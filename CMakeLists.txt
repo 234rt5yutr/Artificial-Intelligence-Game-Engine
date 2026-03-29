@@ -22,3 +22,19 @@ if(MSVC)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
+
+# Dependencies
+find_package(spdlog CONFIG REQUIRED)
+
+# Core Engine Library
+add_library(EngineCore
+    Core/Log.cpp
+    Core/Log.h
+)
+
+target_link_libraries(EngineCore PRIVATE spdlog::spdlog)
+target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Sandbox / Test Executable
+add_executable(AIGameEngine src/main.cpp)
+target_link_libraries(AIGameEngine PRIVATE EngineCore)

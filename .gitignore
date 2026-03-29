@@ -63,3 +63,6 @@ Thumbs.db
 pmpt.txt
 
 vcpkg_installed/
+
+.vs/
+*.user

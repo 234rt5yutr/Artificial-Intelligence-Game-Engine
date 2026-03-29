@@ -2,5 +2,7 @@
   "name": "artificial-intelligence-game-engine",
   "version-string": "1.0.0",
   "description": "Custom Multiplayer 3D Game Engine",
-  "dependencies": []
+  "dependencies": [
+    "spdlog"
+  ]
 }
