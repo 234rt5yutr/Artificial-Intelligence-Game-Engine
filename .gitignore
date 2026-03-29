@@ -60,3 +60,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+pmpt.txt
+
+vcpkg_installed/
