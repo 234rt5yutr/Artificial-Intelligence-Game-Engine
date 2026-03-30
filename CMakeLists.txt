@@ -71,6 +71,8 @@ add_library(EngineCore
     Core/RHI/Vulkan/VulkanPipelineState.cpp
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
+    Core/Renderer/ZPrepass.h
+    Core/Renderer/ZPrepass.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc)
