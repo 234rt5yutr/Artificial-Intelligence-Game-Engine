@@ -27,6 +27,7 @@ endif()
 find_package(spdlog CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
+find_package(SDL3 CONFIG REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
@@ -46,7 +47,7 @@ add_library(EngineCore
     Core/JobSystem/JobSystem.cpp
 )
 
-target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient)
+target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Option to enable Tracy profiling

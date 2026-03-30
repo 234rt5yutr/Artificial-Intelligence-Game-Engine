@@ -5,6 +5,7 @@
   "dependencies": [
     "spdlog",
     "glm",
-    "tracy"
+    "tracy",
+    "sdl3"
   ]
 }
