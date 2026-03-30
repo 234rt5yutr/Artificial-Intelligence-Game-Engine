@@ -108,15 +108,21 @@ namespace Physics {
         // Create temp allocator for physics operations
         m_TempAllocator = std::make_unique<JPH::TempAllocatorImpl>(config.TempAllocatorSize);
 
-        // Create job system (use hardware threads minus one for main thread)
-        uint32_t numThreads = std::max(1u, std::thread::hardware_concurrency() - 1);
-        m_JobSystem = std::make_unique<JPH::JobSystemThreadPool>(
-            JPH::cMaxPhysicsJobs,
-            JPH::cMaxPhysicsBarriers,
-            static_cast<int>(numThreads)
-        );
-
-        ENGINE_CORE_INFO("Jolt JobSystem using {} threads", numThreads);
+        // Create job system - use engine's job system or Jolt's thread pool
+        if (config.UseEngineJobSystem) {
+            auto engineJobSystem = std::make_unique<EngineJobSystemAdapter>();
+            engineJobSystem->Initialize();
+            m_JobSystem = std::move(engineJobSystem);
+            ENGINE_CORE_INFO("Jolt using Engine JobSystem adapter");
+        } else {
+            uint32_t numThreads = std::max(1u, std::thread::hardware_concurrency() - 1);
+            m_JobSystem = std::make_unique<JPH::JobSystemThreadPool>(
+                JPH::cMaxPhysicsJobs,
+                JPH::cMaxPhysicsBarriers,
+                static_cast<int>(numThreads)
+            );
+            ENGINE_CORE_INFO("Jolt using built-in ThreadPool with {} threads", numThreads);
+        }
 
         // Create layer interfaces
         m_BroadPhaseLayerInterface = std::make_unique<BroadPhaseLayerInterfaceImpl>();

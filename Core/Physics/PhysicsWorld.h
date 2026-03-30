@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Physics/PhysicsLayers.h"
+#include "Core/Physics/EngineJobSystemAdapter.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include <memory>
@@ -47,6 +48,7 @@ namespace Physics {
         uint32_t MaxContactConstraints = 10240;
         float GravityY = -9.81f;
         uint32_t TempAllocatorSize = 10 * 1024 * 1024;  // 10 MB
+        bool UseEngineJobSystem = true;  // Use engine's job system instead of Jolt's
     };
 
     class PhysicsWorld {
@@ -80,6 +82,9 @@ namespace Physics {
         // Access temp allocator for physics operations
         JPH::TempAllocator& GetTempAllocator() { return *m_TempAllocator; }
 
+        // Access job system
+        JPH::JobSystem& GetJobSystem() { return *m_JobSystem; }
+
         // Get gravity
         JPH::Vec3 GetGravity() const;
         void SetGravity(const JPH::Vec3& gravity);
@@ -90,7 +95,7 @@ namespace Physics {
 
         // Jolt systems
         std::unique_ptr<JPH::TempAllocatorImpl> m_TempAllocator;
-        std::unique_ptr<JPH::JobSystemThreadPool> m_JobSystem;
+        std::unique_ptr<JPH::JobSystem> m_JobSystem;  // Can be either EngineJobSystemAdapter or JobSystemThreadPool
         std::unique_ptr<JPH::PhysicsSystem> m_PhysicsSystem;
 
         // Layer interfaces
