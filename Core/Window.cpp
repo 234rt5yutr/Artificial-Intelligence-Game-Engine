@@ -66,7 +66,17 @@ namespace Core {
 
     void Window::OnUpdate() {
         PROFILE_FUNCTION();
-        // Event pumping will be implemented in Step 2.4 EventSystem
+        
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                WindowCloseEvent e;
+                if (m_Data.EventCallback) {
+                    m_Data.EventCallback(e);
+                }
+            }
+            // More window events mapped as Engine specific components later
+        }
     }
 
 } // namespace Core

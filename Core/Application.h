@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Window.h"
+#include "Core/Event.h"
 #include <memory>
 
 namespace Core {
@@ -16,6 +17,8 @@ namespace Core {
 
         void Run();
         void Close();
+        
+        void OnEvent(Event& e);
 
         static Application& Get() { return *s_Instance; }
         
@@ -24,6 +27,9 @@ namespace Core {
     protected:
         bool m_Running = true;
         std::unique_ptr<Core::Window> m_Window;
+
+    private:
+        bool OnWindowClose(WindowCloseEvent& e);
 
     private:
         static Application* s_Instance;

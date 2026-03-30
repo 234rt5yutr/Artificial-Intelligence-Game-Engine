@@ -7,9 +7,6 @@
 class SandboxApp : public Core::Application {
 public:
     SandboxApp() {
-        // [TEMPORARY] Close instantly so the terminal doesn't hang forever 
-        // since we don't have Window events to close it yet.
-        Close();
     }
 
     ~SandboxApp() override {

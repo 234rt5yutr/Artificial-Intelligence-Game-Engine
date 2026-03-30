@@ -15,6 +15,7 @@ namespace Core {
         s_Instance = this;
 
         m_Window = std::make_unique<Window>(WindowProps("AIGameEngine", 1280, 720));
+        m_Window->SetEventCallback(std::bind(&Application::OnEvent, this, std::placeholders::_1));
     }
 
     Application::~Application() {
@@ -34,15 +35,21 @@ namespace Core {
 
             m_Window->OnUpdate();
 
-            // Placeholder for real tick logic (Update, Render, Poll Events)
-            // Once we have a Window and Event system, we will pump events here
-
-
             // Prevent pegging the CPU to 100% since loop is empty
             std::this_thread::sleep_for(std::chrono::milliseconds(16));
         }
 
         ENGINE_CORE_INFO("Application shutting down.");
+    }
+
+    void Application::OnEvent(Event& e) {
+        EventDispatcher dispatcher(e);
+        dispatcher.Dispatch<WindowCloseEvent>(std::bind(&Application::OnWindowClose, this, std::placeholders::_1));
+    }
+
+    bool Application::OnWindowClose(WindowCloseEvent& e) {
+        Close();
+        return true;
     }
 
 } // namespace Core
