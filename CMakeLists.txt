@@ -37,6 +37,8 @@ add_library(EngineCore
     Core/Assert.h
     Core/CrashHandler.h
     Core/CrashHandler.cpp
+    Core/Window.h
+    Core/Window.cpp
     Core/Application.h
     Core/Application.cpp
     Core/Math/Math.h

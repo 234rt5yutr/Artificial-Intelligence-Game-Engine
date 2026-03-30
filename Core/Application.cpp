@@ -13,6 +13,8 @@ namespace Core {
         PROFILE_FUNCTION();
         ENGINE_CORE_ASSERT(!s_Instance, "Application already exists!");
         s_Instance = this;
+
+        m_Window = std::make_unique<Window>(WindowProps("AIGameEngine", 1280, 720));
     }
 
     Application::~Application() {
@@ -29,6 +31,8 @@ namespace Core {
 
         while (m_Running) {
             PROFILE_SCOPE("Application Loop");
+
+            m_Window->OnUpdate();
 
             // Placeholder for real tick logic (Update, Render, Poll Events)
             // Once we have a Window and Event system, we will pump events here

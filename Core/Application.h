@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Core/Window.h"
+#include <memory>
+
 namespace Core {
 
     class Application {
@@ -15,9 +18,12 @@ namespace Core {
         void Close();
 
         static Application& Get() { return *s_Instance; }
+        
+        inline Core::Window& GetWindow() { return *m_Window; }
 
     protected:
         bool m_Running = true;
+        std::unique_ptr<Core::Window> m_Window;
 
     private:
         static Application* s_Instance;
