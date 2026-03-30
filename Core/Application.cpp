@@ -2,6 +2,7 @@
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include "Core/Assert.h"
+#include "Core/Input.h"
 #include <thread>
 #include <chrono>
 
@@ -16,10 +17,13 @@ namespace Core {
 
         m_Window = std::make_unique<Window>(WindowProps("AIGameEngine", 1280, 720));
         m_Window->SetEventCallback(std::bind(&Application::OnEvent, this, std::placeholders::_1));
+
+        Input::Init();
     }
 
     Application::~Application() {
         PROFILE_FUNCTION();
+        Input::Shutdown();
     }
 
     void Application::Close() {

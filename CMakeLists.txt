@@ -42,6 +42,8 @@ add_library(EngineCore
     Core/Window.cpp
     Core/Application.h
     Core/Application.cpp
+    Core/Input.h
+    Core/Input.cpp
     Core/Math/Math.h
     Core/Memory/Allocator.h
     Core/Memory/LinearAllocator.cpp

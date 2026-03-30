@@ -20,7 +20,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 2.2: Implement ``Application`` singleton to manage the main game loop.
 *   [x] Step 2.3: Implement ``Window`` class wrapping SDL3 window creation.
 *   [x] Step 2.4: Implement ``EventSystem`` utilizing a dispatcher pattern mapped to SDL events.
-*   [ ] Step 2.5: Implement ``InputSystem`` for capturing keyboard, mouse, and gamepad states.
+*   [x] Step 2.5: Implement ``InputSystem`` for capturing keyboard, mouse, and gamepad states.
 *   [ ] Step 2.6: Bind window close and input events to the ``Application`` loop to allow safe shutdown.
 
 ## Phase 3: Render Hardware Interface (RHI) - Base & Vulkan Setup (Weeks 4-6)
