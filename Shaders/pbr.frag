@@ -20,7 +20,34 @@ struct Light {
 layout(binding = 5) uniform LightBuffer {
     Light directionalLight; // simplistic light struct for initial PRB implementation
     vec3 viewPos;
+    uint gridSizeX;
+    uint gridSizeY;
+    uint gridSizeZ; // 32
+    float zNear;
+    float zFar;
 } uboLights;
+
+struct PointLight {
+    vec4 positionAndRadius;
+    vec4 colorAndIntensity;
+};
+
+struct LightGrid {
+    uint offset;
+    uint count;
+};
+
+layout(std430, binding = 6) readonly buffer PointLightBuffer {
+    PointLight pointLights[];
+};
+
+layout(std430, binding = 7) readonly buffer LightGridBuffer {
+    LightGrid lightGrid[];
+};
+
+layout(std430, binding = 8) readonly buffer LightIndexBuffer {
+    uint lightIndices[];
+};
 
 const float PI = 3.14159265359;
 
@@ -116,6 +143,56 @@ void main() {
 
     vec3 ambient = vec3(0.03) * albedo * uboLights.directionalLight.color.a;
     vec3 color = ambient + Lo;
+
+    // Forward+ clustered lighting
+    uint tileX = uint(gl_FragCoord.x) / 16;
+    uint tileY = uint(gl_FragCoord.y) / 16;
+    
+    // Simplistic Z-slice mapping based on linear depth approximation
+    // In a full implementation, calculate linearDepth / zNear and standard clustering formula
+    uint tileZ = uint(clamp(gl_FragCoord.z * float(uboLights.gridSizeZ), 0.0, float(uboLights.gridSizeZ - 1.0)));
+    
+    uint clusterIndex = tileX + (tileY * uboLights.gridSizeX) + (tileZ * uboLights.gridSizeX * uboLights.gridSizeY);
+
+    uint maxClusters = uboLights.gridSizeX * uboLights.gridSizeY * uboLights.gridSizeZ;
+    if (clusterIndex < maxClusters) {
+        LightGrid grid = lightGrid[clusterIndex];
+        
+        for (uint i = 0; i < grid.count; ++i) {
+            uint lightIndex = lightIndices[grid.offset + i];
+            PointLight pLight = pointLights[lightIndex];
+            
+            vec3 L_p = pLight.positionAndRadius.xyz - inWorldPos;
+            float dist = length(L_p);
+            float radius = pLight.positionAndRadius.w;
+            
+            // Basic attenuation
+            float attenuation_p = 1.0 / (dist * dist + 1.0);
+            
+            if (dist < radius) {
+                L_p = normalize(L_p);
+                vec3 H_p = normalize(V + L_p);
+                
+                float NDF_p = DistributionGGX(N, H_p, roughness);   
+                float G_p   = GeometrySmith(N, V, L_p, roughness);      
+                vec3 F_p    = fresnelSchlick(max(dot(H_p, V), 0.0), F0);
+                   
+                vec3 nominator_p    = NDF_p * G_p * F_p;
+                float denominator_p = 4.0 * max(dot(N, V), 0.0) * max(dot(N, L_p), 0.0) + 0.0001; 
+                vec3 specular_p     = nominator_p / denominator_p;
+                
+                vec3 kS_p = F_p;
+                vec3 kD_p = vec3(1.0) - kS_p;
+                kD_p *= 1.0 - metallic;	  
+            
+                float NdotL_p = max(dot(N, L_p), 0.0);        
+                
+                vec3 radiance_p = pLight.colorAndIntensity.rgb * pLight.colorAndIntensity.w * attenuation_p;
+                
+                color += (kD_p * albedo / PI + specular_p) * radiance_p * NdotL_p;
+            }
+        }
+    }
 
     // HDR tonemapping
     color = color / (color + vec3(1.0));
