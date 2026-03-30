@@ -20,7 +20,7 @@ namespace Renderer {
     constexpr uint32_t MAX_LIGHTS_PER_CLUSTER = 256;
     constexpr uint32_t MAX_LIGHTS = 10000;
 
-    // GPU-aligned structures
+    // GPU-aligned structures for Forward+ lighting
     struct alignas(16) PointLight {
         glm::vec4 positionAndRadius; // xyz = position, w = radius
         glm::vec4 colorAndIntensity; // xyz = color, w = intensity
