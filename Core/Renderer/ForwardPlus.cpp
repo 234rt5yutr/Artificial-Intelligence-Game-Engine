@@ -7,7 +7,7 @@ namespace Core {
 namespace Renderer {
 
     void ForwardPlusLightData::Initialize(std::shared_ptr<RHI::RHIDevice> device, uint32_t screenWidth, uint32_t screenHeight) {
-        CORE_LOG_INFO("Initializing Forward+ Light Data Grid Definitions & Buffers.");
+        ENGINE_CORE_INFO("Initializing Forward+ Light Data Grid Definitions & Buffers.");
         
         m_GridSizeX = static_cast<uint32_t>(std::ceil(static_cast<float>(screenWidth) / TILE_SIZE));
         m_GridSizeY = static_cast<uint32_t>(std::ceil(static_cast<float>(screenHeight) / TILE_SIZE));
@@ -42,7 +42,7 @@ namespace Renderer {
         indexListDesc.mapped = false;
         m_LightIndexListBuffer = device->CreateBuffer(indexListDesc);
 
-        CORE_LOG_INFO("Forward+ Lighting GPU Buffers created. Total clusters: {}", m_TotalClusters);
+        ENGINE_CORE_INFO("Forward+ Lighting GPU Buffers created. Total clusters: {0}", m_TotalClusters);
     }
 
     void ForwardPlusLightData::Shutdown() {

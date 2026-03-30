@@ -2,10 +2,16 @@
 
 #include "Core/Math/Math.h"
 #include "Core/RHI/RHIBuffer.h"
+#include "Core/RHI/RHIDevice.h"
 #include <memory>
 #include <vector>
 
 namespace Core {
+
+namespace RHI {
+    class RHIDevice;
+}
+
 namespace Renderer {
 
     // Forward+ Constants
