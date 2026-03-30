@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 #include <vector>
 #include <optional>
 
@@ -28,12 +29,14 @@ namespace RHI {
         VkDevice GetDevice() const { return m_Device; }
         VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
         QueueFamilyIndices GetQueueFamilyIndices() const { return m_QueueFamilyIndices; }
+        VmaAllocator GetAllocator() const { return m_Allocator; }
 
     private:
         void CreateInstance();
         void SetupDebugMessenger();
         void PickPhysicalDevice();
         void CreateLogicalDevice();
+        void CreateAllocator();
         bool IsDeviceSuitable(VkPhysicalDevice device);
         QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device) const;
         bool CheckValidationLayerSupport();
@@ -45,6 +48,7 @@ namespace RHI {
         VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
         VkDevice m_Device = VK_NULL_HANDLE;
         VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
+        VmaAllocator m_Allocator = VK_NULL_HANDLE;
         QueueFamilyIndices m_QueueFamilyIndices;
 
 #ifdef NDEBUG

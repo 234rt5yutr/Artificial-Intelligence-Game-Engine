@@ -7,6 +7,7 @@
     "glm",
     "tracy",
     "sdl3",
-    "vulkan"
+    "vulkan",
+    "vulkan-memory-allocator"
   ]
 }

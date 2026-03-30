@@ -50,7 +50,7 @@ void* LinearAllocator::Allocate(size_t size, size_t alignment) {
     return reinterpret_cast<void*>(nextAddress);
 }
 
-void LinearAllocator::Free(void* ptr) {
+void LinearAllocator::Free(void* /*ptr*/) {
     // Linear allocator does not support freeing individual allocations.
     // Memory is freed all at once using Reset().
 }

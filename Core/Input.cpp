@@ -47,7 +47,7 @@ namespace Core {
 
     bool Input::IsMouseButtonPressed(uint8_t button) {
         uint32_t mouseState = SDL_GetMouseState(nullptr, nullptr);
-        return (mouseState & SDL_BUTTON(button)) != 0;
+        return (mouseState & SDL_BUTTON_MASK(button)) != 0;
     }
 
     float Input::GetMouseX() {

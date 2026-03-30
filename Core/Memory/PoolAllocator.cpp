@@ -48,7 +48,7 @@ void PoolAllocator::Init() {
     current->next = nullptr;
 }
 
-void* PoolAllocator::Allocate(size_t size, size_t alignment) {
+void* PoolAllocator::Allocate(size_t /*size*/, size_t /*alignment*/) {
     PROFILE_FUNCTION();
     if (m_FreeList == nullptr) {
         return nullptr; // Pool is full or uninitialized

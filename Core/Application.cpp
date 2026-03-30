@@ -52,7 +52,7 @@ namespace Core {
         dispatcher.Dispatch<KeyPressedEvent>(std::bind(&Application::OnKeyPress, this, std::placeholders::_1));
     }
 
-    bool Application::OnWindowClose(WindowCloseEvent& e) {
+    bool Application::OnWindowClose(WindowCloseEvent& /*e*/) {
         Close();
         return true;
     }

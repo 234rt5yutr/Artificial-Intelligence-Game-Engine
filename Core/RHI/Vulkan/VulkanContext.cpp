@@ -1,3 +1,4 @@
+#define VMA_IMPLEMENTATION
 #include "VulkanContext.h"
 #include "Core/Log.h"
 #include "Core/Assert.h"
@@ -16,6 +17,9 @@ namespace RHI {
         VkDebugUtilsMessageTypeFlagsEXT messageType,
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         void* pUserData) {
+        
+        (void)messageType;
+        (void)pUserData;
         
         if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
             ENGINE_CORE_WARN("Vulkan Validation: {0}", pCallbackData->pMessage);
@@ -53,9 +57,15 @@ namespace RHI {
         SetupDebugMessenger();
         PickPhysicalDevice();
         CreateLogicalDevice();
+        CreateAllocator();
     }
 
     void VulkanContext::Shutdown() {
+        if (m_Allocator) {
+            vmaDestroyAllocator(m_Allocator);
+            m_Allocator = VK_NULL_HANDLE;
+        }
+
         if (m_Device) {
             vkDestroyDevice(m_Device, nullptr);
             m_Device = VK_NULL_HANDLE;
@@ -267,6 +277,20 @@ namespace RHI {
         }
 
         vkGetDeviceQueue(m_Device, m_QueueFamilyIndices.graphicsFamily.value(), 0, &m_GraphicsQueue);
+    }
+
+    void VulkanContext::CreateAllocator() {
+        VmaAllocatorCreateInfo allocatorInfo{};
+        allocatorInfo.physicalDevice = m_PhysicalDevice;
+        allocatorInfo.device = m_Device;
+        allocatorInfo.instance = m_Instance;
+        allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+
+        VkResult result = vmaCreateAllocator(&allocatorInfo, &m_Allocator);
+        ENGINE_CORE_ASSERT(result == VK_SUCCESS, "Failed to create Vulkan Memory Allocator!");
+        if (result == VK_SUCCESS) {
+            ENGINE_CORE_INFO("Vulkan Memory Allocator created successfully.");
+        }
     }
 } // namespace RHI
 } // namespace Core
