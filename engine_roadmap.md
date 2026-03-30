@@ -42,14 +42,14 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 4.1: Implement generalized Buffer abstraction (Vertex, Index, Uniform, Storage).
 *   [x] Step 4.2: Implement generalized Texture abstraction (2D, 3D, Cubemap) and Sampler objects.
 *   [x] Step 4.3: Build an asynchronous texture/mesh uploader using a staging buffer and transfer queue.
-*   [ ] Step 4.4: Implement a primitive specific Mesh loader (assimp/cgltf) to load GLTF files.
+*   [x] Step 4.4: Implement a primitive specific Mesh loader (assimp/cgltf) to load GLTF files.
 *   [x] Step 4.5: Implement the fundamental PBR shader (Albedo, Normal, Metallic, Roughness).
 *   [x] Step 4.6: Implement Render Passes structure grouping command buffer submissions.
 *   [x] Step 4.7: Implement the Z-Prepass render pass.
 *   [x] Step 4.8: Implement the Compute Shader for Frustum Cluster generation.
 *   [x] Step 4.9: Implement the Compute Shader for Light bounding sphere to Cluster intersection testing.
 *   [x] Step 4.10: Create GPU buffers for Light Index Lists and Grid definitions.
-*   [ ] Step 4.11: Update the PBR shader to iterate over lights within the current fragment's cluster.
+*   [x] Step 4.11: Update the PBR shader to iterate over lights within the current fragment's cluster.
 *   [x] Step 4.12: Implement simple shadow mapping (Directional Light).
 
 ## Phase 5: Entity Component System & Gameplay Rules (Weeks 10-11)

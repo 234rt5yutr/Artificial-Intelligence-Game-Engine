@@ -9,6 +9,7 @@
     "sdl3",
     "vulkan",
     "vulkan-memory-allocator",
-    "shaderc"
+    "shaderc",
+    "cgltf"
   ]
 }

@@ -31,6 +31,7 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(unofficial-shaderc CONFIG REQUIRED)
+find_path(CGLTF_INCLUDE_DIRS "cgltf.h")
 
 # Core Engine Library
 add_library(EngineCore
@@ -74,6 +75,8 @@ add_library(EngineCore
     Core/RHI/Vulkan/VulkanContext.cpp
     Core/RHI/Vulkan/VulkanPipelineState.h
     Core/RHI/Vulkan/VulkanPipelineState.cpp
+    Core/Renderer/Mesh.h
+    Core/Renderer/Mesh.cpp
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
@@ -83,7 +86,7 @@ add_library(EngineCore
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc)
-target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS})       
 
 # Option to enable Tracy profiling
 option(ENABLE_PROFILING "Enable Tracy Profiling" ON)
