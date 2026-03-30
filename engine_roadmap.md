@@ -53,7 +53,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 4.12: Implement simple shadow mapping (Directional Light).
 
 ## Phase 5: Entity Component System & Gameplay Rules (Weeks 10-11)
-*   [ ] Step 5.1: Add ``EnTT`` dependency.
+*   [x] Step 5.1: Add ``EnTT`` dependency.
 *   [ ] Step 5.2: Create the ``Scene`` class to wrap the EnTT registry.
 *   [ ] Step 5.3: Implement basic components: ``TransformComponent``, ``MeshComponent``, ``LightComponent``.
 *   [ ] Step 5.4: Implement the Render System: iterates over Transform and Mesh components to submit draw calls to the Renderer.

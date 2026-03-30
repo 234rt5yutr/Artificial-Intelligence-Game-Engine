@@ -10,6 +10,7 @@
     "vulkan",
     "vulkan-memory-allocator",
     "shaderc",
-    "cgltf"
+    "cgltf",
+    "entt"
   ]
 }
