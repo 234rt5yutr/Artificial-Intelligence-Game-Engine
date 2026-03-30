@@ -52,9 +52,15 @@ namespace RHI {
         CreateInstance();
         SetupDebugMessenger();
         PickPhysicalDevice();
+        CreateLogicalDevice();
     }
 
     void VulkanContext::Shutdown() {
+        if (m_Device) {
+            vkDestroyDevice(m_Device, nullptr);
+            m_Device = VK_NULL_HANDLE;
+        }
+
         if (m_EnableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(m_Instance, m_DebugMessenger, nullptr);
         }
@@ -196,7 +202,72 @@ namespace RHI {
     }
 
     bool VulkanContext::IsDeviceSuitable(VkPhysicalDevice device) {
-        // Here we could add specific checks for queues, extensions, features, etc.
-        return true;
+        QueueFamilyIndices indices = FindQueueFamilies(device);
+        return indices.IsComplete();
     }
+
+    QueueFamilyIndices VulkanContext::FindQueueFamilies(VkPhysicalDevice device) const {
+        QueueFamilyIndices indices;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int i = 0;
+        for (const auto& queueFamily : queueFamilies) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                indices.graphicsFamily = i;
+            }
+
+            if (indices.IsComplete()) {
+                break;
+            }
+
+            i++;
+        }
+
+        return indices;
+    }
+
+    void VulkanContext::CreateLogicalDevice() {
+        m_QueueFamilyIndices = FindQueueFamilies(m_PhysicalDevice);
+
+        VkDeviceQueueCreateInfo queueCreateInfo{};
+        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        queueCreateInfo.queueFamilyIndex = m_QueueFamilyIndices.graphicsFamily.value();
+        queueCreateInfo.queueCount = 1;
+
+        float queuePriority = 1.0f;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        VkDeviceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        createInfo.pQueueCreateInfos = &queueCreateInfo;
+        createInfo.queueCreateInfoCount = 1;
+
+        createInfo.pEnabledFeatures = &deviceFeatures;
+
+        createInfo.enabledExtensionCount = 0;
+
+        if (m_EnableValidationLayers) {
+            createInfo.enabledLayerCount = static_cast<uint32_t>(m_ValidationLayers.size());
+            createInfo.ppEnabledLayerNames = m_ValidationLayers.data();
+        } else {
+            createInfo.enabledLayerCount = 0;
+        }
+
+        VkResult result = vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device);
+        ENGINE_CORE_ASSERT(result == VK_SUCCESS, "Failed to create Vulkan logical device!");
+        if (result == VK_SUCCESS) {
+            ENGINE_CORE_INFO("Vulkan logical device created successfully.");
+        }
+
+        vkGetDeviceQueue(m_Device, m_QueueFamilyIndices.graphicsFamily.value(), 0, &m_GraphicsQueue);
+    }
+} // namespace RHI
+} // namespace Core
 

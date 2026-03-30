@@ -28,7 +28,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 3.2: Add ``Vulkan SDK`` dependency.
 *   [x] Step 3.3: Implement Vulkan Instance creation with Validation Layers enabled in Debug builds.
 *   [x] Step 3.4: Implement Vulkan Physical Device selection (preferring discrete GPUs, supporting iGPUs).
-*   [ ] Step 3.5: Implement Vulkan Logical Device and Queue retrieval.
+*   [x] Step 3.5: Implement Vulkan Logical Device and Queue retrieval.
 *   [ ] Step 3.6: Integrate Vulkan Memory Allocator (VMA).
 *   [ ] Step 3.7: Implement Vulkan Swapchain creation and recreation logic on window resize.
 *   [ ] Step 3.8: Implement Vulkan Command Pool and Command Buffer allocation.
