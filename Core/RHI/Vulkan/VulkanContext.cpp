@@ -582,6 +582,27 @@ namespace RHI {
         }
     }
 
+    VkShaderModule VulkanContext::CreateShaderModule(const std::vector<uint32_t>& code) {
+        VkShaderModuleCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+        createInfo.codeSize = code.size() * sizeof(uint32_t);
+        createInfo.pCode = code.data();
+
+        VkShaderModule shaderModule;
+        if (vkCreateShaderModule(m_Device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+            ENGINE_CORE_ASSERT(false, "Failed to create shader module!");
+            return VK_NULL_HANDLE;
+        }
+
+        return shaderModule;
+    }
+
+    void VulkanContext::DestroyShaderModule(VkShaderModule shaderModule) {
+        if (shaderModule != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(m_Device, shaderModule, nullptr);
+        }
+    }
+
 } // namespace RHI
 } // namespace Core
 

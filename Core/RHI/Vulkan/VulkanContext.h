@@ -56,6 +56,9 @@ namespace RHI {
         VkSemaphore GetRenderFinishedSemaphore() const { return m_RenderFinishedSemaphore; }
         VkFence GetInFlightFence() const { return m_InFlightFence; }
 
+        VkShaderModule CreateShaderModule(const std::vector<uint32_t>& code);
+        void DestroyShaderModule(VkShaderModule shaderModule);
+
         void RecreateSwapchain(uint32_t width, uint32_t height);
 
     private:

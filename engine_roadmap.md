@@ -34,7 +34,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 3.8: Implement Vulkan Command Pool and Command Buffer allocation.
 *   [x] Step 3.9: Implement Vulkan Synchronization objects (Semaphores, Fences).
 *   [ ] Step 3.10: Integrate ``glslang`` or ``DXC`` to compile GLSL/HLSL to SPIR-V dynamically.
-*   [ ] Step 3.11: Implement Shader Module creation.
+*   [x] Step 3.11: Implement Shader Module creation.
 *   [ ] Step 3.12: Implement Graphics Pipeline State Object (PSO) creation logic.
 *   [ ] Step 3.13: Get a colored triangle rendering on screen using raw RHI calls.
 
