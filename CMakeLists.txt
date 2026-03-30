@@ -31,11 +31,14 @@ find_package(glm CONFIG REQUIRED)
 add_library(EngineCore
     Core/Log.cpp
     Core/Log.h
+    Core/Math/Math.h
     Core/Memory/Allocator.h
     Core/Memory/LinearAllocator.cpp
     Core/Memory/LinearAllocator.h
     Core/Memory/PoolAllocator.cpp
     Core/Memory/PoolAllocator.h
+    Core/JobSystem/JobSystem.h
+    Core/JobSystem/JobSystem.cpp
 )
 
 target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm)
