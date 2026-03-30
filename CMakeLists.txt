@@ -57,6 +57,8 @@ add_library(EngineCore
     Core/RHI/RHITexture.h
     Core/RHI/RHICommandList.h
     Core/RHI/RHIDevice.h
+    Core/RHI/Vulkan/VulkanContext.h
+    Core/RHI/Vulkan/VulkanContext.cpp
 )
 
 target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan)

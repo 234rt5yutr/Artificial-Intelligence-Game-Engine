@@ -26,7 +26,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 ## Phase 3: Render Hardware Interface (RHI) - Base & Vulkan Setup (Weeks 4-6)
 *   [x] Step 3.1: Define abstract base RHI classes: ``RHIDevice``, ``RHICommandList``, ``RHIBuffer``, ``RHITexture``.
 *   [x] Step 3.2: Add ``Vulkan SDK`` dependency.
-*   [ ] Step 3.3: Implement Vulkan Instance creation with Validation Layers enabled in Debug builds.
+*   [x] Step 3.3: Implement Vulkan Instance creation with Validation Layers enabled in Debug builds.
 *   [ ] Step 3.4: Implement Vulkan Physical Device selection (preferring discrete GPUs, supporting iGPUs).
 *   [ ] Step 3.5: Implement Vulkan Logical Device and Queue retrieval.
 *   [ ] Step 3.6: Integrate Vulkan Memory Allocator (VMA).
