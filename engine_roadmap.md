@@ -40,7 +40,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 4: High-Level Renderer & Forward+ Architecture (Weeks 7-9)
 *   [ ] Step 4.1: Implement generalized Buffer abstraction (Vertex, Index, Uniform, Storage).
-*   [ ] Step 4.2: Implement generalized Texture abstraction (2D, 3D, Cubemap) and Sampler objects.
+*   [x] Step 4.2: Implement generalized Texture abstraction (2D, 3D, Cubemap) and Sampler objects.
 *   [ ] Step 4.3: Build an asynchronous texture/mesh uploader using a staging buffer and transfer queue.
 *   [ ] Step 4.4: Implement a primitive specific Mesh loader (assimp/cgltf) to load GLTF files.
 *   [ ] Step 4.5: Implement the fundamental PBR shader (Albedo, Normal, Metallic, Roughness).
