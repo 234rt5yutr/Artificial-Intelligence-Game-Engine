@@ -52,6 +52,10 @@ namespace RHI {
         VkCommandPool GetCommandPool() const { return m_CommandPool; }
         VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 
+        VkSemaphore GetImageAvailableSemaphore() const { return m_ImageAvailableSemaphore; }
+        VkSemaphore GetRenderFinishedSemaphore() const { return m_RenderFinishedSemaphore; }
+        VkFence GetInFlightFence() const { return m_InFlightFence; }
+
         void RecreateSwapchain(uint32_t width, uint32_t height);
 
     private:
@@ -65,6 +69,7 @@ namespace RHI {
         void CreateImageViews();
         void CreateCommandPool();
         void CreateCommandBuffer();
+        void CreateSyncObjects();
         void CleanupSwapchain();
         bool IsDeviceSuitable(VkPhysicalDevice device);
         bool CheckDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -93,6 +98,10 @@ namespace RHI {
 
         VkCommandPool m_CommandPool = VK_NULL_HANDLE;
         VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
+
+        VkSemaphore m_ImageAvailableSemaphore = VK_NULL_HANDLE;
+        VkSemaphore m_RenderFinishedSemaphore = VK_NULL_HANDLE;
+        VkFence m_InFlightFence = VK_NULL_HANDLE;
 
         const std::vector<const char*> m_DeviceExtensions = {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME

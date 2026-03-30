@@ -63,6 +63,7 @@ namespace RHI {
         CreateAllocator();
         CreateCommandPool();
         CreateCommandBuffer();
+        CreateSyncObjects();
         if (m_Window) {
             CreateSwapchain(m_Window->GetWidth(), m_Window->GetHeight());
             CreateImageViews();
@@ -95,6 +96,21 @@ namespace RHI {
         vkDeviceWaitIdle(m_Device);
 
         CleanupSwapchain();
+
+        if (m_RenderFinishedSemaphore) {
+            vkDestroySemaphore(m_Device, m_RenderFinishedSemaphore, nullptr);
+            m_RenderFinishedSemaphore = VK_NULL_HANDLE;
+        }
+
+        if (m_ImageAvailableSemaphore) {
+            vkDestroySemaphore(m_Device, m_ImageAvailableSemaphore, nullptr);
+            m_ImageAvailableSemaphore = VK_NULL_HANDLE;
+        }
+
+        if (m_InFlightFence) {
+            vkDestroyFence(m_Device, m_InFlightFence, nullptr);
+            m_InFlightFence = VK_NULL_HANDLE;
+        }
 
         if (m_CommandPool) {
             vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
@@ -547,6 +563,22 @@ namespace RHI {
 
         if (vkAllocateCommandBuffers(m_Device, &allocInfo, &m_CommandBuffer) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "Failed to allocate command buffer!");
+        }
+    }
+
+    void VulkanContext::CreateSyncObjects() {
+        VkSemaphoreCreateInfo semaphoreInfo{};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        if (vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_ImageAvailableSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphore) != VK_SUCCESS ||
+            vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFence) != VK_SUCCESS) {
+            
+            ENGINE_CORE_ASSERT(false, "Failed to create synchronization objects for a frame!");
         }
     }
 

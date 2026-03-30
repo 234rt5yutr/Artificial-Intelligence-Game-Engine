@@ -32,7 +32,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 3.6: Integrate Vulkan Memory Allocator (VMA).
 *   [x] Step 3.7: Implement Vulkan Swapchain creation and recreation logic on window resize.
 *   [x] Step 3.8: Implement Vulkan Command Pool and Command Buffer allocation.
-*   [ ] Step 3.9: Implement Vulkan Synchronization objects (Semaphores, Fences).
+*   [x] Step 3.9: Implement Vulkan Synchronization objects (Semaphores, Fences).
 *   [ ] Step 3.10: Integrate ``glslang`` or ``DXC`` to compile GLSL/HLSL to SPIR-V dynamically.
 *   [ ] Step 3.11: Implement Shader Module creation.
 *   [ ] Step 3.12: Implement Graphics Pipeline State Object (PSO) creation logic.
