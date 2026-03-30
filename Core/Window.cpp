@@ -74,6 +74,16 @@ namespace Core {
                 if (m_Data.EventCallback) {
                     m_Data.EventCallback(e);
                 }
+            } else if (event.type == SDL_EVENT_KEY_DOWN) {
+                KeyPressedEvent e(event.key.key, event.key.repeat);
+                if (m_Data.EventCallback) {
+                    m_Data.EventCallback(e);
+                }
+            } else if (event.type == SDL_EVENT_KEY_UP) {
+                KeyReleasedEvent e(event.key.key);
+                if (m_Data.EventCallback) {
+                    m_Data.EventCallback(e);
+                }
             }
             // More window events mapped as Engine specific components later
         }

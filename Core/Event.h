@@ -31,6 +31,35 @@ namespace Core {
         EVENT_CLASS_TYPE(WindowClose)
     };
 
+    class KeyEvent : public Event {
+    public:
+        inline int GetKeyCode() const { return m_KeyCode; }
+
+    protected:
+        KeyEvent(int keycode) : m_KeyCode(keycode) {}
+        int m_KeyCode;
+    };
+
+    class KeyPressedEvent : public KeyEvent {
+    public:
+        KeyPressedEvent(int keycode, bool isRepeat = false)
+            : KeyEvent(keycode), m_IsRepeat(isRepeat) {}
+
+        inline bool IsRepeat() const { return m_IsRepeat; }
+
+        EVENT_CLASS_TYPE(KeyPressed)
+    private:
+        bool m_IsRepeat;
+    };
+
+    class KeyReleasedEvent : public KeyEvent {
+    public:
+        KeyReleasedEvent(int keycode)
+            : KeyEvent(keycode) {}
+
+        EVENT_CLASS_TYPE(KeyReleased)
+    };
+
     class EventDispatcher {
     public:
         // Accept the event tightly by reference

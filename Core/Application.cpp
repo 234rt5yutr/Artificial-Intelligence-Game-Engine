@@ -49,11 +49,23 @@ namespace Core {
     void Application::OnEvent(Event& e) {
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<WindowCloseEvent>(std::bind(&Application::OnWindowClose, this, std::placeholders::_1));
+        dispatcher.Dispatch<KeyPressedEvent>(std::bind(&Application::OnKeyPress, this, std::placeholders::_1));
     }
 
     bool Application::OnWindowClose(WindowCloseEvent& e) {
         Close();
         return true;
+    }
+
+    bool Application::OnKeyPress(KeyPressedEvent& e) {
+        // Use the native input polling if you want, but since we get the event:
+        // We'll close the app when Escape is pressed.
+        // SDL3 defines SDLK_ESCAPE.
+        if (e.GetKeyCode() == SDLK_ESCAPE) {
+            Close();
+            return true;
+        }
+        return false;
     }
 
 } // namespace Core

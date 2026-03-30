@@ -30,6 +30,7 @@ namespace Core {
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);
+        bool OnKeyPress(KeyPressedEvent& e);
 
     private:
         static Application* s_Instance;
