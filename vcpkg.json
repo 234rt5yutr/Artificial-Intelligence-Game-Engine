@@ -8,6 +8,7 @@
     "tracy",
     "sdl3",
     "vulkan",
-    "vulkan-memory-allocator"
+    "vulkan-memory-allocator",
+    "shaderc"
   ]
 }

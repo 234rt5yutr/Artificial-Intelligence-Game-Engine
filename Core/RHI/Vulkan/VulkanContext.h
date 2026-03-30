@@ -60,8 +60,13 @@ namespace RHI {
         void DestroyShaderModule(VkShaderModule shaderModule);
 
         void RecreateSwapchain(uint32_t width, uint32_t height);
+        void DrawFrame();
 
     private:
+        void CreateRenderPass();
+        void CreateGraphicsPipeline();
+        void CreateFramebuffers();
+
         void CreateInstance();
         void SetupDebugMessenger();
         void CreateSurface();
@@ -98,6 +103,11 @@ namespace RHI {
         VkFormat m_SwapchainImageFormat;
         VkExtent2D m_SwapchainExtent;
         std::vector<VkImageView> m_SwapchainImageViews;
+        std::vector<VkFramebuffer> m_SwapchainFramebuffers;
+
+        VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+        VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
+        VkPipeline m_GraphicsPipeline = VK_NULL_HANDLE;
 
         VkCommandPool m_CommandPool = VK_NULL_HANDLE;
         VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;

@@ -5,6 +5,8 @@
 #include <memory>
 
 namespace Core {
+    namespace RHI { class VulkanContext; }
+
 
     class Application {
     public:
@@ -27,6 +29,7 @@ namespace Core {
     protected:
         bool m_Running = true;
         std::unique_ptr<Core::Window> m_Window;
+        std::unique_ptr<RHI::VulkanContext> m_VulkanContext;
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);
@@ -41,3 +44,4 @@ namespace Core {
     Application* CreateApplication();
 
 } // namespace Core
+

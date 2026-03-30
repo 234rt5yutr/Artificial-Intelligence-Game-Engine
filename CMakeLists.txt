@@ -60,6 +60,8 @@ add_library(EngineCore
     Core/RHI/RHICommandList.h
     Core/RHI/RHIDevice.h
     Core/RHI/RHIPipelineState.h
+    Core/RHI/ShaderCompiler.h
+    Core/RHI/ShaderCompiler.cpp
     Core/RHI/Vulkan/VulkanContext.h
     Core/RHI/Vulkan/VulkanContext.cpp
     Core/RHI/Vulkan/VulkanPipelineState.h

@@ -170,9 +170,9 @@ namespace RHI {
         pipelineInfo.layout = pipelineLayout;
         pipelineInfo.renderPass = renderPass;
         pipelineInfo.subpass = 0;
-ENGINE_
+
         if (vkCreateGraphicsPipelines(m_Context->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
-            CORE_ASSERT(false, "Failed to create graphics pipeline!");
+            ENGINE_CORE_ASSERT(false, "Failed to create graphics pipeline!");
         }
 
         for (VkShaderModule module : modulesToDestroy) {

@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include "Core/Assert.h"
@@ -19,11 +20,11 @@ namespace Core {
         m_Window->SetEventCallback(std::bind(&Application::OnEvent, this, std::placeholders::_1));
 
         Input::Init();
+        m_VulkanContext = std::make_unique<RHI::VulkanContext>(m_Window.get());
+        m_VulkanContext->Init();
     }
 
     Application::~Application() {
-        PROFILE_FUNCTION();
-        Input::Shutdown();
     }
 
     void Application::Close() {
@@ -38,9 +39,7 @@ namespace Core {
             PROFILE_SCOPE("Application Loop");
 
             m_Window->OnUpdate();
-
-            // Prevent pegging the CPU to 100% since loop is empty
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+            if (m_VulkanContext) m_VulkanContext->DrawFrame();
         }
 
         ENGINE_CORE_INFO("Application shutting down.");
