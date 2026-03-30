@@ -26,11 +26,13 @@ endif()
 # Dependencies
 find_package(spdlog CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(Tracy CONFIG REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
     Core/Log.cpp
     Core/Log.h
+    Core/Profile.h
     Core/Math/Math.h
     Core/Memory/Allocator.h
     Core/Memory/LinearAllocator.cpp
@@ -41,8 +43,14 @@ add_library(EngineCore
     Core/JobSystem/JobSystem.cpp
 )
 
-target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm)
+target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+# Option to enable Tracy profiling
+option(ENABLE_PROFILING "Enable Tracy Profiling" ON)
+if(ENABLE_PROFILING)
+    target_compile_definitions(EngineCore PUBLIC TRACY_ENABLE)
+endif()
 
 # Sandbox / Test Executable
 add_executable(AIGameEngine src/main.cpp)

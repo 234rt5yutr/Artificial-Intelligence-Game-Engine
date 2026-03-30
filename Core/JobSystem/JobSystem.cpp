@@ -1,4 +1,5 @@
 #include "JobSystem.h"
+#include "Core/Profile.h"
 #include <algorithm>
 
 namespace Core {
@@ -13,6 +14,7 @@ namespace JobSystem {
         std::atomic<bool> isRunning{false};
 
         void WorkerThread() {
+            PROFILE_THREAD("Job Worker");
             while (isRunning.load()) {
                 std::function<void()> job;
                 {
@@ -32,6 +34,7 @@ namespace JobSystem {
                 }
 
                 if (job) {
+                    PROFILE_SCOPE("Execute Job");
                     job();
                 }
             }
@@ -39,6 +42,7 @@ namespace JobSystem {
     }
 
     void Initialize() {
+        PROFILE_FUNCTION();
         if (isRunning.load()) return;
 
         numThreads = std::max(1u, std::thread::hardware_concurrency() - 1u);
@@ -50,6 +54,7 @@ namespace JobSystem {
     }
 
     void Shutdown() {
+        PROFILE_FUNCTION();
         if (!isRunning.load()) return;
 
         isRunning.store(false);
@@ -64,6 +69,7 @@ namespace JobSystem {
     }
 
     void Execute(Context& ctx, const std::function<void()>& job) {
+        PROFILE_FUNCTION();
         ctx.counter.fetch_add(1, std::memory_order_relaxed);
 
         {
@@ -77,6 +83,7 @@ namespace JobSystem {
     }
 
     void Dispatch(Context& ctx, uint32_t jobCount, uint32_t groupSize, const std::function<void(uint32_t)>& job) {
+        PROFILE_FUNCTION();
         if (jobCount == 0 || groupSize == 0) return;
 
         uint32_t groupCount = (jobCount + groupSize - 1) / groupSize;
@@ -105,6 +112,7 @@ namespace JobSystem {
     }
 
     void Wait(const Context& ctx) {
+        PROFILE_FUNCTION();
         while (IsBusy(ctx)) {
             // Optional: calling thread can help execute jobs instead of just yielding
             std::this_thread::yield();

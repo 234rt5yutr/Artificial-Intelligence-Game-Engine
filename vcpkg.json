@@ -4,6 +4,7 @@
   "description": "Custom Multiplayer 3D Game Engine",
   "dependencies": [
     "spdlog",
-    "glm"
+    "glm",
+    "tracy"
   ]
 }

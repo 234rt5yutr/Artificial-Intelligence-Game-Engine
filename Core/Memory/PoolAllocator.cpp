@@ -1,4 +1,5 @@
 #include "PoolAllocator.h"
+#include "Core/Profile.h"
 #include <cstdlib>
 #include <algorithm>
 
@@ -22,6 +23,7 @@ PoolAllocator::PoolAllocator(size_t objectSize, size_t objectAlignment, size_t c
 }
 
 PoolAllocator::~PoolAllocator() {
+    PROFILE_FUNCTION();
     if (m_StartPtr) {
         std::free(m_StartPtr);
         m_StartPtr = nullptr;
@@ -29,6 +31,7 @@ PoolAllocator::~PoolAllocator() {
 }
 
 void PoolAllocator::Init() {
+    PROFILE_FUNCTION();
     if (m_StartPtr != nullptr) return;
 
     // Allocate continuous memory block for the pool
@@ -46,6 +49,7 @@ void PoolAllocator::Init() {
 }
 
 void* PoolAllocator::Allocate(size_t size, size_t alignment) {
+    PROFILE_FUNCTION();
     if (m_FreeList == nullptr) {
         return nullptr; // Pool is full or uninitialized
     }
@@ -56,6 +60,7 @@ void* PoolAllocator::Allocate(size_t size, size_t alignment) {
 }
 
 void PoolAllocator::Free(void* ptr) {
+    PROFILE_FUNCTION();
     if (ptr == nullptr) {
         return;
     }

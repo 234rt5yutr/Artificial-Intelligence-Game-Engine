@@ -12,7 +12,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 1.7: Implement a Pool Allocator for fixed-size object allocations.
 *   [x] Step 1.8: Add ``glm`` dependency and create engine-specific math alias typedfs.
 *   [x] Step 1.9: Implement the multi-threaded Job System using standard C++ threads and concurrent queues.
-*   [ ] Step 1.10: Add ``Tracy`` profiler dependency and implement profiling macros across existing systems.
+*   [x] Step 1.10: Add ``Tracy`` profiler dependency and implement profiling macros across existing systems.
 *   [ ] Step 1.11: Implement the Assertion and Crash-handling system.
 
 ## Phase 2: Platform & Windowing (Week 3)

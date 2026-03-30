@@ -1,4 +1,5 @@
 #include "LinearAllocator.h"
+#include "Core/Profile.h"
 #include <cstdlib>
 #include <memory>
 
@@ -10,6 +11,7 @@ LinearAllocator::LinearAllocator(size_t totalSize)
 }
 
 LinearAllocator::~LinearAllocator() {
+    PROFILE_FUNCTION();
     if (m_StartPtr) {
         std::free(m_StartPtr);
         m_StartPtr = nullptr;
@@ -17,12 +19,14 @@ LinearAllocator::~LinearAllocator() {
 }
 
 void LinearAllocator::Init() {
+    PROFILE_FUNCTION();
     if (m_StartPtr == nullptr) {
         m_StartPtr = std::malloc(m_TotalSize);
     }
 }
 
 void* LinearAllocator::Allocate(size_t size, size_t alignment) {
+    PROFILE_FUNCTION();
     if (m_StartPtr == nullptr) {
         return nullptr; // Allocator not initialized
     }
