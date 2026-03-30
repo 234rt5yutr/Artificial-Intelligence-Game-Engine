@@ -6,6 +6,7 @@
     "spdlog",
     "glm",
     "tracy",
-    "sdl3"
+    "sdl3",
+    "vulkan"
   ]
 }

@@ -28,6 +28,7 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
+find_package(Vulkan REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
@@ -58,7 +59,7 @@ add_library(EngineCore
     Core/RHI/RHIDevice.h
 )
 
-target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3)
+target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Option to enable Tracy profiling
