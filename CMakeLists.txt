@@ -57,15 +57,20 @@ add_library(EngineCore
     Core/JobSystem/JobSystem.cpp
     Core/RHI/RHIBuffer.h
     Core/RHI/RHITexture.h
+    Core/RHI/RHIRenderPass.h
     Core/RHI/RHICommandList.h
     Core/RHI/RHIDevice.h
     Core/RHI/RHIPipelineState.h
     Core/RHI/ShaderCompiler.h
     Core/RHI/ShaderCompiler.cpp
+    Core/RHI/Vulkan/VulkanBuffer.h
+    Core/RHI/Vulkan/VulkanBuffer.cpp
     Core/RHI/Vulkan/VulkanContext.h
     Core/RHI/Vulkan/VulkanContext.cpp
     Core/RHI/Vulkan/VulkanPipelineState.h
     Core/RHI/Vulkan/VulkanPipelineState.cpp
+    Core/Renderer/ForwardPlus.h
+    Core/Renderer/ForwardPlus.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc)

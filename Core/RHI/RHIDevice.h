@@ -5,6 +5,7 @@
 #include "RHISampler.h"
 #include "RHICommandList.h"
 #include "RHIPipelineState.h"
+#include "RHIRenderPass.h"
 #include <memory>
 
 namespace Core {
@@ -19,8 +20,10 @@ namespace RHI {
         virtual std::shared_ptr<RHISampler> CreateSampler(const SamplerDescriptor& desc) = 0;
         virtual std::shared_ptr<RHICommandList> CreateCommandList() = 0;
         virtual std::shared_ptr<RHIPipelineState> CreateGraphicsPipelineState(const GraphicsPipelineDescriptor& desc) = 0;
+        virtual std::shared_ptr<RHIRenderPass> CreateRenderPass(const RenderPassDescriptor& desc) = 0;
 
         virtual void SubmitCommandList(std::shared_ptr<RHICommandList> commandList) = 0;
+        virtual void ExecuteRenderPass(std::shared_ptr<RHIRenderPass> renderPass) = 0;
         virtual void WaitIdle() = 0;
     };
 

@@ -1,0 +1,84 @@
+#version 450
+
+// Dispatched with threads matching the grid dimensions (e.g., 16x9x24)
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform Constants {
+    mat4 inverseProjection;
+    uvec2 screenDimensions;
+    vec2 zDelineations; // x: zNear, y: zFar
+    uvec3 gridDimensions;
+} pcs;
+
+struct ClusterAABB {
+    vec4 minPoint;
+    vec4 maxPoint;
+};
+
+// SSBO containing the cluster bounding boxes (AABBs) in View Space
+layout(std430, set = 0, binding = 0) buffer ClusterBuffer {
+    ClusterAABB clusters[];
+};
+
+// Helper: Convert clip space to view space
+vec4 ClipToView(vec4 clip) {
+    vec4 view = pcs.inverseProjection * clip;
+    view = view / view.w;
+    return view;
+}
+
+// Helper: Convert screen space coordinate (pixels) to view space ray
+vec4 ScreenToView(vec4 screenSpace) {
+    vec2 ndc = screenSpace.xy / vec2(pcs.screenDimensions.x, pcs.screenDimensions.y);
+    ndc = ndc * 2.0 - 1.0;
+    // We map ndc to the view space directions
+    return ClipToView(vec4(ndc, screenSpace.z, screenSpace.w));
+}
+
+// Intersect a ray from origin towards 'dir' with a view-space Z plane
+vec3 LineIntersectionToZPlane(vec3 a, vec3 b, float zDistance) {
+    vec3 dir = b - a;
+    if (abs(dir.z) < 0.0001) {
+        return a; // Avoid division by zero
+    }
+    float t = (zDistance - a.z) / dir.z;
+    return a + t * dir;
+}
+
+void main() {
+    uint clusterIndex = gl_GlobalInvocationID.x +
+                        gl_GlobalInvocationID.y * pcs.gridDimensions.x +
+                        gl_GlobalInvocationID.z * pcs.gridDimensions.x * pcs.gridDimensions.y;
+                        
+    // Determine bounds of the tile in pixel space
+    vec2 tileSize = vec2(pcs.screenDimensions) / vec2(pcs.gridDimensions.xy);
+    
+    vec4 maxPoint_ss = vec4(vec2(gl_GlobalInvocationID.x + 1, gl_GlobalInvocationID.y + 1) * tileSize, 1.0, 1.0);
+    vec4 minPoint_ss = vec4(vec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y) * tileSize, 1.0, 1.0);
+    
+    // View space rays at the corners
+    vec3 maxPointLast = ScreenToView(maxPoint_ss).xyz;
+    vec3 minPointLast = ScreenToView(minPoint_ss).xyz;
+    vec3 eyePos = vec3(0.0, 0.0, 0.0);
+    
+    // Calculate the logarithmic near and far ranges for the current slice
+    float sliceDistance = float(gl_GlobalInvocationID.z) / float(pcs.gridDimensions.z);
+    float sliceNextDistance = float(gl_GlobalInvocationID.z + 1) / float(pcs.gridDimensions.z);
+    
+    // Z planes for this depth slice
+    float zNear = -1.0 * (pcs.zDelineations.x * pow(pcs.zDelineations.y / pcs.zDelineations.x, sliceDistance));
+    float zFar  = -1.0 * (pcs.zDelineations.x * pow(pcs.zDelineations.y / pcs.zDelineations.x, sliceNextDistance));
+    
+    // Find the intersection points of our tile's frustum corners with the Z planes
+    vec3 minPointNear = LineIntersectionToZPlane(eyePos, minPointLast, zNear);
+    vec3 minPointFar  = LineIntersectionToZPlane(eyePos, minPointLast, zFar);
+    vec3 maxPointNear = LineIntersectionToZPlane(eyePos, maxPointLast, zNear);
+    vec3 maxPointFar  = LineIntersectionToZPlane(eyePos, maxPointLast, zFar);
+    
+    // Form the AABB that encloses all 4 corner intersections
+    vec3 minBound = min(min(minPointNear, minPointFar), min(maxPointNear, maxPointFar));
+    vec3 maxBound = max(max(minPointNear, minPointFar), max(maxPointNear, maxPointFar));
+    
+    clusters[clusterIndex].minPoint = vec4(minBound, 1.0);
+    clusters[clusterIndex].maxPoint = vec4(maxBound, 1.0);
+}
