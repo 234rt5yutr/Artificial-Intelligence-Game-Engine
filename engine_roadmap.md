@@ -47,7 +47,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 4.6: Implement Render Passes structure grouping command buffer submissions.
 *   [x] Step 4.7: Implement the Z-Prepass render pass.
 *   [x] Step 4.8: Implement the Compute Shader for Frustum Cluster generation.
-*   [ ] Step 4.9: Implement the Compute Shader for Light bounding sphere to Cluster intersection testing.
+*   [x] Step 4.9: Implement the Compute Shader for Light bounding sphere to Cluster intersection testing.
 *   [x] Step 4.10: Create GPU buffers for Light Index Lists and Grid definitions.
 *   [ ] Step 4.11: Update the PBR shader to iterate over lights within the current fragment's cluster.
 *   [ ] Step 4.12: Implement simple shadow mapping (Directional Light).
