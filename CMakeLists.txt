@@ -52,6 +52,10 @@ add_library(EngineCore
     Core/Memory/PoolAllocator.h
     Core/JobSystem/JobSystem.h
     Core/JobSystem/JobSystem.cpp
+    Core/RHI/RHIBuffer.h
+    Core/RHI/RHITexture.h
+    Core/RHI/RHICommandList.h
+    Core/RHI/RHIDevice.h
 )
 
 target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3)

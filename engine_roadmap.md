@@ -24,7 +24,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 2.6: Bind window close and input events to the ``Application`` loop to allow safe shutdown.
 
 ## Phase 3: Render Hardware Interface (RHI) - Base & Vulkan Setup (Weeks 4-6)
-*   [ ] Step 3.1: Define abstract base RHI classes: ``RHIDevice``, ``RHICommandList``, ``RHIBuffer``, ``RHITexture``.
+*   [x] Step 3.1: Define abstract base RHI classes: ``RHIDevice``, ``RHICommandList``, ``RHIBuffer``, ``RHITexture``.
 *   [ ] Step 3.2: Add ``Vulkan SDK`` dependency.
 *   [ ] Step 3.3: Implement Vulkan Instance creation with Validation Layers enabled in Debug builds.
 *   [ ] Step 3.4: Implement Vulkan Physical Device selection (preferring discrete GPUs, supporting iGPUs).
