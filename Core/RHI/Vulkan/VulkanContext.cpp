@@ -51,6 +51,7 @@ namespace RHI {
     void VulkanContext::Init() {
         CreateInstance();
         SetupDebugMessenger();
+        PickPhysicalDevice();
     }
 
     void VulkanContext::Shutdown() {
@@ -158,5 +159,44 @@ namespace RHI {
         return extensions;
     }
 
-} // namespace RHI
-} // namespace Core
+    void VulkanContext::PickPhysicalDevice() {
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
+        ENGINE_CORE_ASSERT(deviceCount > 0, "Failed to find GPUs with Vulkan support!");
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
+
+        // Prefer discrete GPUs
+        for (const auto& device : devices) {
+            VkPhysicalDeviceProperties deviceProperties;
+            vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+            if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && IsDeviceSuitable(device)) {
+                m_PhysicalDevice = device;
+                ENGINE_CORE_INFO("Selected Discrete GPU: {0}", deviceProperties.deviceName);
+                break;
+            }
+        }
+
+        // Fallback to integrated GPUs or others if no discrete GPU was selected
+        if (m_PhysicalDevice == VK_NULL_HANDLE) {
+            for (const auto& device : devices) {
+                if (IsDeviceSuitable(device)) {
+                    VkPhysicalDeviceProperties deviceProperties;
+                    vkGetPhysicalDeviceProperties(device, &deviceProperties);
+                    m_PhysicalDevice = device;
+                    ENGINE_CORE_INFO("Selected GPU: {0}", deviceProperties.deviceName);
+                    break;
+                }
+            }
+        }
+
+        ENGINE_CORE_ASSERT(m_PhysicalDevice != VK_NULL_HANDLE, "Failed to find a suitable GPU!");
+    }
+
+    bool VulkanContext::IsDeviceSuitable(VkPhysicalDevice device) {
+        // Here we could add specific checks for queues, extensions, features, etc.
+        return true;
+    }
+
