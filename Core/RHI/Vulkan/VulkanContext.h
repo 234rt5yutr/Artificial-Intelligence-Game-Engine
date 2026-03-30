@@ -49,6 +49,9 @@ namespace RHI {
         VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
         const std::vector<VkImageView>& GetSwapchainImageViews() const { return m_SwapchainImageViews; }
         
+        VkCommandPool GetCommandPool() const { return m_CommandPool; }
+        VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
+
         void RecreateSwapchain(uint32_t width, uint32_t height);
 
     private:
@@ -60,6 +63,8 @@ namespace RHI {
         void CreateAllocator();
         void CreateSwapchain(uint32_t width, uint32_t height);
         void CreateImageViews();
+        void CreateCommandPool();
+        void CreateCommandBuffer();
         void CleanupSwapchain();
         bool IsDeviceSuitable(VkPhysicalDevice device);
         bool CheckDeviceExtensionSupport(VkPhysicalDevice device) const;
@@ -85,6 +90,9 @@ namespace RHI {
         VkFormat m_SwapchainImageFormat;
         VkExtent2D m_SwapchainExtent;
         std::vector<VkImageView> m_SwapchainImageViews;
+
+        VkCommandPool m_CommandPool = VK_NULL_HANDLE;
+        VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 
         const std::vector<const char*> m_DeviceExtensions = {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME
