@@ -33,6 +33,9 @@ add_library(EngineCore
     Core/Log.cpp
     Core/Log.h
     Core/Profile.h
+    Core/Assert.h
+    Core/CrashHandler.h
+    Core/CrashHandler.cpp
     Core/Math/Math.h
     Core/Memory/Allocator.h
     Core/Memory/LinearAllocator.cpp
