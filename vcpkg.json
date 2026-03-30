@@ -11,6 +11,7 @@
     "vulkan-memory-allocator",
     "shaderc",
     "cgltf",
-    "entt"
+    "entt",
+    "joltphysics"
   ]
 }

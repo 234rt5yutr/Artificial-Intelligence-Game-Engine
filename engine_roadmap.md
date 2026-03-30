@@ -67,7 +67,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 6: Physics Integration (Weeks 12-13)
 
-* [ ]  Step 6.1: Add ``Jolt Physics`` dependency.
+* [X]  Step 6.1: Add ``Jolt Physics`` dependency.
 * [ ]  Step 6.2: Initialize the Jolt Physics System and configure BroadPhase layers.
 * [ ]  Step 6.3: Implement Jolt JobSystem integration with the engine's multi-threaded Job System.
 * [ ]  Step 6.4: Create physics components: ``RigidBodyComponent``, ``ColliderComponent`` (Box, Sphere, Capsule, Mesh).

@@ -33,6 +33,7 @@ find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(unofficial-shaderc CONFIG REQUIRED)
 find_path(CGLTF_INCLUDE_DIRS "cgltf.h")
 find_package(EnTT CONFIG REQUIRED)
+find_package(Jolt CONFIG REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
@@ -102,7 +103,7 @@ add_library(EngineCore
     Core/ECS/Systems/TransformSystem.cpp
 )
 
-target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT)
+target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS})       
 
 # Option to enable Tracy profiling
