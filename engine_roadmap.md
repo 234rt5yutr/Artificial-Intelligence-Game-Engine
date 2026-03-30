@@ -43,7 +43,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 4.2: Implement generalized Texture abstraction (2D, 3D, Cubemap) and Sampler objects.
 *   [ ] Step 4.3: Build an asynchronous texture/mesh uploader using a staging buffer and transfer queue.
 *   [ ] Step 4.4: Implement a primitive specific Mesh loader (assimp/cgltf) to load GLTF files.
-*   [ ] Step 4.5: Implement the fundamental PBR shader (Albedo, Normal, Metallic, Roughness).
+*   [x] Step 4.5: Implement the fundamental PBR shader (Albedo, Normal, Metallic, Roughness).
 *   [x] Step 4.6: Implement Render Passes structure grouping command buffer submissions.
 *   [ ] Step 4.7: Implement the Z-Prepass render pass.
 *   [x] Step 4.8: Implement the Compute Shader for Frustum Cluster generation.
