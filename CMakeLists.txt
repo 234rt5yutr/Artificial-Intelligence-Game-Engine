@@ -94,6 +94,8 @@ add_library(EngineCore
     Core/ECS/Components/MeshComponent.h
     Core/ECS/Components/LightComponent.h
     Core/ECS/Components/HierarchyComponent.h
+    Core/ECS/Components/RigidBodyComponent.h
+    Core/ECS/Components/ColliderComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
@@ -105,6 +107,8 @@ add_library(EngineCore
     Core/Physics/PhysicsLayers.cpp
     Core/Physics/PhysicsWorld.h
     Core/Physics/PhysicsWorld.cpp
+    Core/Physics/EngineJobSystemAdapter.h
+    Core/Physics/EngineJobSystemAdapter.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt)

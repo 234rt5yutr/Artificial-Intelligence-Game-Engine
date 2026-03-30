@@ -69,8 +69,8 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [X]  Step 6.1: Add ``Jolt Physics`` dependency.
 * [X]  Step 6.2: Initialize the Jolt Physics System and configure BroadPhase layers.
-* [ ]  Step 6.3: Implement Jolt JobSystem integration with the engine's multi-threaded Job System.
-* [ ]  Step 6.4: Create physics components: ``RigidBodyComponent``, ``ColliderComponent`` (Box, Sphere, Capsule, Mesh).
+* [X]  Step 6.3: Implement Jolt JobSystem integration with the engine's multi-threaded Job System.
+* [X]  Step 6.4: Create physics components: ``RigidBodyComponent``, ``ColliderComponent`` (Box, Sphere, Capsule, Mesh).
 * [ ]  Step 6.5: Implement Physics System: step simulation based on Delta Time.
 * [ ]  Step 6.6: Implement Physics-to-Transform Sync System (updating ECS transforms from Jolt results).
 
