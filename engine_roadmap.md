@@ -7,7 +7,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 1.2: Set up the root ``CMakeLists.txt`` with standard C++20 compiler flags.
 *   [x] Step 1.3: Integrate ``vcpkg`` as a git submodule and set up the manifest file (``vcpkg.json``).
 *   [x] Step 1.4: Add ``spdlog`` dependency and implement the engine ``Log`` static class.
-*   [ ] Step 1.5: Create the ``Core/Memory/Allocator.h`` interface class.
+*   [x] Step 1.5: Create the ``Core/Memory/Allocator.h`` interface class.
 *   [ ] Step 1.6: Implement a Linear Allocator for fast, per-frame scratch memory.
 *   [ ] Step 1.7: Implement a Pool Allocator for fixed-size object allocations.
 *   [ ] Step 1.8: Add ``glm`` dependency and create engine-specific math alias typedfs.
