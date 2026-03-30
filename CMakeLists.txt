@@ -105,6 +105,8 @@ add_library(EngineCore
     Core/ECS/Systems/TransformSystem.cpp
     Core/ECS/Systems/PhysicsSystem.h
     Core/ECS/Systems/PhysicsSystem.cpp
+    Core/ECS/Systems/PhysicsSyncSystem.h
+    Core/ECS/Systems/PhysicsSyncSystem.cpp
     Core/Physics/PhysicsLayers.h
     Core/Physics/PhysicsLayers.cpp
     Core/Physics/PhysicsWorld.h

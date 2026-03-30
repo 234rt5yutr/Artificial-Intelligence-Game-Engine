@@ -6,3 +6,4 @@
 #include "Core/ECS/Systems/LightSystem.h"
 #include "Core/ECS/Systems/TransformSystem.h"
 #include "Core/ECS/Systems/PhysicsSystem.h"
+#include "Core/ECS/Systems/PhysicsSyncSystem.h"
