@@ -55,7 +55,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 ## Phase 5: Entity Component System & Gameplay Rules (Weeks 10-11)
 *   [x] Step 5.1: Add ``EnTT`` dependency.
 *   [x] Step 5.2: Create the ``Scene`` class to wrap the EnTT registry.
-*   [ ] Step 5.3: Implement basic components: ``TransformComponent``, ``MeshComponent``, ``LightComponent``.
+*   [x] Step 5.3: Implement basic components: ``TransformComponent``, ``MeshComponent``, ``LightComponent``.
 *   [ ] Step 5.4: Implement the Render System: iterates over Transform and Mesh components to submit draw calls to the Renderer.
 *   [ ] Step 5.5: Implement the Light System: iterates over Light components to update RHI light buffers.
 *   [ ] Step 5.6: Implement parent-child Transform hierarchy and Local-to-World matrix recalculation system.
