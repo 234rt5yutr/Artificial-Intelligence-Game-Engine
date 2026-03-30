@@ -84,6 +84,10 @@ add_library(EngineCore
     Core/Renderer/ZPrepass.cpp
     Core/Renderer/ShadowPass.h
     Core/Renderer/ShadowPass.cpp
+    Core/ECS/Scene.h
+    Core/ECS/Scene.cpp
+    Core/ECS/Entity.h
+    Core/ECS/Entity.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT)
