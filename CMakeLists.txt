@@ -30,6 +30,7 @@ find_package(Tracy CONFIG REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(unofficial-shaderc CONFIG REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
@@ -58,11 +59,14 @@ add_library(EngineCore
     Core/RHI/RHITexture.h
     Core/RHI/RHICommandList.h
     Core/RHI/RHIDevice.h
+    Core/RHI/RHIPipelineState.h
     Core/RHI/Vulkan/VulkanContext.h
     Core/RHI/Vulkan/VulkanContext.cpp
+    Core/RHI/Vulkan/VulkanPipelineState.h
+    Core/RHI/Vulkan/VulkanPipelineState.cpp
 )
 
-target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Option to enable Tracy profiling
