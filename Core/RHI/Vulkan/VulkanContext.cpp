@@ -3,6 +3,7 @@
 #include "Core/Log.h"
 #include "Core/Assert.h"
 #include "Core/Window.h"
+#include "Core/RHI/ShaderCompiler.h"
 
 // SDL extensions support
 #include <SDL3/SDL.h>
@@ -646,8 +647,36 @@ namespace RHI {
     }
 
     void VulkanContext::CreateGraphicsPipeline() {
-        std::vector<uint32_t> vertCode(std::begin(vert), std::end(vert));
-        std::vector<uint32_t> fragCode(std::begin(frag), std::end(frag));
+        const std::string vertShaderSource = R"(
+            #version 450
+            layout(location = 0) out vec3 fragColor;
+            vec2 positions[3] = vec2[](
+                vec2(0.0, -0.5),
+                vec2(0.5, 0.5),
+                vec2(-0.5, 0.5)
+            );
+            vec3 colors[3] = vec3[](
+                vec3(1.0, 0.0, 0.0),
+                vec3(0.0, 1.0, 0.0),
+                vec3(0.0, 0.0, 1.0)
+            );
+            void main() {
+                gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
+                fragColor = colors[gl_VertexIndex];
+            }
+        )";
+
+        const std::string fragShaderSource = R"(
+            #version 450
+            layout(location = 0) in vec3 fragColor;
+            layout(location = 0) out vec4 outColor;
+            void main() {
+                outColor = vec4(fragColor, 1.0);
+            }
+        )";
+
+        std::vector<uint32_t> vertCode = Core::RHI::ShaderCompiler::CompileToSPIRV(vertShaderSource, Core::RHI::ShaderStage::Vertex, "vertex.glsl");
+        std::vector<uint32_t> fragCode = Core::RHI::ShaderCompiler::CompileToSPIRV(fragShaderSource, Core::RHI::ShaderStage::Fragment, "fragment.glsl");
 
         VkShaderModule vertShaderModule = CreateShaderModule(vertCode);
         VkShaderModule fragShaderModule = CreateShaderModule(fragCode);

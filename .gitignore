@@ -66,3 +66,9 @@ vcpkg_installed/
 
 .vs/
 *.user
+
+# Shader Binaries
+*.spv
+
+# Helper scripts
+update_app.py
