@@ -17,7 +17,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 2: Platform & Windowing (Week 3)
 *   [x] Step 2.1: Add ``SDL3`` dependency.
-*   [ ] Step 2.2: Implement ``Application`` singleton to manage the main game loop.
+*   [x] Step 2.2: Implement ``Application`` singleton to manage the main game loop.
 *   [ ] Step 2.3: Implement ``Window`` class wrapping SDL3 window creation.
 *   [ ] Step 2.4: Implement ``EventSystem`` utilizing a dispatcher pattern mapped to SDL events.
 *   [ ] Step 2.5: Implement ``InputSystem`` for capturing keyboard, mouse, and gamepad states.
