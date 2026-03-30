@@ -114,6 +114,11 @@ namespace RHI {
             m_InFlightFence = VK_NULL_HANDLE;
         }
 
+        if (m_TransferCommandPool) {
+            vkDestroyCommandPool(m_Device, m_TransferCommandPool, nullptr);
+            m_TransferCommandPool = VK_NULL_HANDLE;
+        }
+
         if (m_CommandPool) {
             vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
             m_CommandPool = VK_NULL_HANDLE;
@@ -326,6 +331,11 @@ namespace RHI {
                 indices.graphicsFamily = i;
             }
 
+            if (queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT && !(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+                // Prefer dedicated transfer queue
+                indices.transferFamily = i;
+            }
+
             if (m_Surface) {
                 VkBool32 presentSupport = false;
                 vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_Surface, &presentSupport);
@@ -338,11 +348,12 @@ namespace RHI {
                 indices.presentFamily = indices.graphicsFamily;
             }
 
-            if (indices.IsComplete()) {
-                break;
-            }
-
             i++;
+        }
+
+        // If we didn't find a dedicated transfer queue, just use the graphics queue as it inherently supports transfer
+        if (!indices.transferFamily.has_value() && indices.graphicsFamily.has_value()) {
+            indices.transferFamily = indices.graphicsFamily;
         }
 
         return indices;
@@ -382,6 +393,9 @@ namespace RHI {
         }
         if (m_QueueFamilyIndices.presentFamily.has_value()) {
             uniqueQueueFamilies.insert(m_QueueFamilyIndices.presentFamily.value());
+        }
+        if (m_QueueFamilyIndices.transferFamily.has_value()) {
+            uniqueQueueFamilies.insert(m_QueueFamilyIndices.transferFamily.value());
         }
 
         float queuePriority = 1.0f;
@@ -424,6 +438,9 @@ namespace RHI {
         }
         if (m_QueueFamilyIndices.presentFamily.has_value()) {
             vkGetDeviceQueue(m_Device, m_QueueFamilyIndices.presentFamily.value(), 0, &m_PresentQueue);
+        }
+        if (m_QueueFamilyIndices.transferFamily.has_value()) {
+            vkGetDeviceQueue(m_Device, m_QueueFamilyIndices.transferFamily.value(), 0, &m_TransferQueue);
         }
     }
 
@@ -553,6 +570,14 @@ namespace RHI {
 
         if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "Failed to create command pool!");
+        }
+
+        VkCommandPoolCreateInfo transferPoolInfo{};
+        transferPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        transferPoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        transferPoolInfo.queueFamilyIndex = queueFamilyIndices.transferFamily.value();
+        if (vkCreateCommandPool(m_Device, &transferPoolInfo, nullptr, &m_TransferCommandPool) != VK_SUCCESS) {
+            ENGINE_CORE_WARN("Failed to create transfer command pool!");
         }
     }
 

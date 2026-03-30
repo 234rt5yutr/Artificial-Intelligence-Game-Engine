@@ -16,9 +16,10 @@ namespace RHI {
     struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsFamily;
         std::optional<uint32_t> presentFamily;
+        std::optional<uint32_t> transferFamily;
 
         bool IsComplete() const {
-            return graphicsFamily.has_value() && presentFamily.has_value();
+            return graphicsFamily.has_value() && presentFamily.has_value() && transferFamily.has_value();
         }
     };
 
@@ -41,6 +42,7 @@ namespace RHI {
         VkDevice GetDevice() const { return m_Device; }
         VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
         VkQueue GetPresentQueue() const { return m_PresentQueue; }
+        VkQueue GetTransferQueue() const { return m_TransferQueue; }
         QueueFamilyIndices GetQueueFamilyIndices() const { return m_QueueFamilyIndices; }
         VmaAllocator GetAllocator() const { return m_Allocator; }
         VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
@@ -50,6 +52,7 @@ namespace RHI {
         const std::vector<VkImageView>& GetSwapchainImageViews() const { return m_SwapchainImageViews; }
         
         VkCommandPool GetCommandPool() const { return m_CommandPool; }
+        VkCommandPool GetTransferCommandPool() const { return m_TransferCommandPool; }
         VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 
         VkSemaphore GetImageAvailableSemaphore() const { return m_ImageAvailableSemaphore; }
@@ -95,6 +98,7 @@ namespace RHI {
         VkDevice m_Device = VK_NULL_HANDLE;
         VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
         VkQueue m_PresentQueue = VK_NULL_HANDLE;
+        VkQueue m_TransferQueue = VK_NULL_HANDLE;
         VmaAllocator m_Allocator = VK_NULL_HANDLE;
         QueueFamilyIndices m_QueueFamilyIndices;
 
@@ -110,6 +114,7 @@ namespace RHI {
         VkPipeline m_GraphicsPipeline = VK_NULL_HANDLE;
 
         VkCommandPool m_CommandPool = VK_NULL_HANDLE;
+        VkCommandPool m_TransferCommandPool = VK_NULL_HANDLE;
         VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 
         VkSemaphore m_ImageAvailableSemaphore = VK_NULL_HANDLE;

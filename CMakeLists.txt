@@ -63,8 +63,13 @@ add_library(EngineCore
     Core/RHI/RHIPipelineState.h
     Core/RHI/ShaderCompiler.h
     Core/RHI/ShaderCompiler.cpp
+    Core/RHI/RHIResourceUploader.h
     Core/RHI/Vulkan/VulkanBuffer.h
     Core/RHI/Vulkan/VulkanBuffer.cpp
+    Core/RHI/Vulkan/VulkanTexture.h
+    Core/RHI/Vulkan/VulkanTexture.cpp
+    Core/RHI/Vulkan/VulkanResourceUploader.h
+    Core/RHI/Vulkan/VulkanResourceUploader.cpp
     Core/RHI/Vulkan/VulkanContext.h
     Core/RHI/Vulkan/VulkanContext.cpp
     Core/RHI/Vulkan/VulkanPipelineState.h
@@ -73,6 +78,8 @@ add_library(EngineCore
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
     Core/Renderer/ZPrepass.cpp
+    Core/Renderer/ShadowPass.h
+    Core/Renderer/ShadowPass.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc)
