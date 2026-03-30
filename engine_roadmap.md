@@ -50,7 +50,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 4.9: Implement the Compute Shader for Light bounding sphere to Cluster intersection testing.
 *   [x] Step 4.10: Create GPU buffers for Light Index Lists and Grid definitions.
 *   [ ] Step 4.11: Update the PBR shader to iterate over lights within the current fragment's cluster.
-*   [ ] Step 4.12: Implement simple shadow mapping (Directional Light).
+*   [x] Step 4.12: Implement simple shadow mapping (Directional Light).
 
 ## Phase 5: Entity Component System & Gameplay Rules (Weeks 10-11)
 *   [ ] Step 5.1: Add ``EnTT`` dependency.
