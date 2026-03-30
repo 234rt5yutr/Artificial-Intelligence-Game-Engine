@@ -25,14 +25,20 @@ endif()
 
 # Dependencies
 find_package(spdlog CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
     Core/Log.cpp
     Core/Log.h
+    Core/Memory/Allocator.h
+    Core/Memory/LinearAllocator.cpp
+    Core/Memory/LinearAllocator.h
+    Core/Memory/PoolAllocator.cpp
+    Core/Memory/PoolAllocator.h
 )
 
-target_link_libraries(EngineCore PRIVATE spdlog::spdlog)
+target_link_libraries(EngineCore PRIVATE spdlog::spdlog glm::glm)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Sandbox / Test Executable
