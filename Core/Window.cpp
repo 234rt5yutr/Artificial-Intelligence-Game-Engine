@@ -84,6 +84,14 @@ namespace Core {
                 if (m_Data.EventCallback) {
                     m_Data.EventCallback(e);
                 }
+            } else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+                m_Data.Width = event.window.data1;
+                m_Data.Height = event.window.data2;
+
+                WindowResizeEvent e(m_Data.Width, m_Data.Height);
+                if (m_Data.EventCallback) {
+                    m_Data.EventCallback(e);
+                }
             }
             // More window events mapped as Engine specific components later
         }

@@ -30,7 +30,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 *   [x] Step 3.4: Implement Vulkan Physical Device selection (preferring discrete GPUs, supporting iGPUs).
 *   [x] Step 3.5: Implement Vulkan Logical Device and Queue retrieval.
 *   [x] Step 3.6: Integrate Vulkan Memory Allocator (VMA).
-*   [ ] Step 3.7: Implement Vulkan Swapchain creation and recreation logic on window resize.
+*   [x] Step 3.7: Implement Vulkan Swapchain creation and recreation logic on window resize.
 *   [ ] Step 3.8: Implement Vulkan Command Pool and Command Buffer allocation.
 *   [ ] Step 3.9: Implement Vulkan Synchronization objects (Semaphores, Fences).
 *   [ ] Step 3.10: Integrate ``glslang`` or ``DXC`` to compile GLSL/HLSL to SPIR-V dynamically.

@@ -49,12 +49,22 @@ namespace Core {
     void Application::OnEvent(Event& e) {
         EventDispatcher dispatcher(e);
         dispatcher.Dispatch<WindowCloseEvent>(std::bind(&Application::OnWindowClose, this, std::placeholders::_1));
+        dispatcher.Dispatch<WindowResizeEvent>(std::bind(&Application::OnWindowResize, this, std::placeholders::_1));
         dispatcher.Dispatch<KeyPressedEvent>(std::bind(&Application::OnKeyPress, this, std::placeholders::_1));
     }
 
     bool Application::OnWindowClose(WindowCloseEvent& /*e*/) {
         Close();
         return true;
+    }
+
+    bool Application::OnWindowResize(WindowResizeEvent& e) {
+        if (e.GetWidth() == 0 || e.GetHeight() == 0) {
+            return false;
+        }
+
+        // Notify renderer of resize later
+        return false;
     }
 
     bool Application::OnKeyPress(KeyPressedEvent& e) {
