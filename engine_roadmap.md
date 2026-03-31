@@ -86,7 +86,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 ## Phase 8: Multi-Player Networking (Weeks 15-18)
 
 * [X]  Step 8.1: Add ``GameNetworkingSockets`` dependency.
-* [ ]  Step 8.2: Implement ``NetworkManager`` to initialize sockets.
+* [X]  Step 8.2: Implement ``NetworkManager`` to initialize sockets.
 * [ ]  Step 8.3: Implement Server listen socket bindings.
 * [ ]  Step 8.4: Implement Client connection connection requests and handshake.
 * [ ]  Step 8.5: Define network packet schemas using fixed-size structs or FlatBuffers.
