@@ -136,8 +136,11 @@ add_library(EngineCore
     Core/Physics/EngineJobSystemAdapter.cpp
     Core/Network/NetworkManager.h
     Core/Network/NetworkManager.cpp
+    Core/Network/NetworkPackets.h
     Core/Network/NetworkServer.h
     Core/Network/NetworkServer.cpp
+    Core/Network/NetworkClient.h
+    Core/Network/NetworkClient.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets)

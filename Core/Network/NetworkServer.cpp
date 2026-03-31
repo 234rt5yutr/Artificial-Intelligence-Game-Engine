@@ -1,6 +1,13 @@
 #include "Core/Network/NetworkServer.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
+#include <cstring>
+
+#ifdef _MSC_VER
+#define SAFE_STRCPY(dest, src, size) strncpy_s(dest, size, src, _TRUNCATE)
+#else
+#define SAFE_STRCPY(dest, src, size) do { std::strncpy(dest, src, size - 1); dest[size - 1] = '\0'; } while(0)
+#endif
 
 namespace Core {
 namespace Network {
@@ -129,6 +136,9 @@ namespace Network {
 
         // Process incoming messages
         ProcessIncomingMessages();
+
+        // Check for handshake timeouts
+        UpdateHandshakeTimeouts();
     }
 
     void NetworkServer::ProcessIncomingMessages()
@@ -148,8 +158,19 @@ namespace Network {
 
             // Find which client sent this message
             uint32_t clientId = FindClientIdByConnection(msg->m_conn);
-            if (clientId != 0 && m_OnMessage) {
-                m_OnMessage(clientId, msg->m_pData, msg->m_cbSize);
+            if (clientId != 0) {
+                auto it = m_Clients.find(clientId);
+                if (it != m_Clients.end()) {
+                    // Check if handshake is complete
+                    if (it->second.HandshakeState != ClientHandshakeState::Completed) {
+                        // Process as handshake packet
+                        ProcessHandshakePacket(clientId, msg->m_pData, static_cast<uint32_t>(msg->m_cbSize));
+                    }
+                    else if (m_OnMessage) {
+                        // Forward to game message callback
+                        m_OnMessage(clientId, msg->m_pData, msg->m_cbSize);
+                    }
+                }
             }
 
             // Release the message
@@ -370,6 +391,7 @@ namespace Network {
         ClientInfo info;
         info.Connection = connection;
         info.State = ConnectionState::Connecting;
+        info.HandshakeState = ClientHandshakeState::WaitingForHello;
         info.ClientId = clientId;
         info.ConnectedTimestamp = static_cast<uint64_t>(
             NetworkManager::Get().GetCurrentTime() / 1000); // Convert to milliseconds
@@ -396,6 +418,284 @@ namespace Network {
     {
         auto it = m_ConnectionToClientId.find(connection);
         return (it != m_ConnectionToClientId.end()) ? it->second : 0;
+    }
+
+    void NetworkServer::RejectClient(uint32_t clientId, RejectionReason reason, const char* message)
+    {
+        PROFILE_FUNCTION();
+
+        auto it = m_Clients.find(clientId);
+        if (it == m_Clients.end()) {
+            return;
+        }
+
+        SendRejection(clientId, reason, message);
+        
+        // Close connection after sending rejection
+        ISteamNetworkingSockets* sockets = NetworkManager::Get().GetSockets();
+        sockets->CloseConnection(it->second.Connection, static_cast<int>(reason), message, true);
+    }
+
+    void NetworkServer::ProcessHandshakePacket(uint32_t clientId, const void* data, uint32_t size)
+    {
+        PROFILE_FUNCTION();
+
+        if (size < 1) {
+            ENGINE_CORE_WARN("Client {}: Empty handshake packet", clientId);
+            return;
+        }
+
+        auto packetType = *static_cast<const HandshakePacketType*>(data);
+
+        switch (packetType) {
+            case HandshakePacketType::ClientHello:
+                if (size >= sizeof(ClientHelloPacket)) {
+                    HandleClientHello(clientId, *static_cast<const ClientHelloPacket*>(data));
+                }
+                else {
+                    ENGINE_CORE_WARN("Client {}: ClientHello packet too small: {} bytes", clientId, size);
+                }
+                break;
+
+            case HandshakePacketType::ClientReady:
+                if (size >= sizeof(ClientReadyPacket)) {
+                    HandleClientReady(clientId, *static_cast<const ClientReadyPacket*>(data));
+                }
+                else {
+                    ENGINE_CORE_WARN("Client {}: ClientReady packet too small: {} bytes", clientId, size);
+                }
+                break;
+
+            default:
+                ENGINE_CORE_WARN("Client {}: Unexpected handshake packet type: {}", 
+                                 clientId, static_cast<int>(packetType));
+                break;
+        }
+    }
+
+    void NetworkServer::HandleClientHello(uint32_t clientId, const ClientHelloPacket& packet)
+    {
+        PROFILE_FUNCTION();
+
+        auto it = m_Clients.find(clientId);
+        if (it == m_Clients.end()) {
+            return;
+        }
+
+        if (it->second.HandshakeState != ClientHandshakeState::WaitingForHello) {
+            ENGINE_CORE_WARN("Client {}: Received ClientHello in unexpected state", clientId);
+            return;
+        }
+
+        // Check protocol version
+        if (packet.ProtocolVersion != 1) {
+            ENGINE_CORE_WARN("Client {}: Protocol version mismatch (client: {}, server: 1)",
+                             clientId, packet.ProtocolVersion);
+            RejectClient(clientId, RejectionReason::VersionMismatch, "Protocol version mismatch");
+            return;
+        }
+
+        // Store client info
+        it->second.ClientName = packet.ClientName;
+        it->second.ProtocolVersion = packet.ProtocolVersion;
+
+        ENGINE_CORE_INFO("Client {}: ClientHello received - Name: '{}', Protocol: {}",
+                         clientId, it->second.ClientName, packet.ProtocolVersion);
+
+        // Send welcome response
+        SendServerWelcome(clientId);
+    }
+
+    void NetworkServer::HandleClientReady(uint32_t clientId, const ClientReadyPacket& packet)
+    {
+        PROFILE_FUNCTION();
+
+        auto it = m_Clients.find(clientId);
+        if (it == m_Clients.end()) {
+            return;
+        }
+
+        if (it->second.HandshakeState != ClientHandshakeState::WaitingForReady) {
+            ENGINE_CORE_WARN("Client {}: Received ClientReady in unexpected state", clientId);
+            return;
+        }
+
+        // Verify client ID matches
+        if (packet.AcknowledgedClientId != clientId) {
+            ENGINE_CORE_WARN("Client {}: ClientReady ID mismatch (expected {}, got {})",
+                             clientId, clientId, packet.AcknowledgedClientId);
+            RejectClient(clientId, RejectionReason::InvalidClientInfo, "Client ID mismatch");
+            return;
+        }
+
+        ENGINE_CORE_INFO("Client {}: ClientReady received", clientId);
+
+        // Complete handshake
+        SendServerReady(clientId);
+    }
+
+    void NetworkServer::SendServerWelcome(uint32_t clientId)
+    {
+        PROFILE_FUNCTION();
+
+        auto it = m_Clients.find(clientId);
+        if (it == m_Clients.end()) {
+            return;
+        }
+
+        ServerWelcomePacket packet;
+        packet.Type = HandshakePacketType::ServerWelcome;
+        packet.AssignedClientId = clientId;
+        packet.ServerTickRate = m_Config.TickRate;
+
+        SAFE_STRCPY(packet.ServerName, m_Config.ServerName.c_str(), sizeof(packet.ServerName));
+        SAFE_STRCPY(packet.Message, m_Config.WelcomeMessage.c_str(), sizeof(packet.Message));
+
+        std::memset(packet.Reserved, 0, sizeof(packet.Reserved));
+
+        ISteamNetworkingSockets* sockets = NetworkManager::Get().GetSockets();
+        EResult result = sockets->SendMessageToConnection(
+            it->second.Connection,
+            &packet,
+            sizeof(packet),
+            k_nSteamNetworkingSend_Reliable,
+            nullptr
+        );
+
+        if (result == k_EResultOK) {
+            ENGINE_CORE_TRACE("Client {}: Sent ServerWelcome", clientId);
+            it->second.HandshakeState = ClientHandshakeState::WaitingForReady;
+        }
+        else {
+            ENGINE_CORE_ERROR("Client {}: Failed to send ServerWelcome", clientId);
+            it->second.HandshakeState = ClientHandshakeState::Failed;
+        }
+    }
+
+    void NetworkServer::SendServerReady(uint32_t clientId)
+    {
+        PROFILE_FUNCTION();
+
+        auto it = m_Clients.find(clientId);
+        if (it == m_Clients.end()) {
+            return;
+        }
+
+        ServerReadyPacket packet;
+        packet.Type = HandshakePacketType::ServerReady;
+        packet.ServerTimestamp = static_cast<uint64_t>(NetworkManager::Get().GetCurrentTime());
+        std::memset(packet.Reserved, 0, sizeof(packet.Reserved));
+
+        ISteamNetworkingSockets* sockets = NetworkManager::Get().GetSockets();
+        EResult result = sockets->SendMessageToConnection(
+            it->second.Connection,
+            &packet,
+            sizeof(packet),
+            k_nSteamNetworkingSend_Reliable,
+            nullptr
+        );
+
+        if (result == k_EResultOK) {
+            ENGINE_CORE_TRACE("Client {}: Sent ServerReady", clientId);
+            it->second.HandshakeState = ClientHandshakeState::Completed;
+            it->second.State = ConnectionState::Connected;
+
+            ENGINE_CORE_INFO("Client {} '{}' handshake completed, fully connected",
+                             clientId, it->second.ClientName);
+
+            // Invoke connected callback now that handshake is complete
+            if (m_OnClientConnected) {
+                m_OnClientConnected(clientId, it->second);
+            }
+        }
+        else {
+            ENGINE_CORE_ERROR("Client {}: Failed to send ServerReady", clientId);
+            it->second.HandshakeState = ClientHandshakeState::Failed;
+        }
+    }
+
+    void NetworkServer::SendRejection(uint32_t clientId, RejectionReason reason, const char* message)
+    {
+        PROFILE_FUNCTION();
+
+        auto it = m_Clients.find(clientId);
+        if (it == m_Clients.end()) {
+            return;
+        }
+
+        RejectionPacket packet;
+        packet.Type = HandshakePacketType::Rejected;
+        packet.ReasonCode = static_cast<uint32_t>(reason);
+
+        if (message) {
+            SAFE_STRCPY(packet.Reason, message, sizeof(packet.Reason));
+        }
+        else {
+            // Default reason messages
+            switch (reason) {
+                case RejectionReason::ServerFull:
+                    SAFE_STRCPY(packet.Reason, "Server is full", sizeof(packet.Reason));
+                    break;
+                case RejectionReason::VersionMismatch:
+                    SAFE_STRCPY(packet.Reason, "Protocol version mismatch", sizeof(packet.Reason));
+                    break;
+                case RejectionReason::Banned:
+                    SAFE_STRCPY(packet.Reason, "You are banned from this server", sizeof(packet.Reason));
+                    break;
+                case RejectionReason::InvalidClientInfo:
+                    SAFE_STRCPY(packet.Reason, "Invalid client information", sizeof(packet.Reason));
+                    break;
+                case RejectionReason::Timeout:
+                    SAFE_STRCPY(packet.Reason, "Connection timed out", sizeof(packet.Reason));
+                    break;
+                case RejectionReason::ServerShuttingDown:
+                    SAFE_STRCPY(packet.Reason, "Server is shutting down", sizeof(packet.Reason));
+                    break;
+                default:
+                    SAFE_STRCPY(packet.Reason, "Connection rejected", sizeof(packet.Reason));
+                    break;
+            }
+        }
+
+        std::memset(packet.Reserved, 0, sizeof(packet.Reserved));
+
+        ISteamNetworkingSockets* sockets = NetworkManager::Get().GetSockets();
+        sockets->SendMessageToConnection(
+            it->second.Connection,
+            &packet,
+            sizeof(packet),
+            k_nSteamNetworkingSend_Reliable,
+            nullptr
+        );
+
+        ENGINE_CORE_INFO("Client {}: Sent rejection - {}", clientId, packet.Reason);
+        it->second.HandshakeState = ClientHandshakeState::Failed;
+    }
+
+    void NetworkServer::UpdateHandshakeTimeouts()
+    {
+        PROFILE_FUNCTION();
+
+        uint64_t currentTime = static_cast<uint64_t>(NetworkManager::Get().GetCurrentTime() / 1000);
+        std::vector<uint32_t> timedOutClients;
+
+        for (auto& [clientId, info] : m_Clients) {
+            // Check only clients in handshake state
+            if (info.HandshakeState != ClientHandshakeState::Completed &&
+                info.HandshakeState != ClientHandshakeState::Failed) {
+                
+                uint64_t elapsed = currentTime - info.ConnectedTimestamp;
+                if (elapsed >= m_Config.HandshakeTimeoutMs) {
+                    ENGINE_CORE_WARN("Client {}: Handshake timed out after {}ms", clientId, elapsed);
+                    timedOutClients.push_back(clientId);
+                }
+            }
+        }
+
+        // Reject timed out clients
+        for (uint32_t clientId : timedOutClients) {
+            RejectClient(clientId, RejectionReason::Timeout, "Handshake timed out");
+        }
     }
 
 } // namespace Network

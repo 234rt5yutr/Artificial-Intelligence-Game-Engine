@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Network/NetworkManager.h"
+#include "Core/Network/NetworkPackets.h"
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -8,13 +9,24 @@
 namespace Core {
 namespace Network {
 
+    // Client handshake state (server-side tracking)
+    enum class ClientHandshakeState : uint8_t {
+        WaitingForHello = 0,    // Waiting for ClientHello
+        WaitingForReady,        // Sent ServerWelcome, waiting for ClientReady
+        Completed,              // Handshake complete
+        Failed                  // Handshake failed
+    };
+
     // Information about a connected client
     struct ClientInfo {
         HSteamNetConnection Connection = k_HSteamNetConnection_Invalid;
         ConnectionState State = ConnectionState::Disconnected;
+        ClientHandshakeState HandshakeState = ClientHandshakeState::WaitingForHello;
         std::string Address;
+        std::string ClientName;     // Client's display name
         uint64_t ConnectedTimestamp = 0;
-        uint32_t ClientId = 0;  // Server-assigned unique ID
+        uint32_t ClientId = 0;      // Server-assigned unique ID
+        uint32_t ProtocolVersion = 0;   // Client's protocol version
         NetworkStats Stats;
     };
 
@@ -23,6 +35,9 @@ namespace Network {
         uint16_t Port = 27015;              // Default game server port
         uint32_t MaxClients = 32;           // Maximum simultaneous connections
         std::string ServerName = "Game Server";
+        std::string WelcomeMessage = "Welcome to the server!";
+        uint32_t TickRate = 60;             // Server tick rate in Hz
+        uint32_t HandshakeTimeoutMs = 10000; // Handshake timeout
         bool AllowP2P = false;              // Allow P2P connections
         int32_t SendBufferSize = 512 * 1024;  // 512KB send buffer
     };
@@ -88,6 +103,9 @@ namespace Network {
         // Update client network stats
         void UpdateClientStats(uint32_t clientId);
 
+        // Reject a client with reason
+        void RejectClient(uint32_t clientId, RejectionReason reason, const char* message = nullptr);
+
     private:
         // Handle connection status changes
         void OnConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo);
@@ -106,6 +124,17 @@ namespace Network {
 
         // Static callback thunk
         static void SteamNetConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t* pInfo);
+
+        // Handshake packet handlers
+        void ProcessHandshakePacket(uint32_t clientId, const void* data, uint32_t size);
+        void HandleClientHello(uint32_t clientId, const ClientHelloPacket& packet);
+        void HandleClientReady(uint32_t clientId, const ClientReadyPacket& packet);
+        void SendServerWelcome(uint32_t clientId);
+        void SendServerReady(uint32_t clientId);
+        void SendRejection(uint32_t clientId, RejectionReason reason, const char* message);
+
+        // Check handshake timeouts
+        void UpdateHandshakeTimeouts();
 
     private:
         bool m_Running = false;
