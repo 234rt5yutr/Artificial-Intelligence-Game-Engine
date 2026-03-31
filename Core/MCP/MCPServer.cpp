@@ -248,7 +248,7 @@ namespace MCP {
         auto jsonOpt = JsonUtils::Parse(request.Body);
         if (!jsonOpt) {
             auto errorResp = JsonRpcResponse::Error(
-                Json(nullptr), 
+                std::variant<int64_t, std::string>(std::string("")), 
                 JsonRpcError::ParseError,
                 "Invalid JSON"
             );
@@ -260,7 +260,7 @@ namespace MCP {
         auto rpcRequestOpt = JsonRpcRequest::FromJson(*jsonOpt);
         if (!rpcRequestOpt) {
             auto errorResp = JsonRpcResponse::Error(
-                Json(nullptr),
+                std::variant<int64_t, std::string>(std::string("")),
                 JsonRpcError::InvalidRequest,
                 "Invalid JSON-RPC request"
             );

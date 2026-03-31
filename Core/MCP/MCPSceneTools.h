@@ -1,12 +1,13 @@
 #pragma once
 
 // MCP Scene Tools
-// Tools for querying and inspecting the game scene via MCP
+// Tools for querying, modifying, and spawning entities in the game scene via MCP
 
 #include "MCPTool.h"
 #include "MCPTypes.h"
 #include "SceneSerialization.h"
 #include "Core/ECS/Scene.h"
+#include "Core/ECS/Entity.h"
 #include "Core/ECS/Components/Components.h"
 #include "Core/Log.h"
 
@@ -400,12 +401,313 @@ namespace MCP {
     };
 
     // ============================================================================
+    // SpawnEntity Tool
+    // ============================================================================
+    // Allows AI agents to instantiate new entities with meshes, colliders, lights,
+    // and other components programmatically
+
+    class SpawnEntityTool : public MCPTool {
+    public:
+        SpawnEntityTool()
+            : MCPTool("SpawnEntity",
+                      "Spawn a new entity in the scene with specified components. "
+                      "Can create meshes, lights, cameras, physics objects, or empty "
+                      "entities. Returns the new entity ID and its configuration.") {}
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Type = "object";
+            schema.Properties = {
+                {"name", {
+                    {"type", "string"},
+                    {"description", "Name for the new entity"},
+                    {"default", "Entity"}
+                }},
+                {"template", {
+                    {"type", "string"},
+                    {"enum", Json::array({"empty", "mesh", "light", "camera", 
+                                          "physicsBox", "physicsSphere", "trigger"})},
+                    {"description", "Entity template to use as starting point"},
+                    {"default", "empty"}
+                }},
+                {"transform", {
+                    {"type", "object"},
+                    {"description", "Initial transform for the entity"},
+                    {"properties", {
+                        {"position", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"x", {{"type", "number"}}},
+                                {"y", {{"type", "number"}}},
+                                {"z", {{"type", "number"}}}
+                            }}
+                        }},
+                        {"rotation", {
+                            {"type", "object"},
+                            {"description", "Rotation in degrees (pitch, yaw, roll)"},
+                            {"properties", {
+                                {"pitch", {{"type", "number"}}},
+                                {"yaw", {{"type", "number"}}},
+                                {"roll", {{"type", "number"}}}
+                            }}
+                        }},
+                        {"scale", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"x", {{"type", "number"}, {"default", 1.0}}},
+                                {"y", {{"type", "number"}, {"default", 1.0}}},
+                                {"z", {{"type", "number"}, {"default", 1.0}}}
+                            }}
+                        }}
+                    }}
+                }},
+                {"components", {
+                    {"type", "object"},
+                    {"description", "Additional components to add"},
+                    {"properties", {
+                        {"mesh", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"path", {{"type", "string"}, {"description", "Path to mesh asset"}}},
+                                {"visible", {{"type", "boolean"}, {"default", true}}},
+                                {"castShadows", {{"type", "boolean"}, {"default", true}}}
+                            }}
+                        }},
+                        {"light", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"type", {{"type", "string"}, {"enum", Json::array({"directional", "point", "spot"})}}},
+                                {"color", {
+                                    {"type", "object"},
+                                    {"properties", {
+                                        {"r", {{"type", "number"}}},
+                                        {"g", {{"type", "number"}}},
+                                        {"b", {{"type", "number"}}}
+                                    }}
+                                }},
+                                {"intensity", {{"type", "number"}, {"default", 1.0}}},
+                                {"radius", {{"type", "number"}, {"default", 10.0}}},
+                                {"castShadows", {{"type", "boolean"}, {"default", false}}}
+                            }}
+                        }},
+                        {"camera", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"projection", {{"type", "string"}, {"enum", Json::array({"perspective", "orthographic"})}}},
+                                {"fieldOfView", {{"type", "number"}, {"default", 60.0}}},
+                                {"nearPlane", {{"type", "number"}, {"default", 0.1}}},
+                                {"farPlane", {{"type", "number"}, {"default", 1000.0}}},
+                                {"isActive", {{"type", "boolean"}, {"default", false}}}
+                            }}
+                        }},
+                        {"collider", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"type", {{"type", "string"}, {"enum", Json::array({"box", "sphere", "capsule"})}}},
+                                {"halfExtents", {{"type", "object"}}},
+                                {"radius", {{"type", "number"}}},
+                                {"halfHeight", {{"type", "number"}}},
+                                {"isSensor", {{"type", "boolean"}, {"default", false}}}
+                            }}
+                        }},
+                        {"rigidBody", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"motionType", {{"type", "string"}, {"enum", Json::array({"static", "kinematic", "dynamic"})}}},
+                                {"mass", {{"type", "number"}, {"default", 1.0}}},
+                                {"gravityEnabled", {{"type", "boolean"}, {"default", true}}}
+                            }}
+                        }}
+                    }}
+                }},
+                {"parent", {
+                    {"type", "integer"},
+                    {"description", "Entity ID of parent (for hierarchy)"}
+                }}
+            };
+            schema.Required = {};  // No required fields, defaults will be used
+            return schema;
+        }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene* scene) override {
+            if (!scene) {
+                return ToolResult::Error("No active scene available");
+            }
+
+            // Parse entity name
+            std::string name = arguments.value("name", "Entity");
+            std::string templateType = arguments.value("template", "empty");
+
+            // Create the entity
+            ECS::Entity entity = scene->CreateEntity(name);
+            auto& registry = scene->GetRegistry();
+            entt::entity entityHandle = entity.GetHandle();
+
+            // Add NameComponent
+            registry.emplace<NameComponent>(entityHandle, NameComponent{name});
+
+            // Apply transform (always added)
+            ECS::TransformComponent transform;
+            if (arguments.contains("transform")) {
+                transform = DeserializeTransform(arguments["transform"]);
+            }
+            registry.emplace<ECS::TransformComponent>(entityHandle, transform);
+
+            // Apply template
+            ApplyTemplate(registry, entityHandle, templateType, arguments);
+
+            // Apply additional components from arguments
+            if (arguments.contains("components")) {
+                ApplyComponents(registry, entityHandle, arguments["components"]);
+            }
+
+            // Handle parent relationship
+            if (arguments.contains("parent")) {
+                uint32_t parentId = arguments["parent"].get<uint32_t>();
+                entt::entity parentEntity = static_cast<entt::entity>(parentId);
+                
+                if (registry.valid(parentEntity)) {
+                    // Add hierarchy component to child
+                    auto& childHierarchy = registry.emplace_or_replace<ECS::HierarchyComponent>(entityHandle);
+                    childHierarchy.Parent = parentEntity;
+
+                    // Update parent's children list
+                    auto& parentHierarchy = registry.get_or_emplace<ECS::HierarchyComponent>(parentEntity);
+                    parentHierarchy.Children.push_back(entityHandle);
+                    childHierarchy.Depth = parentHierarchy.Depth + 1;
+                }
+            }
+
+            // Build result
+            Json result;
+            result["success"] = true;
+            result["entityId"] = static_cast<uint32_t>(entityHandle);
+            result["name"] = name;
+            result["template"] = templateType;
+
+            // Include created components list
+            Json componentsCreated = Json::array();
+            componentsCreated.push_back("transform");
+            
+            if (registry.all_of<ECS::LightComponent>(entityHandle)) componentsCreated.push_back("light");
+            if (registry.all_of<ECS::MeshComponent>(entityHandle)) componentsCreated.push_back("mesh");
+            if (registry.all_of<ECS::CameraComponent>(entityHandle)) componentsCreated.push_back("camera");
+            if (registry.all_of<ECS::ColliderComponent>(entityHandle)) componentsCreated.push_back("collider");
+            if (registry.all_of<ECS::RigidBodyComponent>(entityHandle)) componentsCreated.push_back("rigidBody");
+            if (registry.all_of<ECS::HierarchyComponent>(entityHandle)) componentsCreated.push_back("hierarchy");
+
+            result["components"] = componentsCreated;
+
+            // Include serialized entity data
+            result["entity"] = SerializeEntity(entityHandle, registry);
+
+            ENGINE_CORE_INFO("MCP SpawnEntity: Created '{}' (ID: {}) with template '{}'",
+                             name, static_cast<uint32_t>(entityHandle), templateType);
+
+            return ToolResult::SuccessJson(result);
+        }
+
+    private:
+        void ApplyTemplate(entt::registry& registry, entt::entity entity, 
+                           const std::string& templateType, const Json& arguments) {
+            
+            if (templateType == "mesh") {
+                // Create a basic mesh entity
+                ECS::MeshComponent mesh;
+                if (arguments.contains("components") && arguments["components"].contains("mesh")) {
+                    mesh = DeserializeMesh(arguments["components"]["mesh"]);
+                }
+                registry.emplace<ECS::MeshComponent>(entity, mesh);
+            }
+            else if (templateType == "light") {
+                // Create a point light by default
+                ECS::LightComponent light;
+                if (arguments.contains("components") && arguments["components"].contains("light")) {
+                    light = DeserializeLight(arguments["components"]["light"]);
+                } else {
+                    light = ECS::LightComponent::CreatePoint(
+                        Math::Vec3(1.0f, 1.0f, 1.0f), 1.0f, 10.0f);
+                }
+                registry.emplace<ECS::LightComponent>(entity, light);
+            }
+            else if (templateType == "camera") {
+                // Create a perspective camera
+                ECS::CameraComponent camera;
+                if (arguments.contains("components") && arguments["components"].contains("camera")) {
+                    camera = DeserializeCamera(arguments["components"]["camera"]);
+                } else {
+                    camera = ECS::CameraComponent::CreatePerspective(60.0f, 0.1f, 1000.0f);
+                    camera.IsActive = false;  // Don't activate by default
+                }
+                registry.emplace<ECS::CameraComponent>(entity, camera);
+            }
+            else if (templateType == "physicsBox") {
+                // Create a dynamic box with collider
+                ECS::ColliderComponent collider = ECS::ColliderComponent::CreateBox(
+                    Math::Vec3(0.5f, 0.5f, 0.5f));
+                registry.emplace<ECS::ColliderComponent>(entity, collider);
+
+                ECS::RigidBodyComponent rigidBody = ECS::RigidBodyComponent::CreateDynamic(1.0f);
+                registry.emplace<ECS::RigidBodyComponent>(entity, rigidBody);
+            }
+            else if (templateType == "physicsSphere") {
+                // Create a dynamic sphere with collider
+                ECS::ColliderComponent collider = ECS::ColliderComponent::CreateSphere(0.5f);
+                registry.emplace<ECS::ColliderComponent>(entity, collider);
+
+                ECS::RigidBodyComponent rigidBody = ECS::RigidBodyComponent::CreateDynamic(1.0f);
+                registry.emplace<ECS::RigidBodyComponent>(entity, rigidBody);
+            }
+            else if (templateType == "trigger") {
+                // Create a trigger volume (sensor)
+                ECS::ColliderComponent collider = ECS::ColliderComponent::CreateSensor(
+                    Math::Vec3(1.0f, 1.0f, 1.0f));
+                registry.emplace<ECS::ColliderComponent>(entity, collider);
+            }
+            // "empty" template adds nothing extra
+        }
+
+        void ApplyComponents(entt::registry& registry, entt::entity entity, const Json& components) {
+            // Apply mesh component
+            if (components.contains("mesh") && !registry.all_of<ECS::MeshComponent>(entity)) {
+                auto mesh = DeserializeMesh(components["mesh"]);
+                registry.emplace<ECS::MeshComponent>(entity, mesh);
+            }
+
+            // Apply light component
+            if (components.contains("light") && !registry.all_of<ECS::LightComponent>(entity)) {
+                auto light = DeserializeLight(components["light"]);
+                registry.emplace<ECS::LightComponent>(entity, light);
+            }
+
+            // Apply camera component
+            if (components.contains("camera") && !registry.all_of<ECS::CameraComponent>(entity)) {
+                auto camera = DeserializeCamera(components["camera"]);
+                registry.emplace<ECS::CameraComponent>(entity, camera);
+            }
+
+            // Apply collider component
+            if (components.contains("collider") && !registry.all_of<ECS::ColliderComponent>(entity)) {
+                auto collider = DeserializeCollider(components["collider"]);
+                registry.emplace<ECS::ColliderComponent>(entity, collider);
+            }
+
+            // Apply rigidBody component
+            if (components.contains("rigidBody") && !registry.all_of<ECS::RigidBodyComponent>(entity)) {
+                auto rigidBody = DeserializeRigidBody(components["rigidBody"]);
+                registry.emplace<ECS::RigidBodyComponent>(entity, rigidBody);
+            }
+        }
+    };
+
+    // ============================================================================
     // Factory function to create all scene tools
     // ============================================================================
 
     inline std::vector<MCPToolPtr> CreateSceneTools() {
         return {
-            std::make_shared<GetSceneContextTool>()
+            std::make_shared<GetSceneContextTool>(),
+            std::make_shared<SpawnEntityTool>()
         };
     }
 
