@@ -8,3 +8,4 @@
 #include "Core/ECS/Components/HierarchyComponent.h"
 #include "Core/ECS/Components/RigidBodyComponent.h"
 #include "Core/ECS/Components/ColliderComponent.h"
+#include "Core/ECS/Components/CameraComponent.h"

@@ -7,3 +7,4 @@
 #include "Core/ECS/Systems/TransformSystem.h"
 #include "Core/ECS/Systems/PhysicsSystem.h"
 #include "Core/ECS/Systems/PhysicsSyncSystem.h"
+#include "Core/ECS/Systems/CameraSystem.h"

@@ -76,7 +76,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 7: Switchable Camera System (Week 14)
 
-* [ ]  Step 7.1: Implement ``CameraComponent`` (FOV, Near/Far planes, Projection Matrix calculation).
+* [X]  Step 7.1: Implement ``CameraComponent`` (FOV, Near/Far planes, Projection Matrix calculation).
 * [ ]  Step 7.2: Create the Character Controller System interfacing with Jolt Physics for player movement.
 * [ ]  Step 7.3: Implement input mapping to velocity and rotation.
 * [ ]  Step 7.4: Implement First-Person View logic: Attach camera coordinate space to the player entity.
