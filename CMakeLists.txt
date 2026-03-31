@@ -50,6 +50,8 @@ add_library(EngineCore
     Core/Application.cpp
     Core/Input.h
     Core/Input.cpp
+    Core/InputMapper.h
+    Core/InputMapper.cpp
     Core/Math/Math.h
     Core/Memory/Allocator.h
     Core/Memory/LinearAllocator.cpp
@@ -98,6 +100,7 @@ add_library(EngineCore
     Core/ECS/Components/ColliderComponent.h
     Core/ECS/Components/CameraComponent.h
     Core/ECS/Components/CharacterControllerComponent.h
+    Core/ECS/Components/PlayerControllerComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
@@ -113,6 +116,8 @@ add_library(EngineCore
     Core/ECS/Systems/CameraSystem.cpp
     Core/ECS/Systems/CharacterControllerSystem.h
     Core/ECS/Systems/CharacterControllerSystem.cpp
+    Core/ECS/Systems/PlayerControllerSystem.h
+    Core/ECS/Systems/PlayerControllerSystem.cpp
     Core/Physics/PhysicsLayers.h
     Core/Physics/PhysicsLayers.cpp
     Core/Physics/PhysicsWorld.h
