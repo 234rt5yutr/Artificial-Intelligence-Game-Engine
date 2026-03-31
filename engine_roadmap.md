@@ -91,7 +91,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 8.4: Implement Client connection connection requests and handshake.
 * [X]  Step 8.5: Define network packet schemas using fixed-size structs or FlatBuffers.
 * [X]  Step 8.6: Create the ``NetworkTransformComponent`` to flag entities for replication.
-* [ ]  Step 8.7: Implement Server serialization loops broadcasting replicated components.
+* [X]  Step 8.7: Implement Server serialization loops broadcasting replicated components.
 * [ ]  Step 8.8: Implement Client deserialization loop updating local proxy entities.
 * [ ]  Step 8.9: Implement Client-Side Prediction: decouple client input execution from server acknowledgment.
 * [ ]  Step 8.10: Implement Server Reconciliation: validate client states and correct mispredictions without snapping.
