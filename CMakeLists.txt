@@ -97,6 +97,7 @@ add_library(EngineCore
     Core/ECS/Components/RigidBodyComponent.h
     Core/ECS/Components/ColliderComponent.h
     Core/ECS/Components/CameraComponent.h
+    Core/ECS/Components/CharacterControllerComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
@@ -110,6 +111,8 @@ add_library(EngineCore
     Core/ECS/Systems/PhysicsSyncSystem.cpp
     Core/ECS/Systems/CameraSystem.h
     Core/ECS/Systems/CameraSystem.cpp
+    Core/ECS/Systems/CharacterControllerSystem.h
+    Core/ECS/Systems/CharacterControllerSystem.cpp
     Core/Physics/PhysicsLayers.h
     Core/Physics/PhysicsLayers.cpp
     Core/Physics/PhysicsWorld.h

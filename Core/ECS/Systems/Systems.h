@@ -8,3 +8,4 @@
 #include "Core/ECS/Systems/PhysicsSystem.h"
 #include "Core/ECS/Systems/PhysicsSyncSystem.h"
 #include "Core/ECS/Systems/CameraSystem.h"
+#include "Core/ECS/Systems/CharacterControllerSystem.h"
