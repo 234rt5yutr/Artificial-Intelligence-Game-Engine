@@ -2,6 +2,7 @@
 
 // Include all ECS systems for convenience
 
+#include "Core/ECS/ParallelECS.h"
 #include "Core/ECS/Systems/RenderSystem.h"
 #include "Core/ECS/Systems/LightSystem.h"
 #include "Core/ECS/Systems/TransformSystem.h"

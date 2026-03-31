@@ -98,6 +98,8 @@ add_library(EngineCore
     Core/ECS/Scene.cpp
     Core/ECS/Entity.h
     Core/ECS/Entity.cpp
+    Core/ECS/ParallelECS.h
+    Core/ECS/ParallelECS.cpp
     Core/ECS/Components/Components.h
     Core/ECS/Components/TransformComponent.h
     Core/ECS/Components/MeshComponent.h
