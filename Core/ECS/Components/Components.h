@@ -14,3 +14,4 @@
 #include "Core/ECS/Components/FirstPersonCameraComponent.h"
 #include "Core/ECS/Components/ThirdPersonCameraComponent.h"
 #include "Core/ECS/Components/CameraViewInterpolatorComponent.h"
+#include "Core/ECS/Components/NetworkTransformComponent.h"
