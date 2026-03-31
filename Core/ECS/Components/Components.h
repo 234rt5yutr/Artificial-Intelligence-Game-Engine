@@ -12,3 +12,4 @@
 #include "Core/ECS/Components/CharacterControllerComponent.h"
 #include "Core/ECS/Components/PlayerControllerComponent.h"
 #include "Core/ECS/Components/FirstPersonCameraComponent.h"
+#include "Core/ECS/Components/ThirdPersonCameraComponent.h"

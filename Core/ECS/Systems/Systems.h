@@ -11,3 +11,4 @@
 #include "Core/ECS/Systems/CharacterControllerSystem.h"
 #include "Core/ECS/Systems/PlayerControllerSystem.h"
 #include "Core/ECS/Systems/FirstPersonCameraSystem.h"
+#include "Core/ECS/Systems/ThirdPersonCameraSystem.h"
