@@ -108,7 +108,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [X]  Step 10.1: Add lightweight HTTP/WebSocket dependency for internal server communication (e.g., `cpp-httplib` or `nlohmann_json`).
 * [X]  Step 10.2: Implement the MCP (Model Context Protocol) Server base architecture to listen for local tool calls from external AI environments (like VS Code or custom UI).
-* [ ]  Step 10.3: Define JSON schemas for serializing the active `EnTT` Registry and core Game Objects (Transforms, Lights, Meshes).
+* [X]  Step 10.3: Define JSON schemas for serializing the active `EnTT` Registry and core Game Objects (Transforms, Lights, Meshes).
 * [ ]  Step 10.4: Implement the `GetSceneContext` MCP tool capable of dumping the current world state, active cameras, and level layout in human/LLM-readable text format.
 * [ ]  Step 10.5: Implement the `SpawnEntity` MCP tool for AI agents to instantiate meshes, colliders, and lights programmatically via prompt execution.
 * [ ]  Step 10.6: Implement the `ModifyComponent` MCP tool allowing the AI to tweak lighting colors, physics mass, or translate/rotate objects based on semantic commands.

@@ -98,6 +98,7 @@ add_library(EngineCore
     Core/MCP/MCPTool.h
     Core/MCP/MCPServer.h
     Core/MCP/MCPServer.cpp
+    Core/MCP/SceneSerialization.h
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
