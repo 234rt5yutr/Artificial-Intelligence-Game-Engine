@@ -102,7 +102,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 9.2: Implement Temporal Anti-Aliasing (TAA) pass.
 * [X]  Step 9.3: Add Dynamic Resolution Scaling based on frame completion time metrics.
 * [X]  Step 9.4: Optimize ECS cache lines and parallelize remaining Systems via the Job System.
-* [ ]  Step 9.5: Finalize asset cooking pipelines for production.
+* [X]  Step 9.5: Finalize asset cooking pipelines for production.
 
 ## Phase 10: Automatic Game Design & AI Agents (MCP) (Weeks 20-22)
 

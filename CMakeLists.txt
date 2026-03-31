@@ -82,6 +82,13 @@ add_library(EngineCore
     Core/RHI/Vulkan/VulkanPipelineState.cpp
     Core/Renderer/Mesh.h
     Core/Renderer/Mesh.cpp
+    Core/Asset/AssetTypes.h
+    Core/Asset/AssetCooker.h
+    Core/Asset/AssetCooker.cpp
+    Core/Asset/AssetPipeline.h
+    Core/Asset/AssetPipeline.cpp
+    Core/Asset/AssetLoader.h
+    Core/Asset/AssetLoader.cpp
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
