@@ -92,7 +92,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 8.5: Define network packet schemas using fixed-size structs or FlatBuffers.
 * [X]  Step 8.6: Create the ``NetworkTransformComponent`` to flag entities for replication.
 * [X]  Step 8.7: Implement Server serialization loops broadcasting replicated components.
-* [ ]  Step 8.8: Implement Client deserialization loop updating local proxy entities.
+* [X]  Step 8.8: Implement Client deserialization loop updating local proxy entities.
 * [ ]  Step 8.9: Implement Client-Side Prediction: decouple client input execution from server acknowledgment.
 * [ ]  Step 8.10: Implement Server Reconciliation: validate client states and correct mispredictions without snapping.
 
@@ -115,3 +115,28 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [ ]  Step 10.7: Implement the `ExecuteScript` MCP tool for injecting dynamic AI-authored Lua/C++ script snippets to define custom gameplay behaviors on the fly.
 * [ ]  Step 10.8: Integrate a sandboxed action-validation layer to ensure AI agents cannot crash the engine when generating invalid transforms or extreme array allocations.
 * [ ]  Step 10.9: Build an overarching "Auto-Level Designer" loop that translates abstract user prompts into sequence of MCP tool calls.
+
+## Phase 11: Spatial Audio & Acoustic Environments (Weeks 23-24)
+
+* [ ]  Step 11.1: Add an audio backend dependency (e.g., `miniaudio`, `FMOD`, or `Wwise`).
+* [ ]  Step 11.2: Implement the `AudioListenerComponent` and bind its position/orientation to the active Camera.
+* [ ]  Step 11.3: Implement the `AudioSourceComponent` for playing 3D spatialized sound files.
+* [ ]  Step 11.4: Integrate the Audio System with Jolt Physics (Phase 6) to trigger sounds dynamically based on collision impulses and material types.
+* [ ]  Step 11.5: Implement basic Reverb Zones or Audio Volumes to simulate acoustic changes when entering different spaces.
+* [ ]  Step 11.6: **MCP Server Update:** Implement the `PlayAudio` and `ModifyAcoustics` MCP tools, allowing AI agents to dynamically trigger sound effects, change background tracks, and alter reverb parameters based on semantic logic.
+
+## Phase 12: Advanced Skeletal Animation & Kinematics (Weeks 25-27)
+
+* [ ]  Step 12.1: Expand the mesh loader (Phase 4) to parse bone weights, indices, and skeletal hierarchies from GLTF files.
+* [ ]  Step 12.2: Implement GPU Skinning via Compute Shaders or Vertex Shader SSBOs to deform meshes based on bone matrices.
+* [ ]  Step 12.3: Implement an `AnimatorComponent` and a data-driven Animation State Machine (Idle, Walk, Run, Jump).
+* [ ]  Step 12.4: Implement Animation Blending to smoothly cross-fade between different animation states.
+* [ ]  Step 12.5: Implement basic Inverse Kinematics (IK) for procedural foot placement, querying the physics world to align feet with uneven terrain.
+* [ ]  Step 12.6: **MCP Server Update:** Implement the `SetAnimationState` and `SetIKTarget` MCP tools, enabling AI agents to programmatically drive character animations, script cutscenes, and direct NPC gaze or limb placement.
+
+## Phase 13: World Building & Procedural Environments (Weeks 28-30)
+
+* [ ]  Step 13.1: Implement a chunk-based LOD Terrain System (using heightmaps or voxels) with asynchronous generation.
+* [ ]  Step 13.2: Implement a Foliage Scattering system utilizing compute-driven instanced rendering to efficiently draw thousands of trees/grass blades.
+* [ ]  Step 13.3: Implement a physically based Volumetric Skybox (Rayleigh/Mie scattering) and a dynamic Day/Night cycle updating directional lights.
+* [ ]  Step 13.4: **MCP Server Update:** Implement the `GenerateBiome` and `SetTimeOfDay` MCP tools. This allows the AI to procedurally sculpt terrain, scatter foliage based on high-level prompts, and manipulate the lighting environment dynamically.
