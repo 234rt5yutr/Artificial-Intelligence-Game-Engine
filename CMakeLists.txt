@@ -88,6 +88,8 @@ add_library(EngineCore
     Core/Renderer/ZPrepass.cpp
     Core/Renderer/ShadowPass.h
     Core/Renderer/ShadowPass.cpp
+    Core/Renderer/FrustumCulling.h
+    Core/Renderer/FrustumCulling.cpp
     Core/ECS/Scene.h
     Core/ECS/Scene.cpp
     Core/ECS/Entity.h

@@ -1,0 +1,170 @@
+#version 450
+
+// GPU-driven Frustum Culling Compute Shader
+// Generates indirect draw commands for objects passing the frustum test
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+//=============================================================================
+// Structures
+//=============================================================================
+
+struct AABB {
+    vec4 center;    // xyz = center, w = padding
+    vec4 extents;   // xyz = half-extents, w = padding
+};
+
+struct ObjectData {
+    mat4 worldMatrix;
+    vec4 boundingSphere;    // xyz = center, w = radius
+    uint meshIndex;
+    uint materialIndex;
+    uint firstIndex;
+    uint indexCount;
+    uint vertexOffset;
+    uint instanceId;
+    uint flags;             // Bit 0: visible, Bit 1: cast shadows
+    uint padding;
+};
+
+// VkDrawIndexedIndirectCommand structure
+struct DrawIndexedIndirectCommand {
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int  vertexOffset;
+    uint firstInstance;
+};
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+layout (set = 0, binding = 0, std140) uniform CullingUniforms {
+    mat4 viewProjection;
+    vec4 frustumPlanes[6];  // xyz = normal, w = distance
+    vec4 cameraPosition;    // xyz = camera pos, w = unused
+    uint objectCount;
+    uint enableFrustumCull;
+    uint enableDistanceCull;
+    float maxDrawDistance;
+};
+
+// Input: All object data
+layout (set = 0, binding = 1, std430) readonly buffer ObjectDataBuffer {
+    ObjectData objects[];
+};
+
+// Output: Indirect draw commands
+layout (set = 0, binding = 2, std430) writeonly buffer DrawCommandBuffer {
+    DrawIndexedIndirectCommand drawCommands[];
+};
+
+// Output: Draw count (atomic counter)
+layout (set = 0, binding = 3, std430) buffer DrawCountBuffer {
+    uint drawCount;
+};
+
+// Output: Visible object indices (for debugging/additional passes)
+layout (set = 0, binding = 4, std430) writeonly buffer VisibleIndexBuffer {
+    uint visibleIndices[];
+};
+
+//=============================================================================
+// Frustum Culling Functions
+//=============================================================================
+
+// Test if a sphere is inside or intersecting the frustum
+bool sphereInFrustum(vec3 center, float radius) {
+    for (int i = 0; i < 6; i++) {
+        float distance = dot(frustumPlanes[i].xyz, center) + frustumPlanes[i].w;
+        if (distance < -radius) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Test AABB against frustum (more precise but slower)
+bool aabbInFrustum(vec3 center, vec3 extents) {
+    for (int i = 0; i < 6; i++) {
+        vec3 planeNormal = frustumPlanes[i].xyz;
+        float planeDistance = frustumPlanes[i].w;
+        
+        // Calculate the projection interval radius of AABB onto plane normal
+        float r = dot(extents, abs(planeNormal));
+        float s = dot(planeNormal, center) + planeDistance;
+        
+        if (s < -r) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Distance culling - objects beyond max draw distance are culled
+bool withinDrawDistance(vec3 objectPos) {
+    if (enableDistanceCull == 0) {
+        return true;
+    }
+    float dist = distance(cameraPosition.xyz, objectPos);
+    return dist <= maxDrawDistance;
+}
+
+//=============================================================================
+// Main Compute Shader
+//=============================================================================
+
+void main() {
+    uint objectIndex = gl_GlobalInvocationID.x;
+    
+    // Bounds check
+    if (objectIndex >= objectCount) {
+        return;
+    }
+    
+    ObjectData obj = objects[objectIndex];
+    
+    // Skip invisible objects
+    if ((obj.flags & 1u) == 0u) {
+        return;
+    }
+    
+    // Transform bounding sphere center to world space
+    vec3 worldCenter = (obj.worldMatrix * vec4(obj.boundingSphere.xyz, 1.0)).xyz;
+    
+    // Scale radius by maximum scale component of world matrix
+    vec3 scale = vec3(
+        length(obj.worldMatrix[0].xyz),
+        length(obj.worldMatrix[1].xyz),
+        length(obj.worldMatrix[2].xyz)
+    );
+    float maxScale = max(max(scale.x, scale.y), scale.z);
+    float worldRadius = obj.boundingSphere.w * maxScale;
+    
+    // Perform culling tests
+    bool visible = true;
+    
+    // Frustum culling
+    if (enableFrustumCull != 0u) {
+        visible = visible && sphereInFrustum(worldCenter, worldRadius);
+    }
+    
+    // Distance culling
+    visible = visible && withinDrawDistance(worldCenter);
+    
+    if (visible) {
+        // Atomically increment draw count and get our slot
+        uint drawIndex = atomicAdd(drawCount, 1);
+        
+        // Write indirect draw command
+        drawCommands[drawIndex].indexCount = obj.indexCount;
+        drawCommands[drawIndex].instanceCount = 1;
+        drawCommands[drawIndex].firstIndex = obj.firstIndex;
+        drawCommands[drawIndex].vertexOffset = int(obj.vertexOffset);
+        drawCommands[drawIndex].firstInstance = obj.instanceId;
+        
+        // Store visible object index
+        visibleIndices[drawIndex] = objectIndex;
+    }
+}
