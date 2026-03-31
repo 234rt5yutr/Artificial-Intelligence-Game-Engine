@@ -12,6 +12,7 @@
     "shaderc",
     "cgltf",
     "entt",
-    "joltphysics"
+    "joltphysics",
+    "gamenetworkingsockets"
   ]
 }
