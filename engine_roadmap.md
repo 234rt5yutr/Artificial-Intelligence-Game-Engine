@@ -112,7 +112,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 10.4: Implement the `GetSceneContext` MCP tool capable of dumping the current world state, active cameras, and level layout in human/LLM-readable text format.
 * [X]  Step 10.5: Implement the `SpawnEntity` MCP tool for AI agents to instantiate meshes, colliders, and lights programmatically via prompt execution.
 * [X]  Step 10.6: Implement the `ModifyComponent` MCP tool allowing the AI to tweak lighting colors, physics mass, or translate/rotate objects based on semantic commands.
-* [ ]  Step 10.7: Implement the `ExecuteScript` MCP tool for injecting dynamic AI-authored Lua/C++ script snippets to define custom gameplay behaviors on the fly.
+* [X]  Step 10.7: Implement the `ExecuteScript` MCP tool for injecting dynamic AI-authored Lua/C++ script snippets to define custom gameplay behaviors on the fly.
 * [ ]  Step 10.8: Integrate a sandboxed action-validation layer to ensure AI agents cannot crash the engine when generating invalid transforms or extreme array allocations.
 * [ ]  Step 10.9: Build an overarching "Auto-Level Designer" loop that translates abstract user prompts into sequence of MCP tool calls.
 

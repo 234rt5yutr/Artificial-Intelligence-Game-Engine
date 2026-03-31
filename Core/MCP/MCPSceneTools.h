@@ -1,7 +1,7 @@
 #pragma once
 
 // MCP Scene Tools
-// Tools for querying, modifying, and spawning entities in the game scene via MCP
+// Tools for querying, modifying, spawning entities, and executing scripts via MCP
 
 #include "MCPTool.h"
 #include "MCPTypes.h"
@@ -9,10 +9,12 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
 #include "Core/ECS/Components/Components.h"
+#include "Core/Scripting/LuaEngine.h"
 #include "Core/Log.h"
 
 #include <sstream>
 #include <algorithm>
+#include <memory>
 
 namespace Core {
 namespace MCP {
@@ -1150,6 +1152,181 @@ namespace MCP {
     };
 
     // ============================================================================
+    // ExecuteScript Tool
+    // ============================================================================
+    // Allows AI agents to inject and execute Lua scripts for custom gameplay behaviors
+
+    class ExecuteScriptTool : public MCPTool {
+    public:
+        ExecuteScriptTool()
+            : MCPTool("ExecuteScript",
+                      "Execute a Lua script to define custom gameplay behaviors. "
+                      "Scripts run in a sandboxed environment with access to the Engine API "
+                      "for entity manipulation, transform operations, lighting, and physics. "
+                      "Returns execution results including output and timing information.") {}
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Type = "object";
+            schema.Properties = {
+                {"script", {
+                    {"type", "string"},
+                    {"description", "Lua script code to execute"}
+                }},
+                {"timeout", {
+                    {"type", "number"},
+                    {"description", "Maximum execution time in milliseconds (default: 1000, max: 5000)"},
+                    {"default", 1000},
+                    {"minimum", 100},
+                    {"maximum", 5000}
+                }},
+                {"maxInstructions", {
+                    {"type", "integer"},
+                    {"description", "Maximum Lua instructions to execute (default: 100000)"},
+                    {"default", 100000},
+                    {"minimum", 1000},
+                    {"maximum", 1000000}
+                }},
+                {"resetState", {
+                    {"type", "boolean"},
+                    {"description", "Reset Lua state before execution (clears variables)"},
+                    {"default", false}
+                }}
+            };
+            schema.Required = {"script"};
+            return schema;
+        }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene* scene) override {
+            if (!scene) {
+                return ToolResult::Error("No active scene available");
+            }
+
+            if (!arguments.contains("script")) {
+                return ToolResult::Error("Missing required 'script' parameter");
+            }
+
+            std::string script = arguments["script"].get<std::string>();
+            if (script.empty()) {
+                return ToolResult::Error("Script cannot be empty");
+            }
+
+            // Get execution limits
+            double timeout = arguments.value("timeout", 1000.0);
+            timeout = std::clamp(timeout, 100.0, 5000.0);
+
+            int maxInstructions = arguments.value("maxInstructions", 100000);
+            maxInstructions = std::clamp(maxInstructions, 1000, 1000000);
+
+            bool resetState = arguments.value("resetState", false);
+
+            // Initialize or reset Lua engine
+            if (!m_LuaEngine || resetState) {
+                m_LuaEngine = std::make_unique<Scripting::LuaEngine>();
+            }
+
+            // Configure limits
+            Scripting::ScriptLimits limits;
+            limits.MaxExecutionTimeMs = timeout;
+            limits.MaxInstructions = maxInstructions;
+            limits.AllowFileIO = false;
+            limits.AllowOSCalls = false;
+            limits.AllowRequire = false;
+
+            m_LuaEngine->SetLimits(limits);
+            m_LuaEngine->SetScene(scene);
+
+            // Execute the script
+            auto result = m_LuaEngine->ExecuteWithTimeout(script, timeout);
+
+            // Build response
+            Json response;
+            response["success"] = result.Success;
+            response["executionTimeMs"] = result.ExecutionTimeMs;
+            response["instructionsExecuted"] = result.InstructionsExecuted;
+
+            if (result.Success) {
+                response["output"] = result.Output;
+                
+                ENGINE_CORE_INFO("MCP ExecuteScript: Completed in {:.2f}ms ({} instructions)",
+                                 result.ExecutionTimeMs, result.InstructionsExecuted);
+                
+                return ToolResult::SuccessJson(response);
+            } else {
+                response["error"] = result.Error;
+                
+                ENGINE_CORE_WARN("MCP ExecuteScript: Failed - {}", result.Error);
+                
+                // Return as success with error info (not a tool error)
+                return ToolResult::SuccessJson(response);
+            }
+        }
+
+        // Get the Engine API documentation for AI agents
+        static Json GetAPIDocumentation() {
+            return {
+                {"namespace", "Engine"},
+                {"description", "Sandboxed Lua API for game engine manipulation"},
+                {"functions", Json::array({
+                    // Logging
+                    {{"name", "log"}, {"args", "..."}, {"description", "Print message to output (also available as print())"}},
+                    {{"name", "warn"}, {"args", "message"}, {"description", "Log a warning message"}},
+                    {{"name", "error"}, {"args", "message"}, {"description", "Log an error message"}},
+                    
+                    // Entity Management
+                    {{"name", "createEntity"}, {"args", "[name]"}, {"returns", "entityId"}, {"description", "Create a new entity with optional name"}},
+                    {{"name", "destroyEntity"}, {"args", "entityId"}, {"returns", "boolean"}, {"description", "Destroy an entity by ID"}},
+                    {{"name", "getEntity"}, {"args", "name"}, {"returns", "entityId or nil"}, {"description", "Find entity by name"}},
+                    {{"name", "entityExists"}, {"args", "entityId"}, {"returns", "boolean"}, {"description", "Check if entity exists"}},
+                    
+                    // Transform
+                    {{"name", "getPosition"}, {"args", "entityId"}, {"returns", "{x,y,z} or nil"}, {"description", "Get entity position"}},
+                    {{"name", "setPosition"}, {"args", "entityId, x, y, z"}, {"description", "Set entity position"}},
+                    {{"name", "getRotation"}, {"args", "entityId"}, {"returns", "{pitch,yaw,roll} or nil"}, {"description", "Get rotation in degrees"}},
+                    {{"name", "setRotation"}, {"args", "entityId, pitch, yaw, roll"}, {"description", "Set rotation in degrees"}},
+                    {{"name", "getScale"}, {"args", "entityId"}, {"returns", "{x,y,z} or nil"}, {"description", "Get entity scale"}},
+                    {{"name", "setScale"}, {"args", "entityId, x, y, z"}, {"description", "Set entity scale"}},
+                    {{"name", "translate"}, {"args", "entityId, dx, dy, dz"}, {"description", "Move entity by delta"}},
+                    {{"name", "rotate"}, {"args", "entityId, dpitch, dyaw, droll"}, {"description", "Rotate entity by delta (degrees)"}},
+                    
+                    // Light
+                    {{"name", "setLightColor"}, {"args", "entityId, r, g, b"}, {"description", "Set light color (0-1 range)"}},
+                    {{"name", "setLightIntensity"}, {"args", "entityId, intensity"}, {"description", "Set light intensity"}},
+                    {{"name", "setLightEnabled"}, {"args", "entityId, enabled"}, {"description", "Enable/disable light"}},
+                    
+                    // Physics
+                    {{"name", "setMass"}, {"args", "entityId, mass"}, {"description", "Set rigid body mass"}},
+                    {{"name", "setVelocity"}, {"args", "entityId, vx, vy, vz"}, {"description", "Set linear velocity"}},
+                    {{"name", "applyForce"}, {"args", "entityId, fx, fy, fz"}, {"description", "Apply force to rigid body"}},
+                    {{"name", "applyImpulse"}, {"args", "entityId, ix, iy, iz"}, {"description", "Apply instant impulse"}},
+                    
+                    // Scene Queries
+                    {{"name", "findByName"}, {"args", "pattern"}, {"returns", "{entityIds}"}, {"description", "Find entities containing pattern"}},
+                    {{"name", "getEntityCount"}, {"returns", "number"}, {"description", "Get total entity count"}},
+                    {{"name", "getAllEntities"}, {"returns", "{entityIds}"}, {"description", "Get all entity IDs"}}
+                })},
+                {"example", R"lua(
+-- Example: Create spinning entities
+local cube = Engine.createEntity("SpinningCube")
+Engine.setPosition(cube, 0, 2, 0)
+
+-- Rotate all entities named "Light"
+local lights = Engine.findByName("Light")
+for i, id in ipairs(lights) do
+    Engine.rotate(id, 0, 45, 0)
+    Engine.setLightIntensity(id, 2.0)
+end
+
+print("Modified " .. #lights .. " lights")
+)lua"}
+            };
+        }
+
+    private:
+        std::unique_ptr<Scripting::LuaEngine> m_LuaEngine;
+    };
+
+    // ============================================================================
     // Factory function to create all scene tools
     // ============================================================================
 
@@ -1157,7 +1334,8 @@ namespace MCP {
         return {
             std::make_shared<GetSceneContextTool>(),
             std::make_shared<SpawnEntityTool>(),
-            std::make_shared<ModifyComponentTool>()
+            std::make_shared<ModifyComponentTool>(),
+            std::make_shared<ExecuteScriptTool>()
         };
     }
 

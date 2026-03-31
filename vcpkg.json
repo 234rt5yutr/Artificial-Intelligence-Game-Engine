@@ -15,6 +15,7 @@
     "joltphysics",
     "gamenetworkingsockets",
     "cpp-httplib",
-    "nlohmann-json"
+    "nlohmann-json",
+    "lua"
   ]
 }
