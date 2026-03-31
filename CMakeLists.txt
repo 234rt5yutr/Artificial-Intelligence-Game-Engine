@@ -35,6 +35,8 @@ find_path(CGLTF_INCLUDE_DIRS "cgltf.h")
 find_package(EnTT CONFIG REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
+find_package(httplib CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
@@ -89,6 +91,9 @@ add_library(EngineCore
     Core/Asset/AssetPipeline.cpp
     Core/Asset/AssetLoader.h
     Core/Asset/AssetLoader.cpp
+    Core/MCP/JsonSerialization.h
+    Core/MCP/HttpServer.h
+    Core/MCP/HttpServer.cpp
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
@@ -166,7 +171,7 @@ add_library(EngineCore
     Core/Network/ServerReconciliationSystem.cpp
 )
 
-target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets)
+target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS})       
 
 # Option to enable Tracy profiling

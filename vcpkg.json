@@ -13,6 +13,8 @@
     "cgltf",
     "entt",
     "joltphysics",
-    "gamenetworkingsockets"
+    "gamenetworkingsockets",
+    "cpp-httplib",
+    "nlohmann-json"
   ]
 }
