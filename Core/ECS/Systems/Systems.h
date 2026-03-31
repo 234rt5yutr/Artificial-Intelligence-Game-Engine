@@ -12,3 +12,4 @@
 #include "Core/ECS/Systems/PlayerControllerSystem.h"
 #include "Core/ECS/Systems/FirstPersonCameraSystem.h"
 #include "Core/ECS/Systems/ThirdPersonCameraSystem.h"
+#include "Core/ECS/Systems/CameraViewInterpolatorSystem.h"
