@@ -147,6 +147,8 @@ add_library(EngineCore
     Core/Network/ClientReplicationSystem.cpp
     Core/Network/ClientPredictionSystem.h
     Core/Network/ClientPredictionSystem.cpp
+    Core/Network/ServerReconciliationSystem.h
+    Core/Network/ServerReconciliationSystem.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets)
