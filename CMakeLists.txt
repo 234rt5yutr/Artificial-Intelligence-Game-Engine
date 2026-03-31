@@ -94,6 +94,10 @@ add_library(EngineCore
     Core/MCP/JsonSerialization.h
     Core/MCP/HttpServer.h
     Core/MCP/HttpServer.cpp
+    Core/MCP/MCPTypes.h
+    Core/MCP/MCPTool.h
+    Core/MCP/MCPServer.h
+    Core/MCP/MCPServer.cpp
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
