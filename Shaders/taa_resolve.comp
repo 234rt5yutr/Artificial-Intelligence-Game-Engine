@@ -1,0 +1,281 @@
+#version 450
+
+// Temporal Anti-Aliasing (TAA) Resolve Shader
+// Combines current frame with history buffer using motion vectors
+
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+// Input: Current frame color (after rendering)
+layout (set = 0, binding = 0) uniform sampler2D currentColor;
+
+// Input: Current frame depth
+layout (set = 0, binding = 1) uniform sampler2D currentDepth;
+
+// Input: Motion vectors (screen-space velocity)
+layout (set = 0, binding = 2) uniform sampler2D motionVectors;
+
+// Input: Previous frame resolved color (history)
+layout (set = 0, binding = 3) uniform sampler2D historyColor;
+
+// Output: Resolved TAA color
+layout (set = 0, binding = 4, rgba16f) uniform writeonly image2D outputColor;
+
+// TAA Parameters
+layout (set = 0, binding = 5, std140) uniform TAAParams {
+    vec4 resolution;         // xy = current resolution, zw = 1/resolution
+    vec4 jitterOffset;       // xy = current jitter, zw = previous jitter
+    float blendFactor;       // Base blend factor (0.0 - 1.0), typically 0.9-0.95
+    float motionScale;       // Motion vector scale
+    float varianceClipGamma; // Variance clipping gamma (1.0 - 2.0)
+    float sharpness;         // Sharpening amount (0.0 - 1.0)
+    uint frameIndex;
+    uint flags;              // Bit 0: enable variance clipping, Bit 1: enable sharpening
+    float padding0;
+    float padding1;
+};
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+const float EPSILON = 0.0001;
+const float YCOCG_LUMA_WEIGHT = 1.0;
+
+//=============================================================================
+// Color Space Conversion
+//=============================================================================
+
+// RGB to YCoCg color space (better for neighborhood clamping)
+vec3 RGBToYCoCg(vec3 rgb) {
+    float Y  = dot(rgb, vec3(0.25, 0.5, 0.25));
+    float Co = dot(rgb, vec3(0.5, 0.0, -0.5));
+    float Cg = dot(rgb, vec3(-0.25, 0.5, -0.25));
+    return vec3(Y, Co, Cg);
+}
+
+// YCoCg to RGB
+vec3 YCoCgToRGB(vec3 ycocg) {
+    float Y = ycocg.x;
+    float Co = ycocg.y;
+    float Cg = ycocg.z;
+    
+    float R = Y + Co - Cg;
+    float G = Y + Cg;
+    float B = Y - Co - Cg;
+    
+    return vec3(R, G, B);
+}
+
+// Tonemap for HDR history clamping
+vec3 Tonemap(vec3 color) {
+    return color / (1.0 + max(color.r, max(color.g, color.b)));
+}
+
+// Inverse tonemap
+vec3 TonemapInverse(vec3 color) {
+    return color / max(1.0 - max(color.r, max(color.g, color.b)), EPSILON);
+}
+
+//=============================================================================
+// Sampling Utilities
+//=============================================================================
+
+// Catmull-Rom bicubic filter for high-quality history sampling
+vec4 SampleCatmullRom(sampler2D tex, vec2 uv, vec2 texelSize) {
+    vec2 position = uv * (1.0 / texelSize);
+    vec2 center = floor(position - 0.5) + 0.5;
+    vec2 f = position - center;
+    vec2 f2 = f * f;
+    vec2 f3 = f2 * f;
+
+    // Catmull-Rom weights
+    vec2 w0 = f2 - 0.5 * (f3 + f);
+    vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+    vec2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
+    vec2 w3 = 0.5 * (f3 - f2);
+
+    vec2 w12 = w1 + w2;
+    vec2 tc0 = (center - 1.0) * texelSize;
+    vec2 tc12 = (center + w2 / w12) * texelSize;
+    vec2 tc3 = (center + 2.0) * texelSize;
+
+    vec4 result = vec4(0.0);
+    result += texture(tex, vec2(tc0.x, tc0.y)) * w0.x * w0.y;
+    result += texture(tex, vec2(tc12.x, tc0.y)) * w12.x * w0.y;
+    result += texture(tex, vec2(tc3.x, tc0.y)) * w3.x * w0.y;
+
+    result += texture(tex, vec2(tc0.x, tc12.y)) * w0.x * w12.y;
+    result += texture(tex, vec2(tc12.x, tc12.y)) * w12.x * w12.y;
+    result += texture(tex, vec2(tc3.x, tc12.y)) * w3.x * w12.y;
+
+    result += texture(tex, vec2(tc0.x, tc3.y)) * w0.x * w3.y;
+    result += texture(tex, vec2(tc12.x, tc3.y)) * w12.x * w3.y;
+    result += texture(tex, vec2(tc3.x, tc3.y)) * w3.x * w3.y;
+
+    return result;
+}
+
+// Sample motion vector at pixel
+vec2 SampleMotionVector(ivec2 coord) {
+    vec2 motion = texelFetch(motionVectors, coord, 0).xy;
+    return motion * motionScale;
+}
+
+// Find closest depth in 3x3 neighborhood (for better motion vector selection)
+ivec2 FindClosestDepth(ivec2 coord) {
+    float closestDepth = 0.0;
+    ivec2 closestCoord = coord;
+    
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            ivec2 sampleCoord = coord + ivec2(x, y);
+            float depth = texelFetch(currentDepth, sampleCoord, 0).r;
+            
+            // Reverse-Z: closer objects have larger depth values
+            if (depth > closestDepth) {
+                closestDepth = depth;
+                closestCoord = sampleCoord;
+            }
+        }
+    }
+    
+    return closestCoord;
+}
+
+//=============================================================================
+// Neighborhood Clamping (Variance Clip)
+//=============================================================================
+
+// Gather 3x3 neighborhood statistics
+void GatherNeighborhood(ivec2 coord, out vec3 minColor, out vec3 maxColor, 
+                        out vec3 avgColor, out vec3 variance) {
+    vec3 m1 = vec3(0.0);  // First moment
+    vec3 m2 = vec3(0.0);  // Second moment
+    
+    minColor = vec3(1e10);
+    maxColor = vec3(-1e10);
+    
+    for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+            ivec2 sampleCoord = coord + ivec2(x, y);
+            vec3 sampleColor = texelFetch(currentColor, sampleCoord, 0).rgb;
+            sampleColor = RGBToYCoCg(Tonemap(sampleColor));
+            
+            minColor = min(minColor, sampleColor);
+            maxColor = max(maxColor, sampleColor);
+            m1 += sampleColor;
+            m2 += sampleColor * sampleColor;
+        }
+    }
+    
+    avgColor = m1 / 9.0;
+    variance = sqrt(abs(m2 / 9.0 - avgColor * avgColor));
+}
+
+// Clip history color to neighborhood AABB (variance-based)
+vec3 ClipToAABB(vec3 history, vec3 minimum, vec3 maximum) {
+    vec3 center = (minimum + maximum) * 0.5;
+    vec3 extents = (maximum - minimum) * 0.5 + EPSILON;
+    
+    vec3 offset = history - center;
+    vec3 v_unit = offset / extents;
+    vec3 absUnit = abs(v_unit);
+    float maxUnit = max(absUnit.x, max(absUnit.y, absUnit.z));
+    
+    if (maxUnit > 1.0) {
+        return center + offset / maxUnit;
+    }
+    return history;
+}
+
+//=============================================================================
+// Main TAA Resolve
+//=============================================================================
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    vec2 texelSize = resolution.zw;
+    
+    // Bounds check
+    if (coord.x >= int(resolution.x) || coord.y >= int(resolution.y)) {
+        return;
+    }
+    
+    vec2 uv = (vec2(coord) + 0.5) * texelSize;
+    
+    // Sample current frame color
+    vec3 currentSample = texelFetch(currentColor, coord, 0).rgb;
+    
+    // Find motion vector from closest depth pixel
+    ivec2 closestCoord = FindClosestDepth(coord);
+    vec2 motion = SampleMotionVector(closestCoord);
+    
+    // Calculate reprojected UV
+    vec2 historyUV = uv - motion;
+    
+    // Check if reprojected position is valid (on screen)
+    bool validHistory = historyUV.x >= 0.0 && historyUV.x <= 1.0 &&
+                        historyUV.y >= 0.0 && historyUV.y <= 1.0;
+    
+    vec3 historySample;
+    if (validHistory) {
+        // Sample history with high-quality bicubic filter
+        historySample = SampleCatmullRom(historyColor, historyUV, texelSize).rgb;
+    } else {
+        // No valid history - use current frame
+        historySample = currentSample;
+    }
+    
+    // Apply variance clipping
+    bool enableVarianceClip = (flags & 1u) != 0u;
+    if (enableVarianceClip && validHistory) {
+        vec3 minColor, maxColor, avgColor, variance;
+        GatherNeighborhood(coord, minColor, maxColor, avgColor, variance);
+        
+        // Expand AABB by variance * gamma
+        vec3 varianceClipMin = avgColor - variance * varianceClipGamma;
+        vec3 varianceClipMax = avgColor + variance * varianceClipGamma;
+        
+        // Convert history to YCoCg and clip
+        vec3 historyYCoCg = RGBToYCoCg(Tonemap(historySample));
+        historyYCoCg = ClipToAABB(historyYCoCg, varianceClipMin, varianceClipMax);
+        historySample = TonemapInverse(YCoCgToRGB(historyYCoCg));
+    }
+    
+    // Calculate dynamic blend factor based on motion
+    float motionLength = length(motion * resolution.xy);
+    float dynamicBlend = blendFactor;
+    
+    // Reduce history weight for fast-moving objects
+    dynamicBlend = mix(dynamicBlend, 0.5, clamp(motionLength * 0.1, 0.0, 0.5));
+    
+    // Reduce history weight at screen edges
+    vec2 edgeFade = smoothstep(vec2(0.0), vec2(0.1), historyUV) * 
+                    smoothstep(vec2(0.0), vec2(0.1), 1.0 - historyUV);
+    dynamicBlend *= edgeFade.x * edgeFade.y;
+    
+    // Blend current and history
+    vec3 result = mix(currentSample, historySample, dynamicBlend);
+    
+    // Optional sharpening pass
+    bool enableSharpening = (flags & 2u) != 0u;
+    if (enableSharpening && sharpness > 0.0) {
+        // Unsharp mask
+        vec3 blur = vec3(0.0);
+        blur += texelFetch(currentColor, coord + ivec2(-1, 0), 0).rgb;
+        blur += texelFetch(currentColor, coord + ivec2(1, 0), 0).rgb;
+        blur += texelFetch(currentColor, coord + ivec2(0, -1), 0).rgb;
+        blur += texelFetch(currentColor, coord + ivec2(0, 1), 0).rgb;
+        blur *= 0.25;
+        
+        vec3 sharpened = result + (result - blur) * sharpness;
+        result = max(sharpened, vec3(0.0));
+    }
+    
+    // Write output
+    imageStore(outputColor, coord, vec4(result, 1.0));
+}

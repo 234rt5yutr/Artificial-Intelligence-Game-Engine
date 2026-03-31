@@ -90,6 +90,8 @@ add_library(EngineCore
     Core/Renderer/ShadowPass.cpp
     Core/Renderer/FrustumCulling.h
     Core/Renderer/FrustumCulling.cpp
+    Core/Renderer/TAASystem.h
+    Core/Renderer/TAASystem.cpp
     Core/ECS/Scene.h
     Core/ECS/Scene.cpp
     Core/ECS/Entity.h
