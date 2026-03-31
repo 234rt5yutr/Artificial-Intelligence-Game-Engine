@@ -101,6 +101,7 @@ add_library(EngineCore
     Core/ECS/Components/CameraComponent.h
     Core/ECS/Components/CharacterControllerComponent.h
     Core/ECS/Components/PlayerControllerComponent.h
+    Core/ECS/Components/FirstPersonCameraComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
@@ -118,6 +119,8 @@ add_library(EngineCore
     Core/ECS/Systems/CharacterControllerSystem.cpp
     Core/ECS/Systems/PlayerControllerSystem.h
     Core/ECS/Systems/PlayerControllerSystem.cpp
+    Core/ECS/Systems/FirstPersonCameraSystem.h
+    Core/ECS/Systems/FirstPersonCameraSystem.cpp
     Core/Physics/PhysicsLayers.h
     Core/Physics/PhysicsLayers.cpp
     Core/Physics/PhysicsWorld.h

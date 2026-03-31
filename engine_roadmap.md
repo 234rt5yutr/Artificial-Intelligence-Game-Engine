@@ -79,7 +79,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 7.1: Implement ``CameraComponent`` (FOV, Near/Far planes, Projection Matrix calculation).
 * [X]  Step 7.2: Create the Character Controller System interfacing with Jolt Physics for player movement.
 * [X]  Step 7.3: Implement input mapping to velocity and rotation.
-* [ ]  Step 7.4: Implement First-Person View logic: Attach camera coordinate space to the player entity.
+* [X]  Step 7.4: Implement First-Person View logic: Attach camera coordinate space to the player entity.
 * [ ]  Step 7.5: Implement Third-Person View logic: Implement a Spring-Arm constraint utilizing Raycasts against the physics world.
 * [ ]  Step 7.6: Implement the interpolator state machine to smoothly pan and zoom between FP and TP view modes upon user input.
 
