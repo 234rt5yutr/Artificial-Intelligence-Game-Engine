@@ -92,6 +92,8 @@ add_library(EngineCore
     Core/Renderer/FrustumCulling.cpp
     Core/Renderer/TAASystem.h
     Core/Renderer/TAASystem.cpp
+    Core/Renderer/DynamicResolution.h
+    Core/Renderer/DynamicResolution.cpp
     Core/ECS/Scene.h
     Core/ECS/Scene.cpp
     Core/ECS/Entity.h

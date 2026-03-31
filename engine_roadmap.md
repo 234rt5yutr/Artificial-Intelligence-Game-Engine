@@ -100,7 +100,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [X]  Step 9.1: Implement GPU-driven Frustum Culling via Compute Shaders generating indirect draw commands.
 * [X]  Step 9.2: Implement Temporal Anti-Aliasing (TAA) pass.
-* [ ]  Step 9.3: Add Dynamic Resolution Scaling based on frame completion time metrics.
+* [X]  Step 9.3: Add Dynamic Resolution Scaling based on frame completion time metrics.
 * [ ]  Step 9.4: Optimize ECS cache lines and parallelize remaining Systems via the Job System.
 * [ ]  Step 9.5: Finalize asset cooking pipelines for production.
 

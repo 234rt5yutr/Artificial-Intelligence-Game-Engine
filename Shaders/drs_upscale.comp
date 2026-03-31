@@ -1,0 +1,183 @@
+#version 450
+
+// Dynamic Resolution Upscaling Compute Shader
+// Upscales lower-resolution render target to native resolution
+
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+// Input: Lower resolution rendered image
+layout (set = 0, binding = 0) uniform sampler2D inputColor;
+
+// Output: Native resolution image
+layout (set = 0, binding = 1, rgba16f) uniform writeonly image2D outputColor;
+
+// Upscale parameters
+layout (set = 0, binding = 2, std140) uniform UpscaleParams {
+    vec4 inputResolution;    // xy = render resolution, zw = 1/resolution
+    vec4 outputResolution;   // xy = native resolution, zw = 1/resolution
+    vec4 scaleFactors;       // xy = input/output scale, zw = output/input scale
+    uint upscaleMethod;      // 0=bilinear, 1=bicubic, 2=lanczos, 3=sharpen
+    float sharpness;         // Sharpening amount (0.0-1.0)
+    float padding0;
+    float padding1;
+};
+
+//=============================================================================
+// Upscaling Methods
+//=============================================================================
+
+// Bilinear (hardware-accelerated via sampler)
+vec3 UpscaleBilinear(vec2 uv) {
+    return texture(inputColor, uv).rgb;
+}
+
+// Catmull-Rom Bicubic
+vec3 UpscaleBicubic(vec2 uv) {
+    vec2 texSize = inputResolution.xy;
+    vec2 invTexSize = inputResolution.zw;
+    
+    vec2 position = uv * texSize;
+    vec2 center = floor(position - 0.5) + 0.5;
+    vec2 f = position - center;
+    vec2 f2 = f * f;
+    vec2 f3 = f2 * f;
+
+    // Catmull-Rom weights
+    vec2 w0 = f2 - 0.5 * (f3 + f);
+    vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+    vec2 w2 = -1.5 * f3 + 2.0 * f2 + 0.5 * f;
+    vec2 w3 = 0.5 * (f3 - f2);
+
+    vec2 w12 = w1 + w2;
+    vec2 tc0 = (center - 1.0) * invTexSize;
+    vec2 tc12 = (center + w2 / w12) * invTexSize;
+    vec2 tc3 = (center + 2.0) * invTexSize;
+
+    vec3 result = vec3(0.0);
+    
+    result += texture(inputColor, vec2(tc0.x, tc0.y)).rgb * w0.x * w0.y;
+    result += texture(inputColor, vec2(tc12.x, tc0.y)).rgb * w12.x * w0.y;
+    result += texture(inputColor, vec2(tc3.x, tc0.y)).rgb * w3.x * w0.y;
+
+    result += texture(inputColor, vec2(tc0.x, tc12.y)).rgb * w0.x * w12.y;
+    result += texture(inputColor, vec2(tc12.x, tc12.y)).rgb * w12.x * w12.y;
+    result += texture(inputColor, vec2(tc3.x, tc12.y)).rgb * w3.x * w12.y;
+
+    result += texture(inputColor, vec2(tc0.x, tc3.y)).rgb * w0.x * w3.y;
+    result += texture(inputColor, vec2(tc12.x, tc3.y)).rgb * w12.x * w3.y;
+    result += texture(inputColor, vec2(tc3.x, tc3.y)).rgb * w3.x * w3.y;
+
+    return result;
+}
+
+// Lanczos kernel
+float Lanczos2(float x) {
+    if (abs(x) < 0.0001) return 1.0;
+    if (abs(x) >= 2.0) return 0.0;
+    
+    const float PI = 3.14159265359;
+    float px = PI * x;
+    return (sin(px) * sin(px * 0.5)) / (px * px * 0.5);
+}
+
+vec3 UpscaleLanczos(vec2 uv) {
+    vec2 texSize = inputResolution.xy;
+    vec2 invTexSize = inputResolution.zw;
+    
+    vec2 position = uv * texSize;
+    vec2 center = floor(position);
+    vec2 f = position - center;
+    
+    vec3 result = vec3(0.0);
+    float totalWeight = 0.0;
+    
+    // 4x4 kernel (Lanczos2)
+    for (int y = -1; y <= 2; y++) {
+        for (int x = -1; x <= 2; x++) {
+            vec2 samplePos = center + vec2(float(x), float(y));
+            vec2 sampleUV = (samplePos + 0.5) * invTexSize;
+            
+            float wx = Lanczos2(f.x - float(x));
+            float wy = Lanczos2(f.y - float(y));
+            float weight = wx * wy;
+            
+            result += texture(inputColor, sampleUV).rgb * weight;
+            totalWeight += weight;
+        }
+    }
+    
+    return result / max(totalWeight, 0.0001);
+}
+
+// Edge-aware sharpening (CAS-like)
+vec3 Sharpen(vec3 center, vec2 uv, float amount) {
+    vec2 invTexSize = inputResolution.zw;
+    
+    // Sample neighbors
+    vec3 n = texture(inputColor, uv + vec2(0.0, -invTexSize.y)).rgb;
+    vec3 s = texture(inputColor, uv + vec2(0.0, invTexSize.y)).rgb;
+    vec3 e = texture(inputColor, uv + vec2(invTexSize.x, 0.0)).rgb;
+    vec3 w = texture(inputColor, uv + vec2(-invTexSize.x, 0.0)).rgb;
+    
+    // Compute local contrast
+    vec3 minNeighbor = min(min(n, s), min(e, w));
+    vec3 maxNeighbor = max(max(n, s), max(e, w));
+    
+    // Clamp to prevent ringing
+    vec3 blur = (n + s + e + w) * 0.25;
+    vec3 sharpened = center + (center - blur) * amount;
+    
+    // Soft clamp to neighbor range
+    return clamp(sharpened, minNeighbor * 0.8, maxNeighbor * 1.2);
+}
+
+//=============================================================================
+// Main
+//=============================================================================
+
+void main() {
+    ivec2 outputCoord = ivec2(gl_GlobalInvocationID.xy);
+    
+    // Bounds check
+    if (outputCoord.x >= int(outputResolution.x) || outputCoord.y >= int(outputResolution.y)) {
+        return;
+    }
+    
+    // Calculate UV in input texture
+    vec2 outputUV = (vec2(outputCoord) + 0.5) * outputResolution.zw;
+    vec2 inputUV = outputUV;  // 1:1 mapping in UV space (sampler handles scaling)
+    
+    vec3 color;
+    
+    // Select upscaling method
+    switch (upscaleMethod) {
+        case 0:  // Bilinear
+            color = UpscaleBilinear(inputUV);
+            break;
+        case 1:  // Bicubic
+            color = UpscaleBicubic(inputUV);
+            break;
+        case 2:  // Lanczos
+            color = UpscaleLanczos(inputUV);
+            break;
+        case 3:  // Sharpen (bilinear + sharpening)
+            color = UpscaleBilinear(inputUV);
+            color = Sharpen(color, inputUV, sharpness);
+            break;
+        default:
+            color = UpscaleBilinear(inputUV);
+            break;
+    }
+    
+    // Apply sharpening for non-sharpen methods if enabled
+    if (upscaleMethod != 3 && sharpness > 0.0) {
+        color = Sharpen(color, inputUV, sharpness * 0.5);  // Half strength for other methods
+    }
+    
+    // Write output
+    imageStore(outputColor, outputCoord, vec4(color, 1.0));
+}
