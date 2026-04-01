@@ -105,6 +105,7 @@ add_library(EngineCore
     Core/MCP/ActionValidator.h
     Core/MCP/AutoLevelDesigner.h
     Core/MCP/MCPAllTools.h
+    Core/MCP/MCPAudioTools.h
     Core/Scripting/LuaEngine.h
     Core/Audio/AudioSystem.h
     Core/Audio/AudioSystem.cpp
