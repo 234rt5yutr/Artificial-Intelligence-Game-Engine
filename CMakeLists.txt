@@ -151,12 +151,15 @@ add_library(EngineCore
     Core/ECS/Components/AudioSourceComponent.h
     Core/ECS/Components/ReverbZoneComponent.h
     Core/ECS/Components/SkeletalMeshComponent.h
+    Core/ECS/Components/AnimatorComponent.h
     Core/ECS/Components/NetworkTransformComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
     Core/ECS/Systems/SkeletalRenderSystem.h
     Core/ECS/Systems/SkeletalRenderSystem.cpp
+    Core/ECS/Systems/AnimatorSystem.h
+    Core/ECS/Systems/AnimatorSystem.cpp
     Core/ECS/Systems/LightSystem.h
     Core/ECS/Systems/LightSystem.cpp
     Core/ECS/Systems/TransformSystem.h

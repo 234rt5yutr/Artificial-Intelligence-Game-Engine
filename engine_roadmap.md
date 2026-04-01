@@ -129,7 +129,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [X]  Step 12.1: Expand the mesh loader (Phase 4) to parse bone weights, indices, and skeletal hierarchies from GLTF files.
 * [X]  Step 12.2: Implement GPU Skinning via Compute Shaders or Vertex Shader SSBOs to deform meshes based on bone matrices.
-* [ ]  Step 12.3: Implement an `AnimatorComponent` and a data-driven Animation State Machine (Idle, Walk, Run, Jump).
+* [X]  Step 12.3: Implement an `AnimatorComponent` and a data-driven Animation State Machine (Idle, Walk, Run, Jump).
 * [ ]  Step 12.4: Implement Animation Blending to smoothly cross-fade between different animation states.
 * [ ]  Step 12.5: Implement basic Inverse Kinematics (IK) for procedural foot placement, querying the physics world to align feet with uneven terrain.
 * [ ]  Step 12.6: **MCP Server Update:** Implement the `SetAnimationState` and `SetIKTarget` MCP tools, enabling AI agents to programmatically drive character animations, script cutscenes, and direct NPC gaze or limb placement.
