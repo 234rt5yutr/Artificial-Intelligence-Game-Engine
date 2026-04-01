@@ -16,3 +16,4 @@
 #include "Core/ECS/Components/CameraViewInterpolatorComponent.h"
 #include "Core/ECS/Components/NetworkTransformComponent.h"
 #include "Core/ECS/Components/AudioListenerComponent.h"
+#include "Core/ECS/Components/AudioSourceComponent.h"
