@@ -4,6 +4,7 @@
 
 #include "Core/ECS/Components/TransformComponent.h"
 #include "Core/ECS/Components/MeshComponent.h"
+#include "Core/ECS/Components/SkeletalMeshComponent.h"
 #include "Core/ECS/Components/LightComponent.h"
 #include "Core/ECS/Components/HierarchyComponent.h"
 #include "Core/ECS/Components/RigidBodyComponent.h"
