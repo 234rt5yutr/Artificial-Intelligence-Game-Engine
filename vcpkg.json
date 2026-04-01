@@ -16,6 +16,7 @@
     "gamenetworkingsockets",
     "cpp-httplib",
     "nlohmann-json",
-    "lua"
+    "lua",
+    "miniaudio"
   ]
 }
