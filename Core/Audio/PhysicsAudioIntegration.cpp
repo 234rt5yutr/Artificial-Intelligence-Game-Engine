@@ -130,7 +130,7 @@ namespace Audio {
     void PhysicsAudioManager::RegisterMaterial(const PhysicsMaterialAudioProperties& properties) {
         std::lock_guard<std::mutex> lock(m_MaterialsMutex);
         m_Materials[properties.Type] = properties;
-        ENGINE_CORE_DEBUG("Registered physics audio material: {}", properties.Name);
+        ENGINE_CORE_TRACE("Registered physics audio material: {}", properties.Name);
     }
 
     void PhysicsAudioManager::UnregisterMaterial(PhysicsMaterialType type) {

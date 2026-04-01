@@ -298,13 +298,13 @@ namespace Audio {
                 if (m_OnZoneEnter) {
                     m_OnZoneEnter(zone->Id, zone->Component.ZoneName);
                 }
-                ENGINE_CORE_DEBUG("Entered reverb zone: {} (ID: {})", zone->Component.ZoneName, zone->Id);
+                ENGINE_CORE_TRACE("Entered reverb zone: {} (ID: {})", zone->Component.ZoneName, zone->Id);
             } else if (!isInside && zone->WasInside) {
                 // Exited zone
                 if (m_OnZoneExit) {
                     m_OnZoneExit(zone->Id, zone->Component.ZoneName);
                 }
-                ENGINE_CORE_DEBUG("Exited reverb zone: {} (ID: {})", zone->Component.ZoneName, zone->Id);
+                ENGINE_CORE_TRACE("Exited reverb zone: {} (ID: {})", zone->Component.ZoneName, zone->Id);
             }
             zone->WasInside = isInside;
 
@@ -429,7 +429,7 @@ namespace Audio {
         uint32_t id = registeredZone->Id;
         m_Zones.push_back(std::move(registeredZone));
 
-        ENGINE_CORE_DEBUG("Registered reverb zone: {} (ID: {})", zone.ZoneName, id);
+        ENGINE_CORE_TRACE("Registered reverb zone: {} (ID: {})", zone.ZoneName, id);
         return id;
     }
 
@@ -440,7 +440,7 @@ namespace Audio {
                                [zoneId](const auto& z) { return z && z->Id == zoneId; });
 
         if (it != m_Zones.end()) {
-            ENGINE_CORE_DEBUG("Unregistered reverb zone: {} (ID: {})", (*it)->Component.ZoneName, zoneId);
+            ENGINE_CORE_TRACE("Unregistered reverb zone: {} (ID: {})", (*it)->Component.ZoneName, zoneId);
             m_Zones.erase(it);
         }
     }
