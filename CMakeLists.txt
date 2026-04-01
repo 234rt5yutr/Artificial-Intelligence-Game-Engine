@@ -108,6 +108,7 @@ add_library(EngineCore
     Core/Scripting/LuaEngine.h
     Core/Audio/AudioSystem.h
     Core/Audio/AudioSystem.cpp
+    Core/Audio/AudioListenerSystem.h
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
@@ -139,6 +140,7 @@ add_library(EngineCore
     Core/ECS/Components/FirstPersonCameraComponent.h
     Core/ECS/Components/ThirdPersonCameraComponent.h
     Core/ECS/Components/CameraViewInterpolatorComponent.h
+    Core/ECS/Components/AudioListenerComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
