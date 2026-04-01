@@ -29,3 +29,6 @@
 #include "Core/ECS/Components/FoliageComponent.h"
 #include "Core/ECS/Components/SkyboxComponent.h"
 #include "Core/ECS/Components/TimeOfDayComponent.h"
+
+// Phase 15: Post-Processing
+#include "Core/ECS/Components/PostProcessComponent.h"

@@ -22,3 +22,6 @@
 #include "Core/ECS/Systems/TerrainSystem.h"
 #include "Core/ECS/Systems/FoliageSystem.h"
 #include "Core/ECS/Systems/SkyboxSystem.h"
+
+// Phase 15: Post-Processing
+#include "Core/ECS/Systems/PostProcessSystem.h"

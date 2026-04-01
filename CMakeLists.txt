@@ -209,6 +209,15 @@ add_library(EngineCore
     Core/Renderer/Particles/ParticleRenderPass.h
     Core/Renderer/Particles/ParticleRenderPass.cpp
     Core/ECS/Components/ParticleEmitterComponent.h
+    # Phase 15: Post-Processing
+    Core/ECS/Components/PostProcessComponent.h
+    Core/ECS/Systems/PostProcessSystem.h
+    Core/ECS/Systems/PostProcessSystem.cpp
+    Core/Renderer/PostProcess/PostProcessPass.h
+    Core/Renderer/PostProcess/FramebufferChain.h
+    Core/Renderer/PostProcess/FramebufferChain.cpp
+    Core/Renderer/PostProcess/PostProcessManager.h
+    Core/Renderer/PostProcess/PostProcessManager.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json ${LUA_LIBRARIES})

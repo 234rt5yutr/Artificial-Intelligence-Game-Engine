@@ -151,12 +151,12 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 15: Post-Processing & Cinematic Polish (Weeks 34-36)
 
-* [ ]  Step 15.1: Implement a ping-pong framebuffer architecture to chain multiple sequential post-processing passes together.
-* [ ]  Step 15.2: Implement physically based Bloom (using a multi-tap downsample/upsample blur technique) to make emissive materials and lights glow realistically.
-* [ ]  Step 15.3: Add Screen Space Ambient Occlusion (SSAO) to ground your geometry with realistic contact shadows.
-* [ ]  Step 15.4: Implement Depth of Field (DoF) and Motion Blur, linking their parameters directly to the active `CameraComponent`.
-* [ ]  Step 15.5: Implement a Color Grading pass using 3D Lookup Tables (LUTs) and ACES Tonemapping for professional cinematic color correction.
-* [ ]  Step 15.6: **MCP Server Update:** Implement the `SetPostProcessProfile` and `BlendCameraEffects` MCP tools. Your AI can now act as a cinematographer, instantly shifting the mood of the game (e.g., "make the scene look gloomy, desaturated, and heavily blurred") based on narrative context.
+* [X]  Step 15.1: Implement a ping-pong framebuffer architecture to chain multiple sequential post-processing passes together.
+* [X]  Step 15.2: Implement physically based Bloom (using a multi-tap downsample/upsample blur technique) to make emissive materials and lights glow realistically.
+* [X]  Step 15.3: Add Screen Space Ambient Occlusion (SSAO) to ground your geometry with realistic contact shadows.
+* [X]  Step 15.4: Implement Depth of Field (DoF) and Motion Blur, linking their parameters directly to the active `CameraComponent`.
+* [X]  Step 15.5: Implement a Color Grading pass using 3D Lookup Tables (LUTs) and ACES Tonemapping for professional cinematic color correction.
+* [X]  Step 15.6: **MCP Server Update:** Implement the `SetPostProcessProfile` and `BlendCameraEffects` MCP tools. Your AI can now act as a cinematographer, instantly shifting the mood of the game (e.g., "make the scene look gloomy, desaturated, and heavily blurred") based on narrative context.
 
 ## Phase 16: In-Game UI Framework & State Management (Weeks 37-39)
 
