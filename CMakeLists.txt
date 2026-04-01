@@ -112,6 +112,7 @@ add_library(EngineCore
     Core/Audio/AudioSourceSystem.h
     Core/Audio/PhysicsAudioIntegration.h
     Core/Audio/PhysicsAudioIntegration.cpp
+    Core/Audio/ReverbZoneSystem.h
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
@@ -145,6 +146,7 @@ add_library(EngineCore
     Core/ECS/Components/CameraViewInterpolatorComponent.h
     Core/ECS/Components/AudioListenerComponent.h
     Core/ECS/Components/AudioSourceComponent.h
+    Core/ECS/Components/ReverbZoneComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
