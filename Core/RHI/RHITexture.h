@@ -7,6 +7,7 @@ namespace RHI {
 
     enum class TextureFormat {
         RGBA8_UNORM,
+        RGBA16_SFLOAT,      // HDR support for particles
         R32_FLOAT,
         D32_SFLOAT,
     };
@@ -15,6 +16,7 @@ namespace RHI {
         Sampled,
         Storage,
         RenderTarget,
+        ColorAttachment,    // Color render target
         DepthStencil
     };
 

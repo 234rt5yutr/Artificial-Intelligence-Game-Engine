@@ -201,6 +201,14 @@ add_library(EngineCore
     Core/Network/ClientPredictionSystem.cpp
     Core/Network/ServerReconciliationSystem.h
     Core/Network/ServerReconciliationSystem.cpp
+    Core/Renderer/Particles/TextureAtlas.h
+    Core/Renderer/Particles/ParticlePool.h
+    Core/Renderer/Particles/ParticlePool.cpp
+    Core/Renderer/Particles/ParticleSystem.h
+    Core/Renderer/Particles/ParticleSystem.cpp
+    Core/Renderer/Particles/ParticleRenderPass.h
+    Core/Renderer/Particles/ParticleRenderPass.cpp
+    Core/ECS/Components/ParticleEmitterComponent.h
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json ${LUA_LIBRARIES})

@@ -1,7 +1,7 @@
 #pragma once
 
 // MCP All Tools Factory
-// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools) into a single collection
+// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools) into a single collection
 // This file exists to avoid circular dependencies between MCPSceneTools.h and AutoLevelDesigner.h
 
 #include "MCPTool.h"
@@ -9,6 +9,7 @@
 #include "AutoLevelDesigner.h"
 #include "MCPAudioTools.h"
 #include "MCPAnimationTools.h"
+#include "MCPParticleTools.h"
 
 namespace Core {
 namespace MCP {
@@ -33,6 +34,9 @@ namespace MCP {
     // - SetAnimationState: Control animation state machines
     // - SetIKTarget: Set inverse kinematics targets
     // - GetAnimationInfo: Query animation states and bone transforms
+    // - SpawnParticleEffect: Spawn particle emitters at locations
+    // - ModifyEmitter: Modify existing particle emitter parameters
+    // - GetParticleInfo: Query particle emitter state and information
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -51,6 +55,10 @@ namespace MCP {
         // Add animation tools (SetAnimationState, SetIKTarget, GetAnimationInfo)
         auto animationTools = CreateAnimationTools();
         tools.insert(tools.end(), animationTools.begin(), animationTools.end());
+
+        // Add particle tools (SpawnParticleEffect, ModifyEmitter, GetParticleInfo)
+        auto particleTools = CreateParticleTools();
+        tools.insert(tools.end(), particleTools.begin(), particleTools.end());
 
         return tools;
     }

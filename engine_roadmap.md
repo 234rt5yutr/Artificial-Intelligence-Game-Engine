@@ -143,11 +143,11 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 14: Particle Systems & Visual Effects (Weeks 31-33)
 
-* [ ]  Step 14.1: Implement a GPU-driven compute particle system to handle millions of particles without bottlenecking the CPU.
-* [ ]  Step 14.2: Create a `ParticleEmitterComponent` with adjustable parameters (emission rate, lifetime, velocity, color over time, size over time).
-* [ ]  Step 14.3: Implement specialized render passes for particle sorting and blending (Additive for fire/magic, Alpha Blend for smoke/dust).
-* [ ]  Step 14.4: Add support for texture atlases (sprite sheets) within the particle renderer to support animated VFX.
-* [ ]  Step 14.5: **MCP Server Update:** Implement the `SpawnParticleEffect` and `ModifyEmitter` MCP tools. This allows your AI agents to trigger explosions, spawn magic auras, or dynamically alter weather effects (like rain or snow) via text commands.
+* [X]  Step 14.1: Implement a GPU-driven compute particle system to handle millions of particles without bottlenecking the CPU.
+* [X]  Step 14.2: Create a `ParticleEmitterComponent` with adjustable parameters (emission rate, lifetime, velocity, color over time, size over time).
+* [X]  Step 14.3: Implement specialized render passes for particle sorting and blending (Additive for fire/magic, Alpha Blend for smoke/dust).
+* [X]  Step 14.4: Add support for texture atlases (sprite sheets) within the particle renderer to support animated VFX.
+* [X]  Step 14.5: **MCP Server Update:** Implement the `SpawnParticleEffect` and `ModifyEmitter` MCP tools. This allows your AI agents to trigger explosions, spawn magic auras, or dynamically alter weather effects (like rain or snow) via text commands.
 
 ## Phase 15: Post-Processing & Cinematic Polish (Weeks 34-36)
 

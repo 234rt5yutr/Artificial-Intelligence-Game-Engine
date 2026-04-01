@@ -1,0 +1,342 @@
+#version 450
+
+/**
+ * @file particle_emit.comp
+ * @brief GPU particle emission compute shader
+ * 
+ * Spawns new particles based on emitter configurations.
+ * Uses atomic operations to allocate particles from the dead list.
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+#define PI 3.14159265359
+#define TWO_PI 6.28318530718
+#define MAX_EMITTERS 64
+
+// Particle flags
+#define PARTICLE_FLAG_ACTIVE    (1u << 0)
+#define PARTICLE_FLAG_NEEDS_SORT (1u << 1)
+#define PARTICLE_FLAG_BILLBOARD (1u << 2)
+
+// Emitter shapes
+#define SHAPE_POINT     0
+#define SHAPE_SPHERE    1
+#define SHAPE_HEMISPHERE 2
+#define SHAPE_CONE      3
+#define SHAPE_BOX       4
+#define SHAPE_CIRCLE    5
+#define SHAPE_EDGE      6
+
+//=============================================================================
+// Structures (must match C++ definitions)
+//=============================================================================
+
+struct Particle {
+    vec3 position;      // World position
+    float lifetime;     // Total lifetime in seconds
+    vec3 velocity;      // Velocity in units/second
+    float age;          // Current age in seconds
+    vec4 color;         // RGBA color
+    vec2 size;          // Width, Height
+    float rotation;     // Rotation angle in radians
+    uint flags;         // Active, emitter ID, etc.
+};
+
+struct EmitterParams {
+    vec3 position;
+    float spawnRate;
+    
+    vec3 direction;
+    float directionSpread;
+    
+    vec2 velocityMinMax;
+    vec2 lifetimeMinMax;
+    
+    vec2 sizeMin;
+    vec2 sizeMax;
+    
+    vec4 colorStart;
+    vec4 colorEnd;
+    
+    vec3 shapeScale;
+    float shapeRadius;
+    
+    float rotationMin;
+    float rotationMax;
+    float rotationSpeedMin;
+    float rotationSpeedMax;
+    
+    uint shape;
+    uint emitterId;
+    uint flags;
+    uint maxParticles;
+    
+    vec3 gravity;
+    float drag;
+    
+    float deltaTime;
+    float time;
+    float emitAccumulator;  // Number of particles to emit this frame
+    uint padding0;
+    
+    vec4 reserved;          // Reserved for future use
+};
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+// Emitter parameters
+layout (set = 0, binding = 0, std430) readonly buffer EmitterBuffer {
+    EmitterParams emitters[MAX_EMITTERS];
+};
+
+// Particle data (write destination)
+layout (set = 0, binding = 1, std430) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+// Dead list (indices of free particle slots)
+layout (set = 0, binding = 2, std430) buffer DeadListBuffer {
+    uint deadList[];
+};
+
+// Alive list (indices of active particles)
+layout (set = 0, binding = 3, std430) buffer AliveListBuffer {
+    uint aliveList[];
+};
+
+// Counters: [aliveCount, deadCount, emitCount, sortCount]
+layout (set = 0, binding = 4, std430) buffer CounterBuffer {
+    uint aliveCount;
+    uint deadCount;
+    uint emitCount;
+    uint sortCount;
+};
+
+// Push constants for frame data
+layout (push_constant) uniform PushConstants {
+    uint activeEmitterCount;
+    uint maxParticles;
+    float time;
+    float deltaTime;
+} pc;
+
+//=============================================================================
+// Random Number Generation (PCG)
+//=============================================================================
+
+uint pcg_hash(uint input) {
+    uint state = input * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+float rand(inout uint seed) {
+    seed = pcg_hash(seed);
+    return float(seed) / float(0xFFFFFFFFu);
+}
+
+vec2 rand2(inout uint seed) {
+    return vec2(rand(seed), rand(seed));
+}
+
+vec3 rand3(inout uint seed) {
+    return vec3(rand(seed), rand(seed), rand(seed));
+}
+
+//=============================================================================
+// Emission Shape Functions
+//=============================================================================
+
+// Generate random point on unit sphere surface
+vec3 randomOnSphere(inout uint seed) {
+    float theta = rand(seed) * TWO_PI;
+    float phi = acos(2.0 * rand(seed) - 1.0);
+    float sinPhi = sin(phi);
+    return vec3(sinPhi * cos(theta), sinPhi * sin(theta), cos(phi));
+}
+
+// Generate random point in unit sphere volume
+vec3 randomInSphere(inout uint seed) {
+    return randomOnSphere(seed) * pow(rand(seed), 1.0 / 3.0);
+}
+
+// Generate random point on hemisphere (Y+)
+vec3 randomOnHemisphere(inout uint seed) {
+    vec3 p = randomOnSphere(seed);
+    p.y = abs(p.y);
+    return p;
+}
+
+// Generate random direction in cone
+vec3 randomInCone(vec3 direction, float angle, inout uint seed) {
+    // Generate random point in unit disk
+    float r = sqrt(rand(seed)) * tan(angle);
+    float theta = rand(seed) * TWO_PI;
+    
+    // Create tangent basis
+    vec3 up = abs(direction.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, direction));
+    vec3 bitangent = cross(direction, tangent);
+    
+    // Generate direction in cone
+    vec3 result = direction + tangent * (r * cos(theta)) + bitangent * (r * sin(theta));
+    return normalize(result);
+}
+
+// Generate spawn position based on emitter shape
+vec3 getSpawnPosition(EmitterParams emitter, inout uint seed) {
+    vec3 offset = vec3(0.0);
+    
+    switch (emitter.shape) {
+        case SHAPE_POINT:
+            // Point: no offset
+            break;
+            
+        case SHAPE_SPHERE:
+            // Sphere: random point inside sphere
+            offset = randomInSphere(seed) * emitter.shapeRadius * emitter.shapeScale;
+            break;
+            
+        case SHAPE_HEMISPHERE:
+            // Hemisphere: random point in upper hemisphere
+            offset = randomOnHemisphere(seed) * emitter.shapeRadius * emitter.shapeScale;
+            break;
+            
+        case SHAPE_CONE:
+            // Cone: random point on cone surface
+            {
+                float t = rand(seed);
+                float radius = t * emitter.shapeRadius;
+                float angle = rand(seed) * TWO_PI;
+                offset = vec3(radius * cos(angle), t * emitter.shapeScale.y, radius * sin(angle));
+            }
+            break;
+            
+        case SHAPE_BOX:
+            // Box: random point in box
+            offset = (rand3(seed) - 0.5) * emitter.shapeScale;
+            break;
+            
+        case SHAPE_CIRCLE:
+            // Circle: random point on circle (XZ plane)
+            {
+                float angle = rand(seed) * TWO_PI;
+                float r = sqrt(rand(seed)) * emitter.shapeRadius;
+                offset = vec3(r * cos(angle), 0.0, r * sin(angle)) * emitter.shapeScale;
+            }
+            break;
+            
+        case SHAPE_EDGE:
+            // Edge: random point on line
+            offset = vec3(rand(seed) - 0.5, 0.0, 0.0) * emitter.shapeScale;
+            break;
+    }
+    
+    return emitter.position + offset;
+}
+
+// Generate spawn velocity based on emitter configuration
+vec3 getSpawnVelocity(EmitterParams emitter, inout uint seed) {
+    vec3 dir;
+    
+    if (emitter.directionSpread > 0.001) {
+        // Random direction within cone
+        dir = randomInCone(emitter.direction, emitter.directionSpread, seed);
+    } else {
+        // Exact direction
+        dir = emitter.direction;
+    }
+    
+    // Random speed between min and max
+    float speed = mix(emitter.velocityMinMax.x, emitter.velocityMinMax.y, rand(seed));
+    
+    return dir * speed;
+}
+
+//=============================================================================
+// Main Emission Shader
+//=============================================================================
+
+void main() {
+    uint globalId = gl_GlobalInvocationID.x;
+    
+    // Early exit if nothing to emit
+    if (pc.activeEmitterCount == 0) {
+        return;
+    }
+    
+    // Calculate which emitter and which particle within that emitter
+    uint emitterIndex = 0;
+    uint particleInEmitter = globalId;
+    uint cumulativeCount = 0;
+    
+    for (uint i = 0; i < pc.activeEmitterCount; ++i) {
+        uint emitCount = uint(emitters[i].emitAccumulator);
+        if (particleInEmitter < emitCount) {
+            emitterIndex = i;
+            break;
+        }
+        particleInEmitter -= emitCount;
+        cumulativeCount += emitCount;
+    }
+    
+    EmitterParams emitter = emitters[emitterIndex];
+    uint toEmit = uint(emitter.emitAccumulator);
+    
+    // Check if this invocation should emit
+    if (particleInEmitter >= toEmit) {
+        return;
+    }
+    
+    // Try to allocate a particle from the dead list
+    uint deadIdx = atomicAdd(deadCount, -1);
+    if (deadIdx == 0 || deadIdx > pc.maxParticles) {
+        // No free particles, restore counter
+        atomicAdd(deadCount, 1);
+        return;
+    }
+    
+    // Get particle index from dead list
+    uint particleIndex = deadList[deadIdx - 1];
+    
+    // Initialize random seed
+    uint seed = pcg_hash(globalId ^ uint(pc.time * 1000.0) ^ (emitter.emitterId << 16));
+    
+    // Initialize particle
+    Particle p;
+    
+    // Position and velocity
+    p.position = getSpawnPosition(emitter, seed);
+    p.velocity = getSpawnVelocity(emitter, seed);
+    
+    // Lifetime
+    p.lifetime = mix(emitter.lifetimeMinMax.x, emitter.lifetimeMinMax.y, rand(seed));
+    p.age = 0.0;
+    
+    // Color (start color, will interpolate to end during update)
+    p.color = emitter.colorStart;
+    
+    // Size
+    p.size = mix(emitter.sizeMin, emitter.sizeMax, rand2(seed));
+    
+    // Rotation
+    p.rotation = mix(emitter.rotationMin, emitter.rotationMax, rand(seed));
+    
+    // Flags: mark as active, store emitter ID in upper bits
+    p.flags = PARTICLE_FLAG_ACTIVE | PARTICLE_FLAG_BILLBOARD | 
+              ((emitter.emitterId & 0xFFFFu) << 16);
+    
+    // Write particle to buffer
+    particles[particleIndex] = p;
+    
+    // Add to alive list
+    uint aliveIdx = atomicAdd(aliveCount, 1);
+    aliveList[aliveIdx] = particleIndex;
+}

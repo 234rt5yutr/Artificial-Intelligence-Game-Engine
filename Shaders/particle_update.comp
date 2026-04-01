@@ -1,0 +1,299 @@
+#version 450
+
+/**
+ * @file particle_update.comp
+ * @brief GPU particle simulation update compute shader
+ * 
+ * Updates particle positions, velocities, lifetimes, and handles death.
+ * Also computes depth for sorting and generates indirect draw commands.
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+#define PARTICLE_FLAG_ACTIVE    (1u << 0)
+#define PARTICLE_FLAG_NEEDS_SORT (1u << 1)
+#define PARTICLE_FLAG_BILLBOARD (1u << 2)
+#define PARTICLE_FLAG_STRETCHED (1u << 3)
+#define PARTICLE_FLAG_COLLISION (1u << 6)
+
+//=============================================================================
+// Structures (must match C++ definitions)
+//=============================================================================
+
+struct Particle {
+    vec3 position;      // World position
+    float lifetime;     // Total lifetime in seconds
+    vec3 velocity;      // Velocity in units/second
+    float age;          // Current age in seconds
+    vec4 color;         // RGBA color
+    vec2 size;          // Width, Height
+    float rotation;     // Rotation angle in radians
+    uint flags;         // Active, emitter ID, etc.
+};
+
+struct UpdateParams {
+    mat4 viewProjection;
+    
+    vec3 cameraPosition;
+    float deltaTime;
+    
+    vec3 gravity;
+    float drag;
+    
+    vec3 windDirection;
+    float windStrength;
+    
+    uint maxParticles;
+    uint enableCollision;
+    uint enableSorting;
+    uint padding0;
+    
+    vec4 collisionPlane;    // xyz = normal, w = distance
+};
+
+// VkDrawIndirectCommand
+struct DrawIndirectCommand {
+    uint vertexCount;
+    uint instanceCount;
+    uint firstVertex;
+    uint firstInstance;
+};
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+// Update parameters
+layout (set = 0, binding = 0, std140) uniform UpdateParamsBuffer {
+    UpdateParams params;
+};
+
+// Particle data (read-write)
+layout (set = 0, binding = 1, std430) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+// Previous frame alive list (read)
+layout (set = 0, binding = 2, std430) readonly buffer AliveListPrevBuffer {
+    uint aliveListPrev[];
+};
+
+// Current frame alive list (write)
+layout (set = 0, binding = 3, std430) buffer AliveListBuffer {
+    uint aliveList[];
+};
+
+// Dead list (write dead particles back)
+layout (set = 0, binding = 4, std430) buffer DeadListBuffer {
+    uint deadList[];
+};
+
+// Counters: [aliveCount, deadCount, aliveCountPrev, sortCount]
+layout (set = 0, binding = 5, std430) buffer CounterBuffer {
+    uint aliveCount;
+    uint deadCount;
+    uint aliveCountPrev;    // Count from previous frame
+    uint sortCount;
+};
+
+// Sort keys (depth values for sorting)
+layout (set = 0, binding = 6, std430) buffer SortKeyBuffer {
+    float sortKeys[];
+};
+
+// Sorted indices
+layout (set = 0, binding = 7, std430) buffer SortedIndexBuffer {
+    uint sortedIndices[];
+};
+
+// Indirect draw command
+layout (set = 0, binding = 8, std430) buffer DrawIndirectBuffer {
+    DrawIndirectCommand drawCmd;
+};
+
+//=============================================================================
+// Emitter Color Data (for interpolation)
+//=============================================================================
+
+// Per-emitter color data (could be in separate buffer)
+layout (set = 0, binding = 9, std430) readonly buffer EmitterColorBuffer {
+    vec4 emitterColorStart[];   // Start colors indexed by emitter ID
+    vec4 emitterColorEnd[];     // End colors indexed by emitter ID
+};
+
+//=============================================================================
+// Push Constants
+//=============================================================================
+
+layout (push_constant) uniform PushConstants {
+    uint maxParticles;
+    float time;
+    float deltaTime;
+    uint padding;
+} pc;
+
+//=============================================================================
+// Physics Functions
+//=============================================================================
+
+// Apply drag force
+vec3 applyDrag(vec3 velocity, float drag, float dt) {
+    return velocity * pow(1.0 - drag, dt);
+}
+
+// Simple collision response against a plane
+vec3 collideWithPlane(vec3 position, vec3 velocity, vec4 plane, float bounciness) {
+    float dist = dot(plane.xyz, position) + plane.w;
+    
+    if (dist < 0.0) {
+        // Below plane, reflect velocity
+        float vn = dot(velocity, plane.xyz);
+        if (vn < 0.0) {
+            return velocity - (1.0 + bounciness) * vn * plane.xyz;
+        }
+    }
+    
+    return velocity;
+}
+
+// Constrain position to be above plane
+vec3 constrainToPlane(vec3 position, vec4 plane) {
+    float dist = dot(plane.xyz, position) + plane.w;
+    if (dist < 0.0) {
+        return position - dist * plane.xyz;
+    }
+    return position;
+}
+
+//=============================================================================
+// Color Interpolation
+//=============================================================================
+
+vec4 lerpColor(vec4 start, vec4 end, float t) {
+    // Smooth step for nicer transitions
+    t = t * t * (3.0 - 2.0 * t);
+    return mix(start, end, t);
+}
+
+//=============================================================================
+// Main Update Shader
+//=============================================================================
+
+void main() {
+    uint globalId = gl_GlobalInvocationID.x;
+    
+    // Process particles from previous frame's alive list
+    if (globalId >= aliveCountPrev) {
+        return;
+    }
+    
+    // Get particle index from previous alive list
+    uint particleIndex = aliveListPrev[globalId];
+    
+    // Bounds check
+    if (particleIndex >= params.maxParticles) {
+        return;
+    }
+    
+    // Read particle
+    Particle p = particles[particleIndex];
+    
+    // Skip if not active
+    if ((p.flags & PARTICLE_FLAG_ACTIVE) == 0u) {
+        return;
+    }
+    
+    // Update age
+    p.age += params.deltaTime;
+    
+    // Check if particle should die
+    if (p.age >= p.lifetime) {
+        // Mark as dead
+        p.flags &= ~PARTICLE_FLAG_ACTIVE;
+        particles[particleIndex] = p;
+        
+        // Add to dead list
+        uint deadIdx = atomicAdd(deadCount, 1);
+        deadList[deadIdx] = particleIndex;
+        
+        return;
+    }
+    
+    // Calculate life ratio for color/size interpolation
+    float lifeRatio = p.age / p.lifetime;
+    
+    // Apply forces
+    vec3 acceleration = params.gravity;
+    
+    // Wind force
+    if (params.windStrength > 0.0) {
+        acceleration += params.windDirection * params.windStrength;
+    }
+    
+    // Integrate velocity
+    p.velocity += acceleration * params.deltaTime;
+    
+    // Apply drag
+    if (params.drag > 0.0) {
+        p.velocity = applyDrag(p.velocity, params.drag, params.deltaTime);
+    }
+    
+    // Collision detection and response
+    if (params.enableCollision != 0u && (p.flags & PARTICLE_FLAG_COLLISION) != 0u) {
+        p.velocity = collideWithPlane(p.position, p.velocity, params.collisionPlane, 0.3);
+        p.position = constrainToPlane(p.position, params.collisionPlane);
+    }
+    
+    // Integrate position
+    p.position += p.velocity * params.deltaTime;
+    
+    // Interpolate color based on life ratio
+    // Extract emitter ID from flags
+    uint emitterId = (p.flags >> 16) & 0xFFFFu;
+    
+    // Fade out alpha over lifetime (simple approach)
+    p.color.a = 1.0 - lifeRatio;
+    
+    // Optional: interpolate full color
+    // p.color = lerpColor(emitterColorStart[emitterId], emitterColorEnd[emitterId], lifeRatio);
+    
+    // Write updated particle
+    particles[particleIndex] = p;
+    
+    // Add to current frame's alive list
+    uint aliveIdx = atomicAdd(aliveCount, 1);
+    aliveList[aliveIdx] = particleIndex;
+    
+    // Compute sort key (view-space depth for back-to-front sorting)
+    if (params.enableSorting != 0u) {
+        vec4 clipPos = params.viewProjection * vec4(p.position, 1.0);
+        float depth = clipPos.z / clipPos.w;
+        
+        // Store sort key and index
+        sortKeys[aliveIdx] = depth;
+        sortedIndices[aliveIdx] = particleIndex;
+    }
+    
+    // Update draw indirect command (done by first thread only after barrier)
+    // Note: This is typically done in a separate finalize pass
+}
+
+//=============================================================================
+// Finalize Pass (optional second dispatch or shader)
+//=============================================================================
+
+// This could be a separate shader that runs after all particles are processed
+// to finalize the indirect draw command:
+//
+// void finalizeDrawCommand() {
+//     if (gl_GlobalInvocationID.x == 0) {
+//         drawCmd.vertexCount = 4;  // Quad
+//         drawCmd.instanceCount = aliveCount;
+//         drawCmd.firstVertex = 0;
+//         drawCmd.firstInstance = 0;
+//     }
+// }

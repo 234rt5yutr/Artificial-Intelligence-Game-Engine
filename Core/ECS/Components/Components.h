@@ -22,3 +22,4 @@
 #include "Core/ECS/Components/ReverbZoneComponent.h"
 #include "Core/ECS/Components/AnimatorComponent.h"
 #include "Core/ECS/Components/IKComponent.h"
+#include "Core/ECS/Components/ParticleEmitterComponent.h"

@@ -1,0 +1,377 @@
+#version 450
+
+/**
+ * @file particle_sort.comp
+ * @brief GPU particle sorting compute shader using Bitonic Sort
+ * 
+ * Sorts particles by view-space depth for correct alpha blending (back-to-front).
+ * Implements parallel bitonic merge sort for efficient GPU sorting.
+ * 
+ * The shader operates in two modes:
+ * 1. Local sort: For small particle counts that fit in shared memory
+ * 2. Global sort: For larger counts using multiple dispatch passes
+ */
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+#define SORT_ASCENDING 0
+#define SORT_DESCENDING 1
+
+// For back-to-front rendering, we sort in descending order (far to near)
+// This ensures particles furthest from camera are rendered first
+#define SORT_ORDER SORT_DESCENDING
+
+#define SHARED_MEMORY_SIZE 512  // 256 threads * 2 elements each
+
+//=============================================================================
+// Structures
+//=============================================================================
+
+struct Particle {
+    vec3 position;
+    float lifetime;
+    vec3 velocity;
+    float age;
+    vec4 color;
+    vec2 size;
+    float rotation;
+    uint flags;
+};
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+// Sort keys (view-space depth values)
+layout (set = 0, binding = 0, std430) buffer SortKeyBuffer {
+    float sortKeys[];
+};
+
+// Sorted indices (particle indices, reordered by sort)
+layout (set = 0, binding = 1, std430) buffer SortedIndexBuffer {
+    uint sortedIndices[];
+};
+
+// Counter buffer to get alive count
+layout (set = 0, binding = 2, std430) readonly buffer CounterBuffer {
+    uint aliveCount;
+    uint deadCount;
+    uint reserved0;
+    uint reserved1;
+};
+
+// Particle data for depth calculation (optional - used in depth key generation pass)
+layout (set = 0, binding = 3, std430) readonly buffer ParticleBuffer {
+    Particle particles[];
+};
+
+// Alive list (particle indices)
+layout (set = 0, binding = 4, std430) readonly buffer AliveListBuffer {
+    uint aliveList[];
+};
+
+//=============================================================================
+// Push Constants
+//=============================================================================
+
+layout (push_constant) uniform PushConstants {
+    uint stageIndex;        // Current stage (0 to log2(n))
+    uint passIndex;         // Current pass within stage
+    uint sortDirection;     // 0 = ascending, 1 = descending
+    uint maxElements;       // Number of elements to sort
+    
+    // Camera data for view-space depth calculation
+    mat4 viewMatrix;        // Camera view matrix (16 floats = 64 bytes)
+    
+    uint generateKeys;      // 1 = generate depth keys, 0 = sort only
+    uint padding0;
+    uint padding1;
+    uint padding2;
+} pc;
+
+//=============================================================================
+// Shared Memory for Local Sorting
+//=============================================================================
+
+shared float sharedKeys[SHARED_MEMORY_SIZE];
+shared uint sharedIndices[SHARED_MEMORY_SIZE];
+
+//=============================================================================
+// View-Space Depth Calculation
+//=============================================================================
+
+/**
+ * @brief Calculate view-space depth for a particle
+ * 
+ * View-space depth is the Z coordinate after transforming by the view matrix.
+ * More negative values are further from the camera (assuming -Z is forward).
+ * We negate to get positive values where larger = further.
+ * 
+ * @param worldPos Particle world position
+ * @return View-space depth (positive, larger = further from camera)
+ */
+float calculateViewSpaceDepth(vec3 worldPos) {
+    // Transform to view space
+    vec4 viewPos = pc.viewMatrix * vec4(worldPos, 1.0);
+    // Return negated Z (camera looks down -Z, so negate to get distance)
+    return -viewPos.z;
+}
+
+//=============================================================================
+// Depth Key Generation
+//=============================================================================
+
+/**
+ * @brief Generate sort keys from particle positions
+ * 
+ * This pass calculates view-space depth for each alive particle
+ * and stores it as the sort key. Also initializes the sorted indices.
+ */
+void generateDepthKeys() {
+    uint globalId = gl_GlobalInvocationID.x;
+    
+    if (globalId >= aliveCount || globalId >= pc.maxElements) {
+        return;
+    }
+    
+    // Get particle index from alive list
+    uint particleIdx = aliveList[globalId];
+    
+    // Calculate view-space depth
+    vec3 worldPos = particles[particleIdx].position;
+    float depth = calculateViewSpaceDepth(worldPos);
+    
+    // Store depth as sort key
+    sortKeys[globalId] = depth;
+    
+    // Initialize sorted index to point to the particle
+    sortedIndices[globalId] = particleIdx;
+}
+
+//=============================================================================
+// Comparison Functions
+//=============================================================================
+
+/**
+ * @brief Compare and swap for bitonic sort (global memory)
+ */
+void compareAndSwap(uint i, uint j, bool ascending) {
+    float keyI = sortKeys[i];
+    float keyJ = sortKeys[j];
+    uint idxI = sortedIndices[i];
+    uint idxJ = sortedIndices[j];
+    
+    bool shouldSwap;
+    if (ascending) {
+        shouldSwap = (keyI > keyJ);
+    } else {
+        shouldSwap = (keyI < keyJ);
+    }
+    
+    if (shouldSwap) {
+        sortKeys[i] = keyJ;
+        sortKeys[j] = keyI;
+        sortedIndices[i] = idxJ;
+        sortedIndices[j] = idxI;
+    }
+}
+
+/**
+ * @brief Local compare and swap using shared memory
+ */
+void localCompareAndSwap(uint i, uint j, bool ascending) {
+    float keyI = sharedKeys[i];
+    float keyJ = sharedKeys[j];
+    uint idxI = sharedIndices[i];
+    uint idxJ = sharedIndices[j];
+    
+    bool shouldSwap;
+    if (ascending) {
+        shouldSwap = (keyI > keyJ);
+    } else {
+        shouldSwap = (keyI < keyJ);
+    }
+    
+    if (shouldSwap) {
+        sharedKeys[i] = keyJ;
+        sharedKeys[j] = keyI;
+        sharedIndices[i] = idxJ;
+        sharedIndices[j] = idxI;
+    }
+}
+
+//=============================================================================
+// Bitonic Sort Implementation
+//=============================================================================
+
+/**
+ * @brief Bitonic sort step (global memory)
+ * 
+ * In bitonic sort:
+ * - We build bitonic sequences of increasing size
+ * - A bitonic sequence is one that monotonically increases then decreases (or vice versa)
+ * - We then merge these sequences into sorted sequences
+ */
+void bitonicSortStep() {
+    uint globalId = gl_GlobalInvocationID.x;
+    uint n = min(aliveCount, pc.maxElements);
+    
+    if (globalId >= n / 2) {
+        return;
+    }
+    
+    uint stage = pc.stageIndex;
+    uint pass = pc.passIndex;
+    
+    // Calculate the size of the current group
+    uint groupSize = 1u << (stage + 1);
+    uint halfGroupSize = groupSize >> 1;
+    
+    // Calculate indices for this comparison
+    uint groupId = globalId / halfGroupSize;
+    uint localId = globalId % halfGroupSize;
+    
+    // Distance between elements to compare decreases each pass
+    uint distance = halfGroupSize >> pass;
+    
+    uint i = groupId * groupSize + localId;
+    uint j = i + distance;
+    
+    // Bounds check
+    if (j >= n) {
+        return;
+    }
+    
+    // Determine sort direction for this group
+    // In bitonic sort, adjacent groups sort in opposite directions
+    bool ascending = ((groupId >> (stage - pass)) & 1u) == 0u;
+    
+    // Apply global sort direction
+    if (pc.sortDirection == SORT_DESCENDING) {
+        ascending = !ascending;
+    }
+    
+    compareAndSwap(i, j, ascending);
+}
+
+//=============================================================================
+// Local Bitonic Sort (Single Workgroup)
+//=============================================================================
+
+/**
+ * @brief Performs complete bitonic sort within a single workgroup
+ * Efficient for small arrays that fit in shared memory
+ */
+void localBitonicSort() {
+    uint localId = gl_LocalInvocationID.x;
+    uint globalId = gl_GlobalInvocationID.x;
+    uint n = min(aliveCount, pc.maxElements);
+    uint workgroupSize = gl_WorkGroupSize.x;
+    
+    // Load data into shared memory (2 elements per thread)
+    uint idx0 = globalId * 2;
+    uint idx1 = globalId * 2 + 1;
+    
+    if (idx0 < n) {
+        sharedKeys[localId * 2] = sortKeys[idx0];
+        sharedIndices[localId * 2] = sortedIndices[idx0];
+    } else {
+        // Use infinity for padding (will sort to end for ascending, beginning for descending)
+        sharedKeys[localId * 2] = (pc.sortDirection == SORT_DESCENDING) ? -1e30 : 1e30;
+        sharedIndices[localId * 2] = 0xFFFFFFFFu;
+    }
+    
+    if (idx1 < n) {
+        sharedKeys[localId * 2 + 1] = sortKeys[idx1];
+        sharedIndices[localId * 2 + 1] = sortedIndices[idx1];
+    } else {
+        sharedKeys[localId * 2 + 1] = (pc.sortDirection == SORT_DESCENDING) ? -1e30 : 1e30;
+        sharedIndices[localId * 2 + 1] = 0xFFFFFFFFu;
+    }
+    
+    barrier();
+    memoryBarrierShared();
+    
+    uint localN = workgroupSize * 2;
+    
+    // Calculate number of stages needed
+    uint numStages = 0;
+    for (uint temp = localN; temp > 1; temp >>= 1) {
+        numStages++;
+    }
+    
+    // Perform local bitonic sort
+    for (uint stage = 0; stage < numStages; ++stage) {
+        uint groupSize = 1u << (stage + 1);
+        
+        for (uint pass = 0; pass <= stage; ++pass) {
+            uint halfGroupSize = groupSize >> 1;
+            uint distance = halfGroupSize >> pass;
+            
+            // Each thread handles one comparison
+            uint pairId = localId;
+            
+            if (distance > 0) {
+                // Calculate which pair of elements this thread compares
+                uint groupId = pairId / halfGroupSize;
+                uint localOffset = pairId % halfGroupSize;
+                
+                uint idx_i = groupId * groupSize + localOffset;
+                uint idx_j = idx_i + distance;
+                
+                if (idx_j < localN) {
+                    // Determine sort direction for this group
+                    bool ascending = ((groupId >> (stage - pass)) & 1u) == 0u;
+                    if (pc.sortDirection == SORT_DESCENDING) {
+                        ascending = !ascending;
+                    }
+                    localCompareAndSwap(idx_i, idx_j, ascending);
+                }
+            }
+            
+            barrier();
+            memoryBarrierShared();
+        }
+    }
+    
+    // Write back to global memory
+    if (idx0 < n) {
+        sortKeys[idx0] = sharedKeys[localId * 2];
+        sortedIndices[idx0] = sharedIndices[localId * 2];
+    }
+    
+    if (idx1 < n) {
+        sortKeys[idx1] = sharedKeys[localId * 2 + 1];
+        sortedIndices[idx1] = sharedIndices[localId * 2 + 1];
+    }
+}
+
+//=============================================================================
+// Main
+//=============================================================================
+
+void main() {
+    // Check if we're generating depth keys
+    if (pc.generateKeys != 0) {
+        generateDepthKeys();
+        return;
+    }
+    
+    uint n = min(aliveCount, pc.maxElements);
+    
+    if (n <= 1) {
+        return;
+    }
+    
+    // Use local sort for small counts, global sort for large
+    // Local sort is faster but limited to shared memory size
+    if (n <= gl_WorkGroupSize.x * 2) {
+        localBitonicSort();
+    } else {
+        bitonicSortStep();
+    }
+}
