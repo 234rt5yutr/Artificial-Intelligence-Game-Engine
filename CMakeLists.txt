@@ -126,6 +126,8 @@ add_library(EngineCore
     Core/Renderer/TAASystem.cpp
     Core/Renderer/DynamicResolution.h
     Core/Renderer/DynamicResolution.cpp
+    Core/Renderer/GPUSkinning.h
+    Core/Renderer/GPUSkinning.cpp
     Core/ECS/Scene.h
     Core/ECS/Scene.cpp
     Core/ECS/Entity.h
@@ -148,9 +150,13 @@ add_library(EngineCore
     Core/ECS/Components/AudioListenerComponent.h
     Core/ECS/Components/AudioSourceComponent.h
     Core/ECS/Components/ReverbZoneComponent.h
+    Core/ECS/Components/SkeletalMeshComponent.h
+    Core/ECS/Components/NetworkTransformComponent.h
     Core/ECS/Systems/Systems.h
     Core/ECS/Systems/RenderSystem.h
     Core/ECS/Systems/RenderSystem.cpp
+    Core/ECS/Systems/SkeletalRenderSystem.h
+    Core/ECS/Systems/SkeletalRenderSystem.cpp
     Core/ECS/Systems/LightSystem.h
     Core/ECS/Systems/LightSystem.cpp
     Core/ECS/Systems/TransformSystem.h

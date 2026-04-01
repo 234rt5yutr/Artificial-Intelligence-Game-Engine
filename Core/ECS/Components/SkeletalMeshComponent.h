@@ -6,6 +6,7 @@
 
 #include "Core/Renderer/Mesh.h"
 #include "Core/Math/Math.h"
+#include <glm/gtx/matrix_decompose.hpp>
 #include <memory>
 #include <string>
 #include <vector>

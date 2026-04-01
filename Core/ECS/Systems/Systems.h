@@ -4,6 +4,7 @@
 
 #include "Core/ECS/ParallelECS.h"
 #include "Core/ECS/Systems/RenderSystem.h"
+#include "Core/ECS/Systems/SkeletalRenderSystem.h"
 #include "Core/ECS/Systems/LightSystem.h"
 #include "Core/ECS/Systems/TransformSystem.h"
 #include "Core/ECS/Systems/PhysicsSystem.h"

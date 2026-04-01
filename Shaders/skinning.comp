@@ -1,0 +1,137 @@
+#version 450
+
+// GPU Skinning Compute Shader
+// Transforms skinned vertices using bone matrices via compute shader
+// This approach separates skinning from rendering for better flexibility
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+const uint MAX_BONES = 256;
+const uint MAX_BONE_INFLUENCES = 4;
+
+//=============================================================================
+// Structures
+//=============================================================================
+
+// Input skinned vertex (matches SkinnedVertex in Mesh.h)
+struct SkinnedVertex {
+    vec3 position;
+    float pad0;
+    vec3 normal;
+    float pad1;
+    vec2 texCoord;
+    vec2 pad2;
+    vec4 tangent;
+    uvec4 boneIndices;
+    vec4 boneWeights;
+};
+
+// Output vertex (matches Vertex in Mesh.h for standard rendering)
+struct OutputVertex {
+    vec3 position;
+    float pad0;
+    vec3 normal;
+    float pad1;
+    vec2 texCoord;
+    vec2 pad2;
+    vec4 tangent;
+};
+
+//=============================================================================
+// Descriptor Bindings
+//=============================================================================
+
+// Uniform buffer with skinning parameters
+layout (set = 0, binding = 0, std140) uniform SkinningUniforms {
+    uint vertexCount;
+    uint boneCount;
+    uint meshInstanceId;
+    uint pad0;
+};
+
+// Input: Skinned vertices (bind pose)
+layout (set = 0, binding = 1, std430) readonly buffer InputVertexBuffer {
+    SkinnedVertex inputVertices[];
+};
+
+// Input: Bone matrices (final skinning matrices = globalTransform * inverseBindMatrix)
+layout (set = 0, binding = 2, std430) readonly buffer BoneMatrixBuffer {
+    mat4 boneMatrices[];
+};
+
+// Output: Deformed vertices ready for rendering
+layout (set = 0, binding = 3, std430) writeonly buffer OutputVertexBuffer {
+    OutputVertex outputVertices[];
+};
+
+//=============================================================================
+// Skinning Functions
+//=============================================================================
+
+// Compute the skinning matrix from bone influences
+mat4 computeSkinMatrix(uvec4 indices, vec4 weights) {
+    mat4 skinMatrix = mat4(0.0);
+    
+    // Accumulate weighted bone matrices
+    skinMatrix += boneMatrices[indices.x] * weights.x;
+    skinMatrix += boneMatrices[indices.y] * weights.y;
+    skinMatrix += boneMatrices[indices.z] * weights.z;
+    skinMatrix += boneMatrices[indices.w] * weights.w;
+    
+    return skinMatrix;
+}
+
+// Transform normal using the inverse-transpose of the skinning matrix
+// For normalized matrices with uniform scaling, we can use the upper 3x3 directly
+vec3 transformNormal(mat4 skinMatrix, vec3 normal) {
+    mat3 normalMatrix = mat3(skinMatrix);
+    // Note: For non-uniform scaling, use inverse-transpose
+    // mat3 normalMatrix = transpose(inverse(mat3(skinMatrix)));
+    return normalize(normalMatrix * normal);
+}
+
+// Transform tangent (similar to normal, but preserve w for bitangent sign)
+vec4 transformTangent(mat4 skinMatrix, vec4 tangent) {
+    mat3 normalMatrix = mat3(skinMatrix);
+    vec3 transformedTangent = normalize(normalMatrix * tangent.xyz);
+    return vec4(transformedTangent, tangent.w);
+}
+
+//=============================================================================
+// Main Compute Shader
+//=============================================================================
+
+void main() {
+    uint vertexIndex = gl_GlobalInvocationID.x;
+    
+    // Bounds check
+    if (vertexIndex >= vertexCount) {
+        return;
+    }
+    
+    // Read input vertex
+    SkinnedVertex inVertex = inputVertices[vertexIndex];
+    
+    // Compute skinning matrix from bone weights
+    mat4 skinMatrix = computeSkinMatrix(inVertex.boneIndices, inVertex.boneWeights);
+    
+    // Transform position
+    vec4 skinnedPosition = skinMatrix * vec4(inVertex.position, 1.0);
+    
+    // Transform normal and tangent
+    vec3 skinnedNormal = transformNormal(skinMatrix, inVertex.normal);
+    vec4 skinnedTangent = transformTangent(skinMatrix, inVertex.tangent);
+    
+    // Write output vertex
+    outputVertices[vertexIndex].position = skinnedPosition.xyz;
+    outputVertices[vertexIndex].pad0 = 0.0;
+    outputVertices[vertexIndex].normal = skinnedNormal;
+    outputVertices[vertexIndex].pad1 = 0.0;
+    outputVertices[vertexIndex].texCoord = inVertex.texCoord;
+    outputVertices[vertexIndex].pad2 = vec2(0.0);
+    outputVertices[vertexIndex].tangent = skinnedTangent;
+}
