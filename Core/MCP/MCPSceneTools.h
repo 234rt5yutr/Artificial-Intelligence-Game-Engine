@@ -6,6 +6,7 @@
 #include "MCPTool.h"
 #include "MCPTypes.h"
 #include "SceneSerialization.h"
+#include "ActionValidator.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
 #include "Core/ECS/Components/Components.h"
@@ -536,9 +537,27 @@ namespace MCP {
                 return ToolResult::Error("No active scene available");
             }
 
+            // Validate and sanitize input
+            auto& validator = GetGlobalValidator();
+            auto validation = validator.ValidateSpawnEntityInput(arguments);
+            validator.LogValidationResult(validation, "SpawnEntity");
+
+            if (!validation.IsValid) {
+                return ToolResult::Error("Validation failed: " + validation.GetErrorSummary());
+            }
+
+            // Use sanitized input
+            const Json& sanitized = validation.SanitizedInput;
+
+            // Check entity count limit
+            if (scene->GetEntityCount() >= validator.GetLimits().MaxTotalEntities) {
+                return ToolResult::Error("Maximum entity count reached (" + 
+                    std::to_string(validator.GetLimits().MaxTotalEntities) + ")");
+            }
+
             // Parse entity name
-            std::string name = arguments.value("name", "Entity");
-            std::string templateType = arguments.value("template", "empty");
+            std::string name = sanitized.value("name", "Entity");
+            std::string templateType = sanitized.value("template", "empty");
 
             // Create the entity
             ECS::Entity entity = scene->CreateEntity(name);
@@ -550,22 +569,22 @@ namespace MCP {
 
             // Apply transform (always added)
             ECS::TransformComponent transform;
-            if (arguments.contains("transform")) {
-                transform = DeserializeTransform(arguments["transform"]);
+            if (sanitized.contains("transform")) {
+                transform = DeserializeTransform(sanitized["transform"]);
             }
             registry.emplace<ECS::TransformComponent>(entityHandle, transform);
 
             // Apply template
-            ApplyTemplate(registry, entityHandle, templateType, arguments);
+            ApplyTemplate(registry, entityHandle, templateType, sanitized);
 
-            // Apply additional components from arguments
-            if (arguments.contains("components")) {
-                ApplyComponents(registry, entityHandle, arguments["components"]);
+            // Apply additional components from sanitized arguments
+            if (sanitized.contains("components")) {
+                ApplyComponents(registry, entityHandle, sanitized["components"]);
             }
 
             // Handle parent relationship
-            if (arguments.contains("parent")) {
-                uint32_t parentId = arguments["parent"].get<uint32_t>();
+            if (sanitized.contains("parent")) {
+                uint32_t parentId = sanitized["parent"].get<uint32_t>();
                 entt::entity parentEntity = static_cast<entt::entity>(parentId);
                 
                 if (registry.valid(parentEntity)) {
@@ -602,6 +621,11 @@ namespace MCP {
 
             // Include serialized entity data
             result["entity"] = SerializeEntity(entityHandle, registry);
+
+            // Include validation warnings if any
+            if (!validation.Warnings.empty()) {
+                result["validationWarnings"] = validation.Warnings;
+            }
 
             ENGINE_CORE_INFO("MCP SpawnEntity: Created '{}' (ID: {}) with template '{}'",
                              name, static_cast<uint32_t>(entityHandle), templateType);
@@ -869,10 +893,22 @@ namespace MCP {
                 return ToolResult::Error("No active scene available");
             }
 
+            // Validate and sanitize input
+            auto& validator = GetGlobalValidator();
+            auto validation = validator.ValidateModifyComponentInput(arguments);
+            validator.LogValidationResult(validation, "ModifyComponent");
+
+            if (!validation.IsValid) {
+                return ToolResult::Error("Validation failed: " + validation.GetErrorSummary());
+            }
+
+            // Use sanitized input for component modifications
+            const Json& sanitized = validation.SanitizedInput;
+
             auto& registry = scene->GetRegistry();
             entt::entity targetEntity = entt::null;
 
-            // Find entity by ID or name
+            // Find entity by ID or name (use original arguments for entity lookup)
             if (arguments.contains("entityId")) {
                 uint32_t entityId = arguments["entityId"].get<uint32_t>();
                 targetEntity = static_cast<entt::entity>(entityId);
@@ -904,55 +940,55 @@ namespace MCP {
             std::string operation = arguments.value("operation", "set");
             Json modifications = Json::array();
 
-            // Modify transform
-            if (arguments.contains("transform")) {
+            // Modify transform (use sanitized input)
+            if (sanitized.contains("transform")) {
                 if (registry.all_of<ECS::TransformComponent>(targetEntity)) {
                     auto& transform = registry.get<ECS::TransformComponent>(targetEntity);
-                    ModifyTransform(transform, arguments["transform"], operation);
+                    ModifyTransform(transform, sanitized["transform"], operation);
                     transform.IsDirty = true;
                     modifications.push_back("transform");
                 } else {
                     // Add transform if it doesn't exist
-                    ECS::TransformComponent transform = DeserializeTransform(arguments["transform"]);
+                    ECS::TransformComponent transform = DeserializeTransform(sanitized["transform"]);
                     registry.emplace<ECS::TransformComponent>(targetEntity, transform);
                     modifications.push_back("transform (added)");
                 }
             }
 
-            // Modify light
-            if (arguments.contains("light")) {
+            // Modify light (use sanitized input)
+            if (sanitized.contains("light")) {
                 if (registry.all_of<ECS::LightComponent>(targetEntity)) {
                     auto& light = registry.get<ECS::LightComponent>(targetEntity);
-                    ModifyLight(light, arguments["light"], operation);
+                    ModifyLight(light, sanitized["light"], operation);
                     modifications.push_back("light");
                 } else {
                     return ToolResult::Error("Entity does not have a LightComponent");
                 }
             }
 
-            // Modify rigidBody
-            if (arguments.contains("rigidBody")) {
+            // Modify rigidBody (use sanitized input)
+            if (sanitized.contains("rigidBody")) {
                 if (registry.all_of<ECS::RigidBodyComponent>(targetEntity)) {
                     auto& rigidBody = registry.get<ECS::RigidBodyComponent>(targetEntity);
-                    ModifyRigidBody(rigidBody, arguments["rigidBody"], operation);
+                    ModifyRigidBody(rigidBody, sanitized["rigidBody"], operation);
                     modifications.push_back("rigidBody");
                 } else {
                     return ToolResult::Error("Entity does not have a RigidBodyComponent");
                 }
             }
 
-            // Modify camera
-            if (arguments.contains("camera")) {
+            // Modify camera (use sanitized input)
+            if (sanitized.contains("camera")) {
                 if (registry.all_of<ECS::CameraComponent>(targetEntity)) {
                     auto& camera = registry.get<ECS::CameraComponent>(targetEntity);
-                    ModifyCamera(camera, arguments["camera"], operation);
+                    ModifyCamera(camera, sanitized["camera"], operation);
                     modifications.push_back("camera");
                 } else {
                     return ToolResult::Error("Entity does not have a CameraComponent");
                 }
             }
 
-            // Modify mesh
+            // Modify mesh (use original - no numerical sanitization needed)
             if (arguments.contains("mesh")) {
                 if (registry.all_of<ECS::MeshComponent>(targetEntity)) {
                     auto& mesh = registry.get<ECS::MeshComponent>(targetEntity);
@@ -963,11 +999,11 @@ namespace MCP {
                 }
             }
 
-            // Modify collider
-            if (arguments.contains("collider")) {
+            // Modify collider (use sanitized input)
+            if (sanitized.contains("collider")) {
                 if (registry.all_of<ECS::ColliderComponent>(targetEntity)) {
                     auto& collider = registry.get<ECS::ColliderComponent>(targetEntity);
-                    ModifyCollider(collider, arguments["collider"], operation);
+                    ModifyCollider(collider, sanitized["collider"], operation);
                     modifications.push_back("collider");
                 } else {
                     return ToolResult::Error("Entity does not have a ColliderComponent");
@@ -996,6 +1032,11 @@ namespace MCP {
             result["operation"] = operation;
             result["modificationsApplied"] = modifications;
             result["entity"] = SerializeEntity(targetEntity, registry);
+
+            // Include validation warnings if any
+            if (!validation.Warnings.empty()) {
+                result["validationWarnings"] = validation.Warnings;
+            }
 
             // Get entity name for logging
             std::string entityName = "Entity";
@@ -1202,23 +1243,24 @@ namespace MCP {
                 return ToolResult::Error("No active scene available");
             }
 
-            if (!arguments.contains("script")) {
-                return ToolResult::Error("Missing required 'script' parameter");
+            // Validate and sanitize input
+            auto& validator = GetGlobalValidator();
+            auto validation = validator.ValidateExecuteScriptInput(arguments);
+            validator.LogValidationResult(validation, "ExecuteScript");
+
+            if (!validation.IsValid) {
+                return ToolResult::Error("Validation failed: " + validation.GetErrorSummary());
             }
 
-            std::string script = arguments["script"].get<std::string>();
-            if (script.empty()) {
-                return ToolResult::Error("Script cannot be empty");
-            }
+            // Use sanitized input
+            const Json& sanitized = validation.SanitizedInput;
 
-            // Get execution limits
-            double timeout = arguments.value("timeout", 1000.0);
-            timeout = std::clamp(timeout, 100.0, 5000.0);
+            std::string script = sanitized["script"].get<std::string>();
 
-            int maxInstructions = arguments.value("maxInstructions", 100000);
-            maxInstructions = std::clamp(maxInstructions, 1000, 1000000);
-
-            bool resetState = arguments.value("resetState", false);
+            // Get execution limits from sanitized input
+            double timeout = sanitized.value("timeout", 1000.0);
+            int maxInstructions = sanitized.value("maxInstructions", 100000);
+            bool resetState = sanitized.value("resetState", false);
 
             // Initialize or reset Lua engine
             if (!m_LuaEngine || resetState) {
@@ -1248,12 +1290,22 @@ namespace MCP {
             if (result.Success) {
                 response["output"] = result.Output;
                 
+                // Include validation warnings if any
+                if (!validation.Warnings.empty()) {
+                    response["validationWarnings"] = validation.Warnings;
+                }
+                
                 ENGINE_CORE_INFO("MCP ExecuteScript: Completed in {:.2f}ms ({} instructions)",
                                  result.ExecutionTimeMs, result.InstructionsExecuted);
                 
                 return ToolResult::SuccessJson(response);
             } else {
                 response["error"] = result.Error;
+                
+                // Include validation warnings if any
+                if (!validation.Warnings.empty()) {
+                    response["validationWarnings"] = validation.Warnings;
+                }
                 
                 ENGINE_CORE_WARN("MCP ExecuteScript: Failed - {}", result.Error);
                 
