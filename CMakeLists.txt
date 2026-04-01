@@ -110,6 +110,8 @@ add_library(EngineCore
     Core/Audio/AudioSystem.cpp
     Core/Audio/AudioListenerSystem.h
     Core/Audio/AudioSourceSystem.h
+    Core/Audio/PhysicsAudioIntegration.h
+    Core/Audio/PhysicsAudioIntegration.cpp
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h

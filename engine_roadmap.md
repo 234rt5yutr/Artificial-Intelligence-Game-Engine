@@ -121,7 +121,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 11.1: Add an audio backend dependency (e.g., `miniaudio`, `FMOD`, or `Wwise`).
 * [X]  Step 11.2: Implement the `AudioListenerComponent` and bind its position/orientation to the active Camera.
 * [X]  Step 11.3: Implement the `AudioSourceComponent` for playing 3D spatialized sound files.
-* [ ]  Step 11.4: Integrate the Audio System with Jolt Physics (Phase 6) to trigger sounds dynamically based on collision impulses and material types.
+* [X]  Step 11.4: Integrate the Audio System with Jolt Physics (Phase 6) to trigger sounds dynamically based on collision impulses and material types.
 * [ ]  Step 11.5: Implement basic Reverb Zones or Audio Volumes to simulate acoustic changes when entering different spaces.
 * [ ]  Step 11.6: **MCP Server Update:** Implement the `PlayAudio` and `ModifyAcoustics` MCP tools, allowing AI agents to dynamically trigger sound effects, change background tracks, and alter reverb parameters based on semantic logic.
 
