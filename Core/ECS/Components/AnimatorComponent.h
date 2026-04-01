@@ -268,6 +268,675 @@ namespace ECS {
     };
 
     // ========================================================================
+    // Animation Blending System
+    // ========================================================================
+
+    /**
+     * @brief Types of nodes in a blend tree
+     * 
+     * Defines how animations are combined within a blend tree structure.
+     * Each type has specific blending behavior and parameter requirements.
+     */
+    enum class BlendTreeNodeType : uint8_t {
+        Clip = 0,       ///< Single animation clip (leaf node)
+        Blend1D,        ///< 1D blend space (e.g., walk to run by speed)
+        Blend2D,        ///< 2D blend space (e.g., movement direction)
+        Additive,       ///< Additive blend on top of base animation
+        Override        ///< Override specific bones with this animation
+    };
+
+    /**
+     * @brief Convert BlendTreeNodeType to string for debugging/serialization
+     */
+    inline const char* BlendTreeNodeTypeToString(BlendTreeNodeType type) {
+        switch (type) {
+            case BlendTreeNodeType::Clip:     return "Clip";
+            case BlendTreeNodeType::Blend1D:  return "Blend1D";
+            case BlendTreeNodeType::Blend2D:  return "Blend2D";
+            case BlendTreeNodeType::Additive: return "Additive";
+            case BlendTreeNodeType::Override: return "Override";
+            default:                          return "Unknown";
+        }
+    }
+
+    /**
+     * @brief A node within a blend tree structure
+     * 
+     * Blend tree nodes can be either leaf nodes (animation clips) or
+     * branch nodes (blend operations that combine child nodes).
+     * 
+     * For Clip type: AnimationClipName specifies the animation to play
+     * For Blend1D/Blend2D: ChildIndices contains indices of child nodes
+     * For Additive: Combines with BasePoseClip using AdditiveWeight
+     * 
+     * @note PositionX/PositionY define the node's position in blend space,
+     *       used by parent blend nodes to calculate interpolation weights.
+     */
+    struct BlendTreeNode {
+        BlendTreeNodeType Type = BlendTreeNodeType::Clip;
+        std::string AnimationClipName;      ///< Animation clip name (for Clip type)
+        
+        // Blend position in parameter space
+        float PositionX = 0.0f;             ///< Position in blend space X axis
+        float PositionY = 0.0f;             ///< Position in blend space Y axis (for 2D blending)
+        
+        // Child nodes for blend types
+        std::vector<int32_t> ChildIndices;  ///< Indices into BlendTree::Nodes array
+        
+        // Runtime computed weight
+        float ComputedWeight = 0.0f;        ///< Weight calculated during blend evaluation
+        
+        // For additive blending
+        std::string BasePoseClip;           ///< Reference pose for additive blending
+        float AdditiveWeight = 1.0f;        ///< Blend weight for additive layer (0-1)
+        
+        BlendTreeNode() = default;
+        
+        /**
+         * @brief Create a clip node at a specific blend space position
+         * @param clipName Name of the animation clip
+         * @param posX X position in blend space
+         * @param posY Y position in blend space (for 2D blending)
+         * @return Configured BlendTreeNode
+         */
+        static BlendTreeNode CreateClip(const std::string& clipName, float posX = 0.0f, float posY = 0.0f) {
+            BlendTreeNode node;
+            node.Type = BlendTreeNodeType::Clip;
+            node.AnimationClipName = clipName;
+            node.PositionX = posX;
+            node.PositionY = posY;
+            return node;
+        }
+        
+        /**
+         * @brief Create a 1D blend node (children blended by single parameter)
+         * @return Configured BlendTreeNode for 1D blending
+         */
+        static BlendTreeNode CreateBlend1D() {
+            BlendTreeNode node;
+            node.Type = BlendTreeNodeType::Blend1D;
+            return node;
+        }
+        
+        /**
+         * @brief Create a 2D blend node (children blended by two parameters)
+         * @return Configured BlendTreeNode for 2D blending
+         */
+        static BlendTreeNode CreateBlend2D() {
+            BlendTreeNode node;
+            node.Type = BlendTreeNodeType::Blend2D;
+            return node;
+        }
+        
+        /**
+         * @brief Create an additive blend node
+         * @param clipName Additive animation clip to apply
+         * @param basePose Reference pose clip for additive calculation
+         * @return Configured BlendTreeNode for additive blending
+         */
+        static BlendTreeNode CreateAdditive(const std::string& clipName, const std::string& basePose) {
+            BlendTreeNode node;
+            node.Type = BlendTreeNodeType::Additive;
+            node.AnimationClipName = clipName;
+            node.BasePoseClip = basePose;
+            return node;
+        }
+        
+        /**
+         * @brief Create an override node for partial body animation
+         * @param clipName Animation clip to use for override
+         * @return Configured BlendTreeNode for override blending
+         */
+        static BlendTreeNode CreateOverride(const std::string& clipName) {
+            BlendTreeNode node;
+            node.Type = BlendTreeNodeType::Override;
+            node.AnimationClipName = clipName;
+            return node;
+        }
+    };
+
+    /**
+     * @brief A complete blend tree for complex animation blending
+     * 
+     * Blend trees allow smooth transitions between multiple animations
+     * based on continuous parameters (e.g., speed, direction).
+     * 
+     * The tree is stored as a flat array of nodes, with RootNodeIndex
+     * pointing to the top-level blend node. Each blend node references
+     * its children by index in the Nodes array.
+     * 
+     * @code
+     * // Create a locomotion blend tree
+     * auto tree = BlendTree::CreateLocomotion1D("idle", "walk", "run");
+     * tree.ComputeWeights(currentSpeed);  // Update weights based on parameter
+     * @endcode
+     */
+    struct BlendTree {
+        std::string Name;                   ///< Blend tree identifier
+        std::vector<BlendTreeNode> Nodes;   ///< All nodes in the tree (flat storage)
+        int32_t RootNodeIndex = 0;          ///< Index of the root blend node
+        
+        // Parameters that drive this blend tree
+        std::string ParameterX;             ///< Parameter name for X axis (1D and 2D)
+        std::string ParameterY;             ///< Parameter name for Y axis (2D only)
+        
+        // Blend space bounds (for parameter normalization)
+        float MinX = 0.0f;                  ///< Minimum X parameter value
+        float MaxX = 1.0f;                  ///< Maximum X parameter value
+        float MinY = 0.0f;                  ///< Minimum Y parameter value
+        float MaxY = 1.0f;                  ///< Maximum Y parameter value
+        
+        BlendTree() = default;
+        
+        /**
+         * @brief Add a node to the blend tree
+         * @param node The node to add
+         * @return Index of the added node
+         */
+        int32_t AddNode(const BlendTreeNode& node) {
+            int32_t index = static_cast<int32_t>(Nodes.size());
+            Nodes.push_back(node);
+            return index;
+        }
+        
+        /**
+         * @brief Set child nodes for a parent blend node
+         * @param parentIndex Index of the parent node
+         * @param children Vector of child node indices
+         */
+        void SetChildNodes(int32_t parentIndex, const std::vector<int32_t>& children) {
+            if (parentIndex >= 0 && parentIndex < static_cast<int32_t>(Nodes.size())) {
+                Nodes[parentIndex].ChildIndices = children;
+            }
+        }
+        
+        /**
+         * @brief Compute blend weights for all nodes based on parameters
+         * 
+         * For 1D blending: Uses linear interpolation between adjacent clips
+         * For 2D blending: Uses inverse distance weighting (Shepard's method)
+         * 
+         * @param paramX Current X parameter value
+         * @param paramY Current Y parameter value (ignored for 1D blending)
+         */
+        void ComputeWeights(float paramX, float paramY = 0.0f) {
+            // Reset all weights
+            for (auto& node : Nodes) {
+                node.ComputedWeight = 0.0f;
+            }
+            
+            if (Nodes.empty() || RootNodeIndex < 0 || 
+                RootNodeIndex >= static_cast<int32_t>(Nodes.size())) {
+                return;
+            }
+            
+            // Normalize parameters to blend space
+            float normalizedX = (MaxX > MinX) ? 
+                (paramX - MinX) / (MaxX - MinX) : 0.0f;
+            float normalizedY = (MaxY > MinY) ? 
+                (paramY - MinY) / (MaxY - MinY) : 0.0f;
+            
+            // Clamp to [0, 1]
+            normalizedX = std::max(0.0f, std::min(1.0f, normalizedX));
+            normalizedY = std::max(0.0f, std::min(1.0f, normalizedY));
+            
+            // Start recursive weight computation from root
+            ComputeNodeWeights(RootNodeIndex, 1.0f, normalizedX, normalizedY);
+        }
+        
+        /**
+         * @brief Check if the blend tree is valid for use
+         * @return true if tree has nodes and valid root index
+         */
+        bool IsValid() const {
+            return !Nodes.empty() && 
+                   RootNodeIndex >= 0 && 
+                   RootNodeIndex < static_cast<int32_t>(Nodes.size());
+        }
+        
+        /**
+         * @brief Get all clip nodes with non-zero weights
+         * @return Vector of pairs (clip name, weight)
+         */
+        std::vector<std::pair<std::string, float>> GetActiveClips() const {
+            std::vector<std::pair<std::string, float>> result;
+            for (const auto& node : Nodes) {
+                if (node.Type == BlendTreeNodeType::Clip && 
+                    node.ComputedWeight > 0.0f) {
+                    result.emplace_back(node.AnimationClipName, node.ComputedWeight);
+                }
+            }
+            return result;
+        }
+        
+        // ====================================================================
+        // Factory Methods for Common Presets
+        // ====================================================================
+        
+        /**
+         * @brief Create a 1D locomotion blend tree (idle -> walk -> run)
+         * 
+         * Blends between three animation clips based on a single speed parameter.
+         * - Speed 0.0: idle
+         * - Speed 0.5: walk
+         * - Speed 1.0: run
+         * 
+         * @param idleClip Idle animation clip name
+         * @param walkClip Walk animation clip name
+         * @param runClip Run animation clip name
+         * @return Configured BlendTree
+         */
+        static BlendTree CreateLocomotion1D(const std::string& idleClip, 
+                                            const std::string& walkClip, 
+                                            const std::string& runClip) {
+            BlendTree tree;
+            tree.Name = "Locomotion1D";
+            tree.ParameterX = "Speed";
+            tree.MinX = 0.0f;
+            tree.MaxX = 1.0f;
+            
+            // Add clip nodes at their blend positions
+            int32_t idleIdx = tree.AddNode(BlendTreeNode::CreateClip(idleClip, 0.0f));
+            int32_t walkIdx = tree.AddNode(BlendTreeNode::CreateClip(walkClip, 0.5f));
+            int32_t runIdx = tree.AddNode(BlendTreeNode::CreateClip(runClip, 1.0f));
+            
+            // Add root blend node
+            BlendTreeNode rootNode = BlendTreeNode::CreateBlend1D();
+            tree.RootNodeIndex = tree.AddNode(rootNode);
+            tree.SetChildNodes(tree.RootNodeIndex, {idleIdx, walkIdx, runIdx});
+            
+            return tree;
+        }
+        
+        /**
+         * @brief Create a 2D directional blend tree (forward/backward/left/right)
+         * 
+         * Blends between four animation clips based on movement direction.
+         * - (0, 1): forward
+         * - (0, -1): backward
+         * - (-1, 0): left
+         * - (1, 0): right
+         * 
+         * @param forwardClip Forward movement animation
+         * @param backwardClip Backward movement animation
+         * @param leftClip Left strafe animation
+         * @param rightClip Right strafe animation
+         * @return Configured BlendTree
+         */
+        static BlendTree CreateDirectional2D(const std::string& forwardClip,
+                                             const std::string& backwardClip,
+                                             const std::string& leftClip,
+                                             const std::string& rightClip) {
+            BlendTree tree;
+            tree.Name = "Directional2D";
+            tree.ParameterX = "DirectionX";
+            tree.ParameterY = "DirectionY";
+            tree.MinX = -1.0f;
+            tree.MaxX = 1.0f;
+            tree.MinY = -1.0f;
+            tree.MaxY = 1.0f;
+            
+            // Add clip nodes at directional positions (normalized to [0,1] internally)
+            // Note: Positions are in the original parameter space [-1, 1]
+            int32_t forwardIdx = tree.AddNode(BlendTreeNode::CreateClip(forwardClip, 0.0f, 1.0f));
+            int32_t backwardIdx = tree.AddNode(BlendTreeNode::CreateClip(backwardClip, 0.0f, -1.0f));
+            int32_t leftIdx = tree.AddNode(BlendTreeNode::CreateClip(leftClip, -1.0f, 0.0f));
+            int32_t rightIdx = tree.AddNode(BlendTreeNode::CreateClip(rightClip, 1.0f, 0.0f));
+            
+            // Add root blend node
+            BlendTreeNode rootNode = BlendTreeNode::CreateBlend2D();
+            tree.RootNodeIndex = tree.AddNode(rootNode);
+            tree.SetChildNodes(tree.RootNodeIndex, {forwardIdx, backwardIdx, leftIdx, rightIdx});
+            
+            return tree;
+        }
+        
+        /**
+         * @brief Create a 2D directional blend tree with 8 directions + center
+         * 
+         * Full directional movement including diagonals and idle.
+         * 
+         * @param idleClip Idle/stationary animation
+         * @param forwardClip Forward movement animation
+         * @param backwardClip Backward movement animation
+         * @param leftClip Left strafe animation
+         * @param rightClip Right strafe animation
+         * @param forwardLeftClip Forward-left diagonal animation
+         * @param forwardRightClip Forward-right diagonal animation
+         * @param backwardLeftClip Backward-left diagonal animation
+         * @param backwardRightClip Backward-right diagonal animation
+         * @return Configured BlendTree
+         */
+        static BlendTree CreateDirectional2DFull(const std::string& idleClip,
+                                                  const std::string& forwardClip,
+                                                  const std::string& backwardClip,
+                                                  const std::string& leftClip,
+                                                  const std::string& rightClip,
+                                                  const std::string& forwardLeftClip,
+                                                  const std::string& forwardRightClip,
+                                                  const std::string& backwardLeftClip,
+                                                  const std::string& backwardRightClip) {
+            BlendTree tree;
+            tree.Name = "Directional2DFull";
+            tree.ParameterX = "DirectionX";
+            tree.ParameterY = "DirectionY";
+            tree.MinX = -1.0f;
+            tree.MaxX = 1.0f;
+            tree.MinY = -1.0f;
+            tree.MaxY = 1.0f;
+            
+            constexpr float diag = 0.707f;  // sqrt(2)/2 for diagonal positions
+            
+            // Center
+            int32_t idleIdx = tree.AddNode(BlendTreeNode::CreateClip(idleClip, 0.0f, 0.0f));
+            
+            // Cardinal directions
+            int32_t forwardIdx = tree.AddNode(BlendTreeNode::CreateClip(forwardClip, 0.0f, 1.0f));
+            int32_t backwardIdx = tree.AddNode(BlendTreeNode::CreateClip(backwardClip, 0.0f, -1.0f));
+            int32_t leftIdx = tree.AddNode(BlendTreeNode::CreateClip(leftClip, -1.0f, 0.0f));
+            int32_t rightIdx = tree.AddNode(BlendTreeNode::CreateClip(rightClip, 1.0f, 0.0f));
+            
+            // Diagonals
+            int32_t flIdx = tree.AddNode(BlendTreeNode::CreateClip(forwardLeftClip, -diag, diag));
+            int32_t frIdx = tree.AddNode(BlendTreeNode::CreateClip(forwardRightClip, diag, diag));
+            int32_t blIdx = tree.AddNode(BlendTreeNode::CreateClip(backwardLeftClip, -diag, -diag));
+            int32_t brIdx = tree.AddNode(BlendTreeNode::CreateClip(backwardRightClip, diag, -diag));
+            
+            // Add root blend node
+            BlendTreeNode rootNode = BlendTreeNode::CreateBlend2D();
+            tree.RootNodeIndex = tree.AddNode(rootNode);
+            tree.SetChildNodes(tree.RootNodeIndex, 
+                {idleIdx, forwardIdx, backwardIdx, leftIdx, rightIdx, flIdx, frIdx, blIdx, brIdx});
+            
+            return tree;
+        }
+        
+    private:
+        /**
+         * @brief Recursively compute weights for a node and its children
+         * @param nodeIndex Index of the node to process
+         * @param parentWeight Weight inherited from parent
+         * @param paramX Normalized X parameter
+         * @param paramY Normalized Y parameter
+         */
+        void ComputeNodeWeights(int32_t nodeIndex, float parentWeight, 
+                                float paramX, float paramY) {
+            if (nodeIndex < 0 || nodeIndex >= static_cast<int32_t>(Nodes.size())) {
+                return;
+            }
+            
+            BlendTreeNode& node = Nodes[nodeIndex];
+            
+            switch (node.Type) {
+                case BlendTreeNodeType::Clip:
+                case BlendTreeNodeType::Override:
+                    // Leaf node - just set the weight
+                    node.ComputedWeight = parentWeight;
+                    break;
+                    
+                case BlendTreeNodeType::Blend1D:
+                    Compute1DBlendWeights(node, parentWeight, paramX);
+                    break;
+                    
+                case BlendTreeNodeType::Blend2D:
+                    Compute2DBlendWeights(node, parentWeight, paramX, paramY);
+                    break;
+                    
+                case BlendTreeNodeType::Additive:
+                    // Additive uses its own weight multiplied by parent
+                    node.ComputedWeight = parentWeight * node.AdditiveWeight;
+                    break;
+            }
+        }
+        
+        /**
+         * @brief Compute weights for 1D blend using linear interpolation
+         * @param node The blend node
+         * @param parentWeight Weight from parent
+         * @param param Normalized blend parameter [0, 1]
+         */
+        void Compute1DBlendWeights(BlendTreeNode& node, float parentWeight, float param) {
+            if (node.ChildIndices.empty()) {
+                return;
+            }
+            
+            // Sort children by position for interpolation
+            std::vector<std::pair<float, int32_t>> sortedChildren;
+            for (int32_t childIdx : node.ChildIndices) {
+                if (childIdx >= 0 && childIdx < static_cast<int32_t>(Nodes.size())) {
+                    sortedChildren.emplace_back(Nodes[childIdx].PositionX, childIdx);
+                }
+            }
+            
+            if (sortedChildren.empty()) {
+                return;
+            }
+            
+            std::sort(sortedChildren.begin(), sortedChildren.end());
+            
+            // Find the two children to interpolate between
+            if (sortedChildren.size() == 1) {
+                // Only one child - full weight
+                Nodes[sortedChildren[0].second].ComputedWeight = parentWeight;
+                return;
+            }
+            
+            // Clamp parameter to available range
+            float minPos = sortedChildren.front().first;
+            float maxPos = sortedChildren.back().first;
+            float clampedParam = std::max(minPos, std::min(maxPos, param));
+            
+            // Find adjacent children
+            for (size_t i = 0; i < sortedChildren.size() - 1; ++i) {
+                float pos0 = sortedChildren[i].first;
+                float pos1 = sortedChildren[i + 1].first;
+                
+                if (clampedParam >= pos0 && clampedParam <= pos1) {
+                    // Interpolate between these two
+                    float range = pos1 - pos0;
+                    float t = (range > 0.0f) ? (clampedParam - pos0) / range : 0.0f;
+                    
+                    int32_t idx0 = sortedChildren[i].second;
+                    int32_t idx1 = sortedChildren[i + 1].second;
+                    
+                    float weight0 = (1.0f - t) * parentWeight;
+                    float weight1 = t * parentWeight;
+                    
+                    ComputeNodeWeights(idx0, weight0, param, 0.0f);
+                    ComputeNodeWeights(idx1, weight1, param, 0.0f);
+                    return;
+                }
+            }
+            
+            // Edge case: parameter at or beyond the last position
+            Nodes[sortedChildren.back().second].ComputedWeight = parentWeight;
+        }
+        
+        /**
+         * @brief Compute weights for 2D blend using inverse distance weighting
+         * 
+         * Uses Shepard's method (inverse distance weighting) to smoothly
+         * blend between all nearby sample points.
+         * 
+         * @param node The blend node
+         * @param parentWeight Weight from parent
+         * @param paramX Normalized X parameter
+         * @param paramY Normalized Y parameter
+         */
+        void Compute2DBlendWeights(BlendTreeNode& node, float parentWeight, 
+                                    float paramX, float paramY) {
+            if (node.ChildIndices.empty()) {
+                return;
+            }
+            
+            constexpr float epsilon = 0.0001f;
+            constexpr float power = 2.0f;  // Inverse distance power
+            
+            std::vector<float> weights(node.ChildIndices.size(), 0.0f);
+            float totalWeight = 0.0f;
+            bool exactMatch = false;
+            int32_t exactMatchIdx = -1;
+            
+            // Calculate inverse distances
+            for (size_t i = 0; i < node.ChildIndices.size(); ++i) {
+                int32_t childIdx = node.ChildIndices[i];
+                if (childIdx < 0 || childIdx >= static_cast<int32_t>(Nodes.size())) {
+                    continue;
+                }
+                
+                const BlendTreeNode& child = Nodes[childIdx];
+                
+                // Normalize child position to [0, 1] range for comparison
+                float childX = (MaxX > MinX) ? 
+                    (child.PositionX - MinX) / (MaxX - MinX) : 0.0f;
+                float childY = (MaxY > MinY) ? 
+                    (child.PositionY - MinY) / (MaxY - MinY) : 0.0f;
+                
+                float dx = paramX - childX;
+                float dy = paramY - childY;
+                float distSq = dx * dx + dy * dy;
+                
+                if (distSq < epsilon * epsilon) {
+                    // Exact match or very close
+                    exactMatch = true;
+                    exactMatchIdx = static_cast<int32_t>(i);
+                    break;
+                }
+                
+                // Inverse distance weight
+                float dist = std::sqrt(distSq);
+                weights[i] = 1.0f / std::pow(dist, power);
+                totalWeight += weights[i];
+            }
+            
+            if (exactMatch && exactMatchIdx >= 0) {
+                // Single child gets all weight
+                int32_t childIdx = node.ChildIndices[exactMatchIdx];
+                ComputeNodeWeights(childIdx, parentWeight, paramX, paramY);
+                return;
+            }
+            
+            // Normalize and apply weights
+            if (totalWeight > epsilon) {
+                for (size_t i = 0; i < node.ChildIndices.size(); ++i) {
+                    if (weights[i] > 0.0f) {
+                        int32_t childIdx = node.ChildIndices[i];
+                        float normalizedWeight = (weights[i] / totalWeight) * parentWeight;
+                        ComputeNodeWeights(childIdx, normalizedWeight, paramX, paramY);
+                    }
+                }
+            }
+        }
+    };
+
+    /**
+     * @brief An animation layer for layered animation blending
+     * 
+     * Layers allow multiple animations to play simultaneously on different
+     * parts of the skeleton (e.g., upper body aiming while lower body walks).
+     * 
+     * Each layer has its own state machine or blend tree and can:
+     * - Affect all bones (AffectedBones empty) or specific bones
+     * - Blend additively or override the base pose
+     * - Have independent weight for smooth transitions
+     * 
+     * @code
+     * AnimationLayer upperBody("UpperBody", 1);
+     * upperBody.AffectedBones = {"Spine", "Chest", "Head", "LeftArm", "RightArm"};
+     * upperBody.IsAdditive = false;  // Override blending
+     * @endcode
+     */
+    struct AnimationLayer {
+        std::string Name;                           ///< Layer identifier
+        int32_t LayerIndex = 0;                     ///< Layer order (0 = base layer)
+        float Weight = 1.0f;                        ///< Blend weight [0-1]
+        
+        // Bone mask - which bones this layer affects
+        std::vector<std::string> AffectedBones;    ///< Empty = all bones affected
+        bool IsAdditive = false;                    ///< true = additive, false = override
+        
+        // The state machine or blend tree for this layer
+        std::string StateMachineName;               ///< Reference to state machine
+        
+        // Runtime state
+        std::string CurrentStateName;               ///< Currently active state
+        float CurrentTime = 0.0f;                   ///< Playback time in current state
+        
+        // Blend tree (optional - alternative to state machine)
+        std::optional<BlendTree> LayerBlendTree;    ///< Blend tree for this layer
+        
+        AnimationLayer() = default;
+        
+        /**
+         * @brief Construct a named layer at a specific index
+         * @param name Layer identifier
+         * @param index Layer order (higher = processed later)
+         */
+        AnimationLayer(const std::string& name, int32_t index) 
+            : Name(name), LayerIndex(index) {}
+        
+        /**
+         * @brief Set the bones affected by this layer
+         * @param bones List of bone names
+         * @return Reference to this for chaining
+         */
+        AnimationLayer& SetAffectedBones(const std::vector<std::string>& bones) {
+            AffectedBones = bones;
+            return *this;
+        }
+        
+        /**
+         * @brief Set the layer as additive
+         * @param additive true for additive blending
+         * @return Reference to this for chaining
+         */
+        AnimationLayer& SetAdditive(bool additive) {
+            IsAdditive = additive;
+            return *this;
+        }
+        
+        /**
+         * @brief Set the layer weight
+         * @param weight Blend weight [0-1]
+         * @return Reference to this for chaining
+         */
+        AnimationLayer& SetWeight(float weight) {
+            Weight = std::max(0.0f, std::min(1.0f, weight));
+            return *this;
+        }
+        
+        /**
+         * @brief Assign a blend tree to this layer
+         * @param tree The blend tree to use
+         * @return Reference to this for chaining
+         */
+        AnimationLayer& SetBlendTree(const BlendTree& tree) {
+            LayerBlendTree = tree;
+            return *this;
+        }
+        
+        /**
+         * @brief Check if a specific bone is affected by this layer
+         * @param boneName Name of the bone to check
+         * @return true if bone is affected (or if all bones are affected)
+         */
+        bool AffectsBone(const std::string& boneName) const {
+            if (AffectedBones.empty()) {
+                return true;  // Empty means all bones
+            }
+            return std::find(AffectedBones.begin(), AffectedBones.end(), boneName) 
+                   != AffectedBones.end();
+        }
+        
+        /**
+         * @brief Check if layer has a blend tree assigned
+         */
+        bool HasBlendTree() const {
+            return LayerBlendTree.has_value();
+        }
+    };
+
+    // ========================================================================
     // Animation State
     // ========================================================================
 
@@ -275,7 +944,9 @@ namespace ECS {
      * @brief A single state in the animation state machine
      * 
      * Represents one animation that can be played (e.g., Idle, Walk, Run)
-     * Contains playback settings and associated events
+     * Contains playback settings and associated events.
+     * 
+     * Can optionally contain a BlendTree for complex multi-animation states.
      */
     struct AnimationState {
         std::string Name;                   ///< Unique identifier for this state
@@ -291,10 +962,18 @@ namespace ECS {
         bool ApplyRootMotion = false;       ///< Extract and apply root bone motion
         float FootIKWeight = 0.0f;          ///< Weight for foot IK (0 = disabled)
 
-        // Blend tree support (for future expansion)
-        bool IsBlendTree = false;
-        std::string BlendParameterX;
-        std::string BlendParameterY;
+        // Blend tree support
+        std::optional<BlendTree> BlendTreeData;  ///< Optional blend tree for this state
+        std::string BlendParameterX;        ///< Parameter name for 1D/2D blend X axis
+        std::string BlendParameterY;        ///< Parameter name for 2D blend Y axis
+        
+        /**
+         * @brief Check if this state uses a blend tree
+         * @return true if BlendTreeData is present and valid
+         */
+        bool IsBlendTree() const { 
+            return BlendTreeData.has_value() && BlendTreeData->IsValid(); 
+        }
 
         AnimationState() = default;
         
@@ -341,11 +1020,94 @@ namespace ECS {
             Events.OnExitEvent = eventName;
             return *this;
         }
+        
+        /**
+         * @brief Assign a blend tree to this state
+         * 
+         * When a blend tree is assigned, this state will blend multiple
+         * animation clips based on the blend tree's parameters.
+         * 
+         * @param tree The blend tree to use
+         * @return Reference to this for method chaining
+         */
+        AnimationState& SetBlendTree(const BlendTree& tree) {
+            BlendTreeData = tree;
+            BlendParameterX = tree.ParameterX;
+            BlendParameterY = tree.ParameterY;
+            return *this;
+        }
+        
+        /**
+         * @brief Create a state with a 1D locomotion blend tree
+         * @param name State name
+         * @param idleClip Idle animation clip
+         * @param walkClip Walk animation clip
+         * @param runClip Run animation clip
+         * @return Configured AnimationState with blend tree
+         */
+        static AnimationState CreateWithLocomotionBlend(const std::string& name,
+                                                        const std::string& idleClip,
+                                                        const std::string& walkClip,
+                                                        const std::string& runClip) {
+            AnimationState state;
+            state.Name = name;
+            state.SetBlendTree(BlendTree::CreateLocomotion1D(idleClip, walkClip, runClip));
+            return state;
+        }
+        
+        /**
+         * @brief Create a state with a 2D directional blend tree
+         * @param name State name
+         * @param forwardClip Forward animation clip
+         * @param backwardClip Backward animation clip
+         * @param leftClip Left strafe animation clip
+         * @param rightClip Right strafe animation clip
+         * @return Configured AnimationState with blend tree
+         */
+        static AnimationState CreateWithDirectionalBlend(const std::string& name,
+                                                         const std::string& forwardClip,
+                                                         const std::string& backwardClip,
+                                                         const std::string& leftClip,
+                                                         const std::string& rightClip) {
+            AnimationState state;
+            state.Name = name;
+            state.SetBlendTree(BlendTree::CreateDirectional2D(forwardClip, backwardClip, 
+                                                              leftClip, rightClip));
+            return state;
+        }
     };
 
     // ========================================================================
     // Animation Transition
     // ========================================================================
+
+    /**
+     * @brief Transition curve types for smooth eased transitions
+     * 
+     * These curves control how the blend weight progresses during a transition,
+     * allowing for more natural-looking animation blending than linear interpolation.
+     */
+    enum class TransitionCurveType : uint8_t {
+        Linear = 0,     ///< Linear interpolation (constant velocity)
+        EaseIn,         ///< Slow start, fast end (accelerating)
+        EaseOut,        ///< Fast start, slow end (decelerating)
+        EaseInOut,      ///< Slow start and end, fast middle (S-curve)
+        Cubic           ///< Smooth cubic interpolation (Hermite)
+    };
+
+    /**
+     * @brief Convert TransitionCurveType to string for debugging/serialization
+     */
+    inline const char* TransitionCurveTypeToString(TransitionCurveType type) {
+        switch (type) {
+            case TransitionCurveType::Linear:    return "Linear";
+            case TransitionCurveType::EaseIn:    return "EaseIn";
+            case TransitionCurveType::EaseOut:   return "EaseOut";
+            case TransitionCurveType::EaseInOut: return "EaseInOut";
+            case TransitionCurveType::Cubic:     return "Cubic";
+            default:                             return "Unknown";
+        }
+    }
 
     /**
      * @brief Settings for how a transition can be interrupted
@@ -383,6 +1145,9 @@ namespace ECS {
         bool CanTransitionToSelf = false;   ///< Allow transition back to same state
         
         int32_t Priority = 0;               ///< Higher priority transitions checked first
+        
+        /// Curve type for transition blending (default: linear)
+        TransitionCurveType CurveType = TransitionCurveType::Linear;
 
         AnimationTransition() = default;
 
@@ -442,6 +1207,16 @@ namespace ECS {
          */
         AnimationTransition& SetInterruption(InterruptionSource source) {
             Interruption = source;
+            return *this;
+        }
+
+        /**
+         * @brief Set the transition curve type for eased blending
+         * @param curve The curve type to use
+         * @return Reference to this for method chaining
+         */
+        AnimationTransition& SetCurveType(TransitionCurveType curve) {
+            CurveType = curve;
             return *this;
         }
 
@@ -751,6 +1526,12 @@ namespace ECS {
      * Provides a data-driven animation state machine that controls
      * animation playback on an associated SkeletalMeshComponent.
      * 
+     * Supports:
+     * - Multiple animation layers (e.g., base body + upper body override)
+     * - Blend trees for smooth multi-animation blending
+     * - Parameter-driven state transitions
+     * - Root motion extraction
+     * 
      * Usage:
      * 1. Create or load an AnimationStateMachine definition
      * 2. Attach AnimatorComponent to entity with SkeletalMeshComponent
@@ -761,10 +1542,15 @@ namespace ECS {
      * // Create animator with locomotion preset
      * auto animator = AnimatorComponent::CreateWithLocomotion();
      * 
+     * // Add an upper body layer for aiming
+     * auto& aimLayer = animator.AddLayer("UpperBody");
+     * aimLayer.SetAffectedBones({"Spine", "Chest", "Head", "LeftArm", "RightArm"});
+     * 
      * // In game logic, set parameters to control animation
      * animator.SetFloat("Speed", characterSpeed);
      * animator.SetBool("IsGrounded", physics.IsOnGround());
      * animator.SetTrigger("Jump");  // One-shot transition
+     * animator.SetLayerWeight("UpperBody", isAiming ? 1.0f : 0.0f);
      * @endcode
      */
     struct AnimatorComponent {
@@ -776,6 +1562,9 @@ namespace ECS {
 
         // Runtime playback state
         AnimatorRuntimeState RuntimeState;
+        
+        // Animation layers for layered blending
+        std::vector<AnimationLayer> Layers;
 
         // Update settings
         float UpdateRate = 0.0f;            ///< 0 = every frame, >0 = fixed timestep
@@ -1028,6 +1817,154 @@ namespace ECS {
             InitializeParameters();
             RuntimeState.CurrentStateName = StateMachine.DefaultStateName;
             RuntimeState.HasInitialized = true;
+            
+            // Reset all layers
+            for (auto& layer : Layers) {
+                layer.CurrentTime = 0.0f;
+                layer.CurrentStateName.clear();
+            }
+        }
+
+        // ====================================================================
+        // Layer Management
+        // ====================================================================
+
+        /**
+         * @brief Add a new animation layer
+         * 
+         * Layers are processed in order of LayerIndex. Layer 0 is typically
+         * the base layer, with higher indices for overlay animations.
+         * 
+         * @param name Unique name for the layer
+         * @return Reference to the newly created layer for configuration
+         */
+        AnimationLayer& AddLayer(const std::string& name) {
+            // Check for duplicate
+            for (auto& layer : Layers) {
+                if (layer.Name == name) {
+                    return layer;  // Return existing layer
+                }
+            }
+            
+            int32_t newIndex = static_cast<int32_t>(Layers.size());
+            Layers.emplace_back(name, newIndex);
+            
+            // Keep layers sorted by index
+            std::sort(Layers.begin(), Layers.end(),
+                [](const AnimationLayer& a, const AnimationLayer& b) {
+                    return a.LayerIndex < b.LayerIndex;
+                });
+            
+            // Return reference to the added layer (may have moved due to sort)
+            for (auto& layer : Layers) {
+                if (layer.Name == name) {
+                    return layer;
+                }
+            }
+            return Layers.back();  // Shouldn't reach here
+        }
+
+        /**
+         * @brief Get a layer by name
+         * @param name Layer name to find
+         * @return Pointer to layer or nullptr if not found
+         */
+        AnimationLayer* GetLayer(const std::string& name) {
+            for (auto& layer : Layers) {
+                if (layer.Name == name) {
+                    return &layer;
+                }
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief Get a layer by name (const version)
+         * @param name Layer name to find
+         * @return Pointer to layer or nullptr if not found
+         */
+        const AnimationLayer* GetLayer(const std::string& name) const {
+            for (const auto& layer : Layers) {
+                if (layer.Name == name) {
+                    return &layer;
+                }
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief Get a layer by index
+         * @param index Layer index
+         * @return Pointer to layer or nullptr if index out of range
+         */
+        AnimationLayer* GetLayerByIndex(int32_t index) {
+            for (auto& layer : Layers) {
+                if (layer.LayerIndex == index) {
+                    return &layer;
+                }
+            }
+            return nullptr;
+        }
+
+        /**
+         * @brief Set the blend weight of a layer
+         * 
+         * @param name Layer name
+         * @param weight Blend weight (0-1), clamped automatically
+         * @return true if layer was found and weight set
+         */
+        void SetLayerWeight(const std::string& name, float weight) {
+            AnimationLayer* layer = GetLayer(name);
+            if (layer) {
+                layer->Weight = std::max(0.0f, std::min(1.0f, weight));
+            }
+        }
+
+        /**
+         * @brief Get the blend weight of a layer
+         * @param name Layer name
+         * @return Layer weight or 0.0f if not found
+         */
+        float GetLayerWeight(const std::string& name) const {
+            const AnimationLayer* layer = GetLayer(name);
+            return layer ? layer->Weight : 0.0f;
+        }
+
+        /**
+         * @brief Remove a layer by name
+         * @param name Layer name to remove
+         * @return true if layer was found and removed
+         */
+        bool RemoveLayer(const std::string& name) {
+            auto it = std::find_if(Layers.begin(), Layers.end(),
+                [&name](const AnimationLayer& layer) { return layer.Name == name; });
+            if (it != Layers.end()) {
+                Layers.erase(it);
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * @brief Get the number of animation layers
+         */
+        size_t GetLayerCount() const {
+            return Layers.size();
+        }
+
+        /**
+         * @brief Assign a blend tree to a layer
+         * @param layerName Layer to assign the blend tree to
+         * @param tree The blend tree
+         * @return true if layer was found and blend tree assigned
+         */
+        bool SetLayerBlendTree(const std::string& layerName, const BlendTree& tree) {
+            AnimationLayer* layer = GetLayer(layerName);
+            if (layer) {
+                layer->SetBlendTree(tree);
+                return true;
+            }
+            return false;
         }
 
         // ====================================================================
