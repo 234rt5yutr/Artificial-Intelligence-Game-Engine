@@ -23,3 +23,9 @@
 #include "Core/ECS/Components/AnimatorComponent.h"
 #include "Core/ECS/Components/IKComponent.h"
 #include "Core/ECS/Components/ParticleEmitterComponent.h"
+
+// Phase 13: World Building & Procedural Environments
+#include "Core/ECS/Components/TerrainComponent.h"
+#include "Core/ECS/Components/FoliageComponent.h"
+#include "Core/ECS/Components/SkyboxComponent.h"
+#include "Core/ECS/Components/TimeOfDayComponent.h"

@@ -17,3 +17,8 @@
 #include "Core/ECS/Systems/CameraViewInterpolatorSystem.h"
 #include "Core/ECS/Systems/AnimatorSystem.h"
 #include "Core/ECS/Systems/IKSystem.h"
+
+// Phase 13: World Building & Procedural Environments
+#include "Core/ECS/Systems/TerrainSystem.h"
+#include "Core/ECS/Systems/FoliageSystem.h"
+#include "Core/ECS/Systems/SkyboxSystem.h"

@@ -136,10 +136,10 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 13: World Building & Procedural Environments (Weeks 28-30)
 
-* [ ]  Step 13.1: Implement a chunk-based LOD Terrain System (using heightmaps or voxels) with asynchronous generation.
-* [ ]  Step 13.2: Implement a Foliage Scattering system utilizing compute-driven instanced rendering to efficiently draw thousands of trees/grass blades.
-* [ ]  Step 13.3: Implement a physically based Volumetric Skybox (Rayleigh/Mie scattering) and a dynamic Day/Night cycle updating directional lights.
-* [ ]  Step 13.4: **MCP Server Update:** Implement the `GenerateBiome` and `SetTimeOfDay` MCP tools. This allows the AI to procedurally sculpt terrain, scatter foliage based on high-level prompts, and manipulate the lighting environment dynamically.
+* [X]  Step 13.1: Implement a chunk-based LOD Terrain System (using heightmaps or voxels) with asynchronous generation.
+* [X]  Step 13.2: Implement a Foliage Scattering system utilizing compute-driven instanced rendering to efficiently draw thousands of trees/grass blades.
+* [X]  Step 13.3: Implement a physically based Volumetric Skybox (Rayleigh/Mie scattering) and a dynamic Day/Night cycle updating directional lights.
+* [X]  Step 13.4: **MCP Server Update:** Implement the `GenerateBiome` and `SetTimeOfDay` MCP tools. This allows the AI to procedurally sculpt terrain, scatter foliage based on high-level prompts, and manipulate the lighting environment dynamically.
 
 ## Phase 14: Particle Systems & Visual Effects (Weeks 31-33)
 

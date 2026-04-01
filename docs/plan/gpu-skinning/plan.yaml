@@ -1,0 +1,667 @@
+plan_id: gpu-skinning
+objective: |
+  Implement GPU skinning for skeletal meshes via compute shaders and/or vertex shader SSBOs.
+  Upload bone matrices from SkeletonPose::SkinningMatrices to GPU, deform skinned vertices,
+  create skinned PBR shader variants, and add a SkeletalRenderSystem for skeletal mesh rendering.
+created_at: "2025-01-04T12:53:00Z"
+created_by: gem-planner
+status: pending_approval
+research_confidence: high
+
+plan_metrics:
+  wave_1_task_count: 2
+  total_dependencies: 8
+  risk_score: medium
+
+tldr: |
+  GPU skinning implementation in 5 waves:
+  1. Core infrastructure: bone matrix buffer management + skinning compute shader
+  2. Vertex shader variant: skinned_pbr.vert with SSBO bone access
+  3. ECS integration: SkeletalRenderSystem to update poses and collect draw commands
+  4. Integration: Connect animation system output to GPU skinning pipeline
+  5. Testing & optimization: Validate correctness, profile performance, add LOD support
+
+  Two skinning approaches provided:
+  - Compute shader (skinning.comp): Pre-transforms vertices into output buffer, suitable for reuse across shadow/main passes
+  - Vertex shader SSBO (skinned_pbr.vert): On-the-fly skinning during vertex stage, simpler but transforms per-pass
+
+  Recommended: Start with vertex shader SSBO approach (simpler), add compute path for multi-pass optimization later.
+
+open_questions:
+  - Should compute-skinned vertices be cached for shadow passes or re-computed per pass?
+  - Maximum expected bone count per model (256 assumed, matches MAX_BONES constant)?
+  - Should dual quaternion skinning be supported for volume preservation?
+
+pre_mortem:
+  overall_risk_level: medium
+  critical_failure_modes:
+    - scenario: Bone matrix buffer update race condition with render thread
+      likelihood: medium
+      impact: high
+      mitigation: Use double-buffering for bone matrices, synchronize via frame index
+    - scenario: SSBO binding conflicts with existing descriptor sets
+      likelihood: medium
+      impact: medium
+      mitigation: Audit existing descriptor set layouts in FrustumCulling and ForwardPlus, reserve dedicated set for skinning
+    - scenario: Skinned vertex data memory explosion for large meshes
+      likelihood: low
+      impact: medium
+      mitigation: Compute path only - use vertex shader SSBO for on-the-fly skinning to avoid output buffer allocation
+    - scenario: Animation pose not ready when GPU skinning runs
+      likelihood: low
+      impact: high
+      mitigation: Ensure animation update runs before SkeletalRenderSystem in ECS update order
+  assumptions:
+    - VMA allocator available for GPU buffer creation (confirmed in VulkanBuffer.cpp)
+    - SSBO support available in Vulkan 1.3 target (confirmed in ShaderCompiler.cpp)
+    - SkeletonPose::SkinningMatrices is computed correctly by animation system
+    - Existing pbr.vert can serve as template for skinned variant
+    - RenderSystem pattern can be extended for skeletal meshes
+
+implementation_specification:
+  code_structure: |
+    GPU skinning follows a layered architecture:
+    1. Buffer Layer: BoneMatrixBuffer class manages per-skeleton GPU bone data
+    2. Shader Layer: skinning.comp (compute) + skinned_pbr.vert (vertex) for deformation
+    3. System Layer: SkeletalRenderSystem orchestrates pose upload and draw command collection
+    4. Integration Layer: Hook into existing render pipeline via DrawCommand extension
+
+  affected_areas:
+    - Core/Renderer/ (new BoneMatrixBuffer, shader management)
+    - Core/ECS/Systems/ (new SkeletalRenderSystem)
+    - Core/ECS/Components/SkeletalMeshComponent.h (GPU buffer reference)
+    - Shaders/ (new skinning.comp, skinned_pbr.vert, skinned_pbr.frag)
+    - Core/RHI/ (potential descriptor set layout additions)
+
+  component_details:
+    - component: BoneMatrixBuffer
+      responsibility: |
+        Manages GPU storage buffer for bone matrices. Handles double-buffering
+        for safe CPU->GPU updates while rendering. Tracks dirty state and
+        performs uploads only when pose changes.
+      interfaces:
+        - "void Initialize(RHIDevice*, uint32_t maxBones)"
+        - "void UpdateMatrices(const std::vector<Mat4>& skinningMatrices, uint32_t frameIndex)"
+        - "RHIBuffer* GetBuffer(uint32_t frameIndex) const"
+        - "uint32_t GetBoneCount() const"
+
+    - component: skinning.comp
+      responsibility: |
+        Compute shader that transforms source vertices using bone matrices.
+        Input: source skinned vertices (position, normal, tangent, bone indices/weights).
+        Output: transformed vertices ready for rasterization.
+        Used when same skinned mesh renders multiple times per frame (shadow + main).
+      interfaces:
+        - "layout(set=0, binding=0) readonly buffer BoneMatrices"
+        - "layout(set=0, binding=1) readonly buffer SourceVertices"
+        - "layout(set=0, binding=2) writeonly buffer OutputVertices"
+
+    - component: skinned_pbr.vert
+      responsibility: |
+        Vertex shader variant with runtime bone matrix skinning via SSBO.
+        Extends pbr.vert with bone transform application before MVP multiply.
+        Preferred for single-pass rendering (no output buffer needed).
+      interfaces:
+        - "layout(location=4) in uvec4 inBoneIndices"
+        - "layout(location=5) in vec4 inBoneWeights"
+        - "layout(set=2, binding=0) readonly buffer BoneMatrices"
+
+    - component: SkeletalRenderSystem
+      responsibility: |
+        ECS system that processes SkeletalMeshComponent entities.
+        1. Updates bone matrix buffers from SkeletonPose::SkinningMatrices
+        2. Optionally dispatches compute skinning
+        3. Collects SkeletalDrawCommands for renderer
+        Follows RenderSystem pattern with parallel processing support.
+      interfaces:
+        - "void Update(Scene& scene)"
+        - "void UpdateParallel(Scene& scene)"
+        - "const std::vector<SkeletalDrawCommand>& GetDrawCommands() const"
+        - "void SetSkinningMode(SkinningMode mode)"
+
+    - component: SkeletalDrawCommand
+      responsibility: |
+        Extended draw command structure for skeletal meshes.
+        Includes bone buffer reference for shader binding.
+      interfaces:
+        - "const RHIBuffer* BoneMatrixBuffer"
+        - "uint32_t BoneCount"
+        - "bool UseComputeSkinning"
+
+  dependencies:
+    - component: SkeletalRenderSystem
+      relationship: Depends on BoneMatrixBuffer for GPU data management
+    - component: SkeletalRenderSystem
+      relationship: Reads from SkeletalMeshComponent::CurrentPose
+    - component: skinned_pbr.vert
+      relationship: Binds BoneMatrixBuffer as SSBO at set 2
+    - component: skinning.comp
+      relationship: Binds BoneMatrixBuffer and vertex buffers as SSBOs
+    - component: BoneMatrixBuffer
+      relationship: Uses RHI::RHIDevice for buffer creation
+
+  integration_points:
+    - SkeletalRenderSystem registered in Scene alongside RenderSystem
+    - Renderer binds BoneMatrixBuffer before drawing skeletal meshes
+    - Animation system updates SkeletonPose before SkeletalRenderSystem runs
+    - Pipeline state factory creates skinned pipeline variant with extended vertex input
+
+contracts:
+  - from_task: bone-buffer-infrastructure
+    to_task: skeletal-render-system
+    interface: BoneMatrixBuffer class with Initialize/UpdateMatrices/GetBuffer API
+    format: C++ class with RHI buffer abstraction
+
+  - from_task: bone-buffer-infrastructure
+    to_task: skinned-vertex-shader
+    interface: Buffer layout for bone matrices (std430, array of mat4)
+    format: GLSL std430 buffer layout matching C++ alignment
+
+  - from_task: skinning-compute-shader
+    to_task: skeletal-render-system
+    interface: Compiled skinning.comp SPIR-V and dispatch parameters
+    format: Compute shader with workgroup size 64, vertex count dispatch
+
+  - from_task: skinned-vertex-shader
+    to_task: skeletal-render-system
+    interface: Pipeline descriptor with extended vertex attributes (bone indices/weights)
+    format: VertexInputAttribute for locations 4 and 5
+
+  - from_task: skeletal-render-system
+    to_task: pipeline-integration
+    interface: SkeletalDrawCommand list with bone buffer references
+    format: std::vector<SkeletalDrawCommand> matching DrawCommand pattern
+
+tasks:
+  # ============================================================================
+  # Wave 1: Core Infrastructure (Parallel)
+  # ============================================================================
+  - id: bone-buffer-infrastructure
+    title: Create BoneMatrixBuffer class for GPU bone data management
+    description: |
+      Implement BoneMatrixBuffer in Core/Renderer/ to manage per-skeleton GPU storage buffers.
+
+      Requirements:
+      1. Create BoneMatrixBuffer.h/.cpp following VulkanBuffer patterns
+      2. Support double-buffered storage (frame N-1 renders while frame N uploads)
+      3. Use BufferUsage::Storage for SSBO compatibility
+      4. Handle variable bone counts up to MAX_BONES (256)
+      5. Track dirty state to skip redundant uploads
+      6. Align mat4 array for std430 layout (16-byte alignment per vec4)
+
+      Key implementation details:
+      - Buffer size: sizeof(Mat4) * maxBones = 64 * 256 = 16KB per buffer
+      - Double buffer: 2 buffers, indexed by frameIndex % 2
+      - Map/memcpy/unmap pattern from FrustumCulling.cpp lines 403-409
+
+      Reference patterns:
+      - FrustumCulling::CreateBuffers() for storage buffer creation
+      - VulkanBuffer constructor for VMA allocation
+
+    wave: 1
+    agent: gem-implementer
+    priority: high
+    status: pending
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: Core/Renderer/FrustumCulling.cpp
+        description: Storage buffer creation pattern (lines 79-129)
+      - path: Core/RHI/Vulkan/VulkanBuffer.cpp
+        description: VMA buffer allocation implementation
+      - path: Core/RHI/RHIBuffer.h
+        description: Buffer interface and BufferUsage enum
+      - path: Core/Renderer/Mesh.h
+        description: MAX_BONES constant (line 29)
+    estimated_effort: medium
+    estimated_files: 2
+    estimated_lines: 150
+    focus_area: GPU buffer management
+    verification:
+      - BoneMatrixBuffer compiles without errors
+      - CreateBuffer succeeds with BufferUsage::Storage
+      - UpdateMatrices correctly maps and uploads data
+      - Double-buffering uses correct frame index modulo
+    acceptance_criteria:
+      - BoneMatrixBuffer.h declares class with Initialize/UpdateMatrices/GetBuffer
+      - BoneMatrixBuffer.cpp implements double-buffered storage pattern
+      - Buffer size accommodates MAX_BONES (256) matrices
+      - std430-compatible alignment for mat4 array
+    failure_modes:
+      - scenario: VMA allocation fails for large buffer
+        likelihood: low
+        impact: high
+        mitigation: Check allocation result, log error with size info
+      - scenario: Frame index race causes buffer overwrite during render
+        likelihood: medium
+        impact: high
+        mitigation: Use fence/semaphore sync or guarantee frame latency >= 2
+    tech_stack:
+      - C++17
+      - Vulkan 1.3
+      - VMA (Vulkan Memory Allocator)
+    test_coverage: Unit test for buffer creation and update cycle
+    requires_review: true
+    review_depth: standard
+    review_security_sensitive: false
+
+  - id: skinning-compute-shader
+    title: Create skinning.comp compute shader for vertex transformation
+    description: |
+      Implement compute shader that transforms skinned vertices using bone matrices.
+
+      Shader specification:
+      1. Workgroup size: 64 threads (matches frustum_cull.comp pattern)
+      2. Input bindings:
+         - set=0, binding=0: BoneMatrices (readonly buffer, mat4 array)
+         - set=0, binding=1: SourceVertices (readonly buffer, SkinnedVertex array)
+         - set=0, binding=2: OutputVertices (writeonly buffer, Vertex array)
+      3. Push constants: vertexCount, boneCount
+
+      Skinning algorithm (4-bone linear blend):
+      ```glsl
+      mat4 skinMatrix = boneMatrices[indices.x] * weights.x
+                      + boneMatrices[indices.y] * weights.y
+                      + boneMatrices[indices.z] * weights.z
+                      + boneMatrices[indices.w] * weights.w;
+      vec4 skinnedPos = skinMatrix * vec4(srcVertex.position, 1.0);
+      vec3 skinnedNormal = mat3(skinMatrix) * srcVertex.normal;
+      vec3 skinnedTangent = mat3(skinMatrix) * srcVertex.tangent.xyz;
+      ```
+
+      Reference: frustum_cull.comp for structure patterns and SSBO layouts.
+
+    wave: 1
+    agent: gem-implementer
+    priority: high
+    status: pending
+    dependencies: []
+    conflicts_with: []
+    context_files:
+      - path: Shaders/frustum_cull.comp
+        description: Compute shader structure and SSBO patterns
+      - path: Core/Renderer/Mesh.h
+        description: SkinnedVertex struct definition (lines 31-54)
+      - path: Core/RHI/ShaderCompiler.cpp
+        description: shaderc compilation settings
+    estimated_effort: medium
+    estimated_files: 1
+    estimated_lines: 100
+    focus_area: GPU compute shader
+    verification:
+      - Shader compiles to SPIR-V without errors
+      - GLSL std430 layout matches C++ struct alignment
+      - Handles edge cases (zero weights, out-of-bounds bone indices)
+    acceptance_criteria:
+      - skinning.comp created in Shaders/ directory
+      - Linear blend skinning with 4 bone influences
+      - Output vertex matches Vertex struct layout
+      - Bounds checking on vertex index
+    failure_modes:
+      - scenario: std430 layout mismatch between GLSL and C++
+        likelihood: medium
+        impact: high
+        mitigation: Explicitly define struct layouts with offset qualifiers, verify with SPIRV-Cross
+      - scenario: Bank conflicts from uncoalesced bone matrix reads
+        likelihood: low
+        impact: low
+        mitigation: Accept initial implementation, optimize later with shared memory if profiling shows issue
+    tech_stack:
+      - GLSL 4.50
+      - Vulkan 1.3 SPIR-V target
+    test_coverage: null
+    requires_review: true
+    review_depth: standard
+    review_security_sensitive: false
+
+  # ============================================================================
+  # Wave 2: Vertex Shader Path
+  # ============================================================================
+  - id: skinned-vertex-shader
+    title: Create skinned_pbr.vert vertex shader with SSBO bone access
+    description: |
+      Create vertex shader variant that performs runtime skinning via bone matrix SSBO.
+
+      Requirements:
+      1. Extend pbr.vert with additional vertex inputs:
+         - location 4: uvec4 inBoneIndices
+         - location 5: vec4 inBoneWeights
+      2. Add bone matrix SSBO binding at set 2, binding 0
+      3. Apply linear blend skinning before model transform
+      4. Transform normal/tangent using mat3(skinMatrix)
+
+      Descriptor set layout:
+      - Set 0: Camera/transform uniforms (existing)
+      - Set 1: Material textures (existing)
+      - Set 2: Bone matrices SSBO (new for skinned meshes)
+
+      Skinning code (insert before worldPos calculation):
+      ```glsl
+      mat4 skinMatrix = boneMatrices[inBoneIndices.x] * inBoneWeights.x
+                      + boneMatrices[inBoneIndices.y] * inBoneWeights.y
+                      + boneMatrices[inBoneIndices.z] * inBoneWeights.z
+                      + boneMatrices[inBoneIndices.w] * inBoneWeights.w;
+      vec3 skinnedPosition = (skinMatrix * vec4(inPosition, 1.0)).xyz;
+      vec3 skinnedNormal = normalize(mat3(skinMatrix) * inNormal);
+      vec3 skinnedTangent = normalize(mat3(skinMatrix) * inTangent);
+      ```
+
+      Then use skinnedPosition/Normal/Tangent in place of inPosition/Normal/Tangent.
+
+    wave: 2
+    agent: gem-implementer
+    priority: high
+    status: pending
+    dependencies:
+      - bone-buffer-infrastructure
+    conflicts_with: []
+    context_files:
+      - path: Shaders/pbr.vert
+        description: Base PBR vertex shader to extend
+      - path: Core/Renderer/Mesh.h
+        description: SkinnedVertex layout for vertex input matching
+    estimated_effort: small
+    estimated_files: 2
+    estimated_lines: 80
+    focus_area: GPU vertex shader
+    verification:
+      - skinned_pbr.vert compiles to SPIR-V
+      - Vertex input locations match SkinnedVertex struct order
+      - Output matches pbr.vert interface for fragment shader compatibility
+    acceptance_criteria:
+      - skinned_pbr.vert created in Shaders/
+      - skinned_pbr.frag created (copy of pbr.frag, same interface)
+      - Bone matrix SSBO at set 2, binding 0
+      - Skinned position/normal/tangent computed before MVP
+    failure_modes:
+      - scenario: Descriptor set 2 conflicts with existing pipeline layouts
+        likelihood: medium
+        impact: medium
+        mitigation: Audit existing pipelines, use dedicated skinned pipeline layout
+    tech_stack:
+      - GLSL 4.50
+      - Vulkan 1.3 SPIR-V target
+    test_coverage: null
+    requires_review: true
+    review_depth: lightweight
+    review_security_sensitive: false
+
+  # ============================================================================
+  # Wave 3: ECS Integration
+  # ============================================================================
+  - id: skeletal-render-system
+    title: Implement SkeletalRenderSystem for skeletal mesh rendering
+    description: |
+      Create ECS system that handles skeletal mesh rendering workflow.
+
+      Requirements:
+      1. Create SkeletalRenderSystem.h/.cpp in Core/ECS/Systems/
+      2. Follow RenderSystem pattern (Update/UpdateParallel, DrawCommand collection)
+      3. Process entities with TransformComponent + SkeletalMeshComponent
+      4. Per-entity workflow:
+         a. Check if pose is dirty (animation updated)
+         b. Update BoneMatrixBuffer from CurrentPose.SkinningMatrices
+         c. Create SkeletalDrawCommand with bone buffer reference
+      5. Support both compute and vertex shader skinning modes
+
+      SkeletalDrawCommand structure:
+      ```cpp
+      struct SkeletalDrawCommand {
+          Math::Mat4 Transform;
+          const Renderer::Mesh* Mesh;
+          const RHI::RHIBuffer* BoneMatrixBuffer;
+          uint32_t MaterialIndex;
+          uint32_t BoneCount;
+          bool CastShadows;
+          bool UseComputeSkinning;
+      };
+      ```
+
+      Reference: RenderSystem.cpp for pattern, FrustumCulling.cpp for buffer updates.
+
+    wave: 3
+    agent: gem-implementer
+    priority: high
+    status: pending
+    dependencies:
+      - bone-buffer-infrastructure
+      - skinned-vertex-shader
+      - skinning-compute-shader
+    conflicts_with: []
+    context_files:
+      - path: Core/ECS/Systems/RenderSystem.cpp
+        description: System pattern and DrawCommand structure
+      - path: Core/ECS/Systems/RenderSystem.h
+        description: System interface and parallel processing
+      - path: Core/ECS/Components/SkeletalMeshComponent.h
+        description: Component structure with SkeletonPose
+      - path: Core/Renderer/FrustumCulling.cpp
+        description: Buffer update pattern (UpdateObjectBuffer)
+    estimated_effort: large
+    estimated_files: 2
+    estimated_lines: 250
+    focus_area: ECS system implementation
+    verification:
+      - System compiles and links
+      - Processes SkeletalMeshComponent entities
+      - Bone buffer updated each frame for animated entities
+      - Draw commands contain valid bone buffer pointers
+    acceptance_criteria:
+      - SkeletalRenderSystem.h/.cpp created following RenderSystem pattern
+      - SkeletalDrawCommand struct defined with bone buffer reference
+      - Update() processes TransformComponent + SkeletalMeshComponent
+      - UpdateParallel() uses ThreadLocalScratch pattern
+      - BoneMatrixBuffer updated from CurrentPose.SkinningMatrices
+    failure_modes:
+      - scenario: Bone buffer not updated before draw command issued
+        likelihood: medium
+        impact: high
+        mitigation: Ensure system update order places SkeletalRenderSystem after animation update
+      - scenario: Thread safety issue with parallel bone buffer updates
+        likelihood: medium
+        impact: high
+        mitigation: Each entity gets own BoneMatrixBuffer, no shared state
+    tech_stack:
+      - C++17
+      - EnTT ECS
+    test_coverage: Integration test with mock skeletal mesh
+    requires_review: true
+    review_depth: full
+    review_security_sensitive: false
+
+  # ============================================================================
+  # Wave 4: Pipeline Integration
+  # ============================================================================
+  - id: pipeline-integration
+    title: Integrate skeletal rendering into main render pipeline
+    description: |
+      Connect SkeletalRenderSystem to the rendering backend.
+
+      Requirements:
+      1. Create skinned pipeline state with extended vertex input layout
+      2. Update Scene to register SkeletalRenderSystem
+      3. Ensure system update order: Animation -> SkeletalRenderSystem -> Render
+      4. Add renderer method to process SkeletalDrawCommands
+      5. Bind bone matrix SSBO before drawing skinned meshes
+
+      Vertex input layout for skinned mesh:
+      ```cpp
+      VertexInputAttribute attrs[] = {
+          {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SkinnedVertex, position)},
+          {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SkinnedVertex, normal)},
+          {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(SkinnedVertex, texCoord)},
+          {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(SkinnedVertex, tangent)},
+          {4, 0, VK_FORMAT_R32G32B32A32_UINT, offsetof(SkinnedVertex, boneIndices)},
+          {5, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(SkinnedVertex, boneWeights)},
+      };
+      ```
+
+      Pipeline layout must include descriptor set 2 for bone matrices.
+
+    wave: 4
+    agent: gem-implementer
+    priority: high
+    status: pending
+    dependencies:
+      - skeletal-render-system
+    conflicts_with: []
+    context_files:
+      - path: Core/RHI/RHIPipelineState.h
+        description: Pipeline descriptor structures
+      - path: Core/ECS/Scene.cpp
+        description: System registration pattern
+      - path: Core/Renderer/Mesh.h
+        description: SkinnedVertex struct for attribute offsets
+    estimated_effort: medium
+    estimated_files: 3
+    estimated_lines: 180
+    focus_area: Render pipeline integration
+    verification:
+      - Skinned pipeline created successfully
+      - SkeletalRenderSystem registered in Scene
+      - System update order correct (animation before skeletal render)
+      - Bone matrix SSBO bound before skinned draw calls
+    acceptance_criteria:
+      - GraphicsPipelineDescriptor supports 6 vertex attributes
+      - SkeletalRenderSystem added to Scene::Update()
+      - Renderer binds set 2 descriptor for bone matrices
+      - Skinned meshes render with correct deformation
+    failure_modes:
+      - scenario: Descriptor set binding order incorrect
+        likelihood: medium
+        impact: high
+        mitigation: Document set assignments, validate with Vulkan validation layers
+    tech_stack:
+      - C++17
+      - Vulkan 1.3
+    test_coverage: Manual visual verification
+    requires_review: true
+    review_depth: standard
+    review_security_sensitive: false
+
+  # ============================================================================
+  # Wave 5: Validation and Optimization
+  # ============================================================================
+  - id: skinning-validation
+    title: Validate GPU skinning correctness and optimize performance
+    description: |
+      Comprehensive testing and optimization of the GPU skinning system.
+
+      Validation tasks:
+      1. Create test scene with animated skeletal mesh
+      2. Compare GPU skinning output with CPU reference implementation
+      3. Verify normal/tangent transformation maintains orthonormality
+      4. Test edge cases: zero weights, max bone count, rapid animation switching
+
+      Performance optimization:
+      1. Profile bone matrix upload time (target: < 0.1ms for 100 entities)
+      2. Measure skinning shader execution time
+      3. Evaluate compute vs vertex shader performance difference
+      4. Consider bone matrix texture for cache efficiency (future optimization)
+
+      Debug visualization:
+      1. Add SkeletalMeshComponent::ShowSkeleton rendering
+      2. Color-code vertices by dominant bone influence
+      3. Visualize skinning matrix errors (scale/shear detection)
+
+    wave: 5
+    agent: gem-implementer
+    priority: medium
+    status: pending
+    dependencies:
+      - pipeline-integration
+    conflicts_with: []
+    context_files:
+      - path: Core/ECS/Components/SkeletalMeshComponent.h
+        description: ShowSkeleton debug flag (line 123)
+      - path: Core/Profile.h
+        description: PROFILE_FUNCTION macro for timing
+    estimated_effort: medium
+    estimated_files: 2
+    estimated_lines: 150
+    focus_area: Testing and optimization
+    verification:
+      - Test scene loads and renders animated skeletal mesh
+      - GPU output matches CPU reference within tolerance
+      - Performance meets target (< 0.1ms for 100 entities)
+    acceptance_criteria:
+      - Test scene demonstrates working GPU skinning
+      - CPU reference comparison validates correctness
+      - Performance profiling data documented
+      - Debug visualization for skeleton rendering
+    failure_modes:
+      - scenario: Numerical precision issues in skinning
+        likelihood: low
+        impact: medium
+        mitigation: Use appropriate epsilon for comparisons, normalize quaternions
+    tech_stack:
+      - C++17
+      - GPU profiling
+    test_coverage: Validation test suite
+    requires_review: true
+    review_depth: lightweight
+    review_security_sensitive: false
+
+  - id: documentation-gpu-skinning
+    title: Document GPU skinning system architecture and usage
+    description: |
+      Create comprehensive documentation for the GPU skinning implementation.
+
+      Documentation sections:
+      1. Architecture Overview
+         - Component diagram showing BoneMatrixBuffer, shaders, system relationships
+         - Data flow from animation -> pose -> GPU buffer -> shader
+
+      2. Usage Guide
+         - Setting up a skeletal mesh for GPU skinning
+         - Animation playback integration
+         - Switching between compute and vertex shader modes
+
+      3. Performance Guidelines
+         - When to use compute vs vertex shader path
+         - Bone count limits and memory considerations
+         - Multi-pass rendering optimization (compute pre-skin)
+
+      4. API Reference
+         - BoneMatrixBuffer class documentation
+         - SkeletalRenderSystem methods
+         - Shader binding points and uniforms
+
+    wave: 5
+    agent: gem-documentation-writer
+    priority: low
+    status: pending
+    dependencies:
+      - skinning-validation
+    conflicts_with: []
+    context_files:
+      - path: engine_roadmap.md
+        description: Overall engine documentation style
+    estimated_effort: small
+    estimated_files: 1
+    estimated_lines: 200
+    focus_area: Technical documentation
+    verification:
+      - Documentation covers all major components
+      - Code examples compile
+      - Architecture diagram accurate
+    acceptance_criteria:
+      - docs/gpu-skinning.md created with architecture overview
+      - Usage guide with code examples
+      - Performance guidelines documented
+      - API reference for public classes
+    failure_modes:
+      - scenario: Documentation out of sync with implementation
+        likelihood: medium
+        impact: low
+        mitigation: Generate docs after implementation complete, review with code
+    task_type: documentation
+    audience: developers
+    coverage_matrix:
+      - Architecture overview
+      - Usage guide
+      - Performance guidelines
+      - API reference
+    requires_review: false
+    review_depth: null
+    review_security_sensitive: false

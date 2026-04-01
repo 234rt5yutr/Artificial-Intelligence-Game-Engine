@@ -1,7 +1,7 @@
 #pragma once
 
 // MCP All Tools Factory
-// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools) into a single collection
+// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools + world tools) into a single collection
 // This file exists to avoid circular dependencies between MCPSceneTools.h and AutoLevelDesigner.h
 
 #include "MCPTool.h"
@@ -10,6 +10,7 @@
 #include "MCPAudioTools.h"
 #include "MCPAnimationTools.h"
 #include "MCPParticleTools.h"
+#include "MCPWorldTools.h"
 
 namespace Core {
 namespace MCP {
@@ -37,6 +38,8 @@ namespace MCP {
     // - SpawnParticleEffect: Spawn particle emitters at locations
     // - ModifyEmitter: Modify existing particle emitter parameters
     // - GetParticleInfo: Query particle emitter state and information
+    // - GenerateBiome: Procedurally generate terrain and foliage
+    // - SetTimeOfDay: Control day/night cycle and lighting
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -59,6 +62,10 @@ namespace MCP {
         // Add particle tools (SpawnParticleEffect, ModifyEmitter, GetParticleInfo)
         auto particleTools = CreateParticleTools();
         tools.insert(tools.end(), particleTools.begin(), particleTools.end());
+
+        // Add world tools (GenerateBiome, SetTimeOfDay)
+        auto worldTools = CreateWorldTools();
+        tools.insert(tools.end(), worldTools.begin(), worldTools.end());
 
         return tools;
     }

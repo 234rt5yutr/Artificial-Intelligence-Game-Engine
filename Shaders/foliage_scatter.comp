@@ -1,0 +1,238 @@
+#version 450
+
+// Foliage Scatter Compute Shader
+// Generates foliage instances on terrain based on density and placement rules
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Instance output structure (must match FoliageInstance in FoliageInstance.h)
+struct FoliageInstance {
+    mat4 transform;         // 64 bytes
+    vec4 color;             // 16 bytes
+    vec4 windParams;        // 16 bytes
+    uint meshIndex;         // 4 bytes
+    uint materialIndex;     // 4 bytes
+    float scale;            // 4 bytes
+    float padding;          // 4 bytes
+};
+
+// SSBO for instance output
+layout(std430, binding = 0) buffer InstanceBuffer {
+    FoliageInstance instances[];
+};
+
+// Atomic counter for instance count
+layout(std430, binding = 1) buffer CounterBuffer {
+    uint instanceCount;
+};
+
+// Uniform buffer for scatter parameters
+layout(std140, binding = 2) uniform ScatterUniforms {
+    mat4 viewProjection;
+    vec4 cameraPosition;        // xyz=pos, w=time
+    vec4 frustumPlanes[6];      // xyz=normal, w=distance
+    vec4 scatterMin;
+    vec4 scatterMax;
+    vec4 heightmapParams;       // x=width, y=height, z=scale, w=offset
+    vec4 windParams;            // xy=direction, z=strength, w=frequency
+    float density;
+    float minScale;
+    float maxScale;
+    float rotationVariation;
+    float cullDistance;
+    float minHeight;
+    float maxHeight;
+    float minSlope;
+    float maxSlope;
+    uint terrainAligned;
+    uint meshIndex;
+    uint materialIndex;
+    uint maxInstances;
+    uint randomSeed;
+};
+
+// Heightmap texture
+layout(binding = 3) uniform sampler2D heightmap;
+
+// Hash function for pseudo-random numbers
+uint hash(uint x) {
+    x += (x << 10u);
+    x ^= (x >> 6u);
+    x += (x << 3u);
+    x ^= (x >> 11u);
+    x += (x << 15u);
+    return x;
+}
+
+// Generate random float [0, 1)
+float randomFloat(uint seed) {
+    return float(hash(seed)) / 4294967296.0;
+}
+
+// Generate random float [min, max)
+float randomRange(uint seed, float minVal, float maxVal) {
+    return minVal + randomFloat(seed) * (maxVal - minVal);
+}
+
+// Sample heightmap at world position
+float sampleHeight(vec2 worldXZ) {
+    vec2 uv = (worldXZ - scatterMin.xz) / (scatterMax.xz - scatterMin.xz);
+    uv = clamp(uv, 0.0, 1.0);
+    return texture(heightmap, uv).r * heightmapParams.z + heightmapParams.w;
+}
+
+// Sample terrain normal from heightmap
+vec3 sampleNormal(vec2 worldXZ) {
+    float epsilon = 1.0;
+    float hL = sampleHeight(worldXZ - vec2(epsilon, 0.0));
+    float hR = sampleHeight(worldXZ + vec2(epsilon, 0.0));
+    float hD = sampleHeight(worldXZ - vec2(0.0, epsilon));
+    float hU = sampleHeight(worldXZ + vec2(0.0, epsilon));
+    return normalize(vec3(hL - hR, 2.0 * epsilon, hD - hU));
+}
+
+// Calculate slope in degrees
+float calculateSlope(vec3 normal) {
+    return degrees(acos(clamp(normal.y, 0.0, 1.0)));
+}
+
+// Check if point is inside frustum
+bool isInFrustum(vec3 position) {
+    for (int i = 0; i < 6; ++i) {
+        float dist = dot(frustumPlanes[i].xyz, position) + frustumPlanes[i].w;
+        if (dist < -10.0) return false;  // Small margin for large objects
+    }
+    return true;
+}
+
+// Create rotation matrix from angle around Y axis
+mat4 rotationY(float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return mat4(
+        c, 0, -s, 0,
+        0, 1,  0, 0,
+        s, 0,  c, 0,
+        0, 0,  0, 1
+    );
+}
+
+// Create rotation matrix to align with surface normal
+mat4 alignToNormal(vec3 normal) {
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 axis = cross(up, normal);
+    float angle = acos(clamp(dot(up, normal), -1.0, 1.0));
+    
+    if (length(axis) < 0.001) {
+        return mat4(1.0);
+    }
+    
+    axis = normalize(axis);
+    float c = cos(angle);
+    float s = sin(angle);
+    float t = 1.0 - c;
+    
+    return mat4(
+        t*axis.x*axis.x + c,        t*axis.x*axis.y - s*axis.z, t*axis.x*axis.z + s*axis.y, 0,
+        t*axis.x*axis.y + s*axis.z, t*axis.y*axis.y + c,        t*axis.y*axis.z - s*axis.x, 0,
+        t*axis.x*axis.z - s*axis.y, t*axis.y*axis.z + s*axis.x, t*axis.z*axis.z + c,        0,
+        0,                          0,                          0,                          1
+    );
+}
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+    
+    // Calculate potential placement position using deterministic grid
+    float areaWidth = scatterMax.x - scatterMin.x;
+    float areaDepth = scatterMax.z - scatterMin.z;
+    float instanceSpacing = 1.0 / sqrt(density);
+    
+    uint gridX = uint(areaWidth / instanceSpacing);
+    uint gridZ = uint(areaDepth / instanceSpacing);
+    uint totalPotentialInstances = gridX * gridZ;
+    
+    if (gid >= totalPotentialInstances) return;
+    
+    // Calculate grid position
+    uint ix = gid % gridX;
+    uint iz = gid / gridX;
+    
+    // Add jitter for natural distribution
+    uint seedBase = randomSeed + gid * 7919u;
+    float jitterX = randomFloat(seedBase) - 0.5;
+    float jitterZ = randomFloat(seedBase + 1u) - 0.5;
+    
+    float worldX = scatterMin.x + (float(ix) + 0.5 + jitterX) * instanceSpacing;
+    float worldZ = scatterMin.z + (float(iz) + 0.5 + jitterZ) * instanceSpacing;
+    
+    // Density-based rejection
+    if (randomFloat(seedBase + 2u) > density / 100.0) return;
+    
+    // Sample terrain
+    vec2 worldXZ = vec2(worldX, worldZ);
+    float height = sampleHeight(worldXZ);
+    vec3 normal = sampleNormal(worldXZ);
+    float slope = calculateSlope(normal);
+    
+    // Height range check
+    if (height < minHeight || height > maxHeight) return;
+    
+    // Slope range check
+    if (slope < minSlope || slope > maxSlope) return;
+    
+    vec3 position = vec3(worldX, height, worldZ);
+    
+    // Distance culling
+    float distToCam = length(position - cameraPosition.xyz);
+    if (distToCam > cullDistance) return;
+    
+    // Frustum culling
+    if (!isInFrustum(position)) return;
+    
+    // Instance passed all tests - create it
+    uint instanceIdx = atomicAdd(instanceCount, 1u);
+    if (instanceIdx >= maxInstances) {
+        atomicSub(instanceCount, 1u);
+        return;
+    }
+    
+    // Generate random properties
+    float instanceScale = randomRange(seedBase + 3u, minScale, maxScale);
+    float rotation = radians(randomRange(seedBase + 4u, 0.0, rotationVariation));
+    
+    // Build transform matrix
+    mat4 translation = mat4(1.0);
+    translation[3] = vec4(position, 1.0);
+    
+    mat4 scale = mat4(instanceScale);
+    scale[3][3] = 1.0;
+    
+    mat4 rot = rotationY(rotation);
+    
+    mat4 transform;
+    if (terrainAligned != 0u) {
+        mat4 align = alignToNormal(normal);
+        transform = translation * align * rot * scale;
+    } else {
+        transform = translation * rot * scale;
+    }
+    
+    // Generate color variation
+    vec3 baseColor = vec3(1.0);
+    float colorVar = randomRange(seedBase + 5u, -0.1, 0.1);
+    vec4 color = vec4(baseColor + vec3(colorVar), 1.0);
+    
+    // Wind parameters (phase offset for variation)
+    float windPhase = randomFloat(seedBase + 6u) * 6.28318;
+    vec4 windInstanceParams = vec4(windParams.xy, windParams.z, windPhase);
+    
+    // Write instance
+    instances[instanceIdx].transform = transform;
+    instances[instanceIdx].color = color;
+    instances[instanceIdx].windParams = windInstanceParams;
+    instances[instanceIdx].meshIndex = meshIndex;
+    instances[instanceIdx].materialIndex = materialIndex;
+    instances[instanceIdx].scale = instanceScale;
+    instances[instanceIdx].padding = 0.0;
+}
