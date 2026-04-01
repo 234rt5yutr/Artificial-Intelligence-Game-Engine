@@ -1,13 +1,14 @@
 #pragma once
 
 // MCP All Tools Factory
-// Combines all MCP tools (scene tools + auto-level designer + audio tools) into a single collection
+// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools) into a single collection
 // This file exists to avoid circular dependencies between MCPSceneTools.h and AutoLevelDesigner.h
 
 #include "MCPTool.h"
 #include "MCPSceneTools.h"
 #include "AutoLevelDesigner.h"
 #include "MCPAudioTools.h"
+#include "MCPAnimationTools.h"
 
 namespace Core {
 namespace MCP {
@@ -29,6 +30,9 @@ namespace MCP {
     // - ModifyAcoustics: Alter reverb and acoustic parameters
     // - GetAudioState: Query audio system state
     // - SetMasterVolume: Control master volume
+    // - SetAnimationState: Control animation state machines
+    // - SetIKTarget: Set inverse kinematics targets
+    // - GetAnimationInfo: Query animation states and bone transforms
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -43,6 +47,10 @@ namespace MCP {
         // Add audio tools (PlayAudio, StopAudio, ModifyAcoustics, GetAudioState, SetMasterVolume)
         auto audioTools = CreateAudioTools();
         tools.insert(tools.end(), audioTools.begin(), audioTools.end());
+
+        // Add animation tools (SetAnimationState, SetIKTarget, GetAnimationInfo)
+        auto animationTools = CreateAnimationTools();
+        tools.insert(tools.end(), animationTools.begin(), animationTools.end());
 
         return tools;
     }
