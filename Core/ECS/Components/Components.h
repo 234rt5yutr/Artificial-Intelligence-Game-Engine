@@ -21,3 +21,4 @@
 #include "Core/ECS/Components/AudioSourceComponent.h"
 #include "Core/ECS/Components/ReverbZoneComponent.h"
 #include "Core/ECS/Components/AnimatorComponent.h"
+#include "Core/ECS/Components/IKComponent.h"

@@ -16,3 +16,4 @@
 #include "Core/ECS/Systems/ThirdPersonCameraSystem.h"
 #include "Core/ECS/Systems/CameraViewInterpolatorSystem.h"
 #include "Core/ECS/Systems/AnimatorSystem.h"
+#include "Core/ECS/Systems/IKSystem.h"
