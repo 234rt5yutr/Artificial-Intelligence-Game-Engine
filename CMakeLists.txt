@@ -102,6 +102,8 @@ add_library(EngineCore
     Core/MCP/SceneSerialization.h
     Core/MCP/MCPSceneTools.h
     Core/MCP/ActionValidator.h
+    Core/MCP/AutoLevelDesigner.h
+    Core/MCP/MCPAllTools.h
     Core/Scripting/LuaEngine.h
     Core/Renderer/ForwardPlus.h
     Core/Renderer/ForwardPlus.cpp

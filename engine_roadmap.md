@@ -114,7 +114,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 10.6: Implement the `ModifyComponent` MCP tool allowing the AI to tweak lighting colors, physics mass, or translate/rotate objects based on semantic commands.
 * [X]  Step 10.7: Implement the `ExecuteScript` MCP tool for injecting dynamic AI-authored Lua/C++ script snippets to define custom gameplay behaviors on the fly.
 * [X]  Step 10.8: Integrate a sandboxed action-validation layer to ensure AI agents cannot crash the engine when generating invalid transforms or extreme array allocations.
-* [ ]  Step 10.9: Build an overarching "Auto-Level Designer" loop that translates abstract user prompts into sequence of MCP tool calls.
+* [X]  Step 10.9: Build an overarching "Auto-Level Designer" loop that translates abstract user prompts into sequence of MCP tool calls.
 
 ## Phase 11: Spatial Audio & Acoustic Environments (Weeks 23-24)
 
