@@ -32,3 +32,7 @@
 
 // Phase 15: Post-Processing
 #include "Core/ECS/Components/PostProcessComponent.h"
+
+// Phase 16: UI Framework & State Management
+#include "Core/ECS/Components/UIComponent.h"
+#include "Core/ECS/Components/WorldUIComponent.h"

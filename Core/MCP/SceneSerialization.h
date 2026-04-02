@@ -9,6 +9,7 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
 #include "Core/ECS/Components/Components.h"
+#include "Core/UI/Anchoring.h"
 
 #include <entt/entt.hpp>
 #include <string>
@@ -187,6 +188,107 @@ namespace MCP {
             };
         }
 
+        // Vec2 schema for UI
+        inline Json Vec2Schema() {
+            return {
+                {"type", "object"},
+                {"description", "2D vector with x, y components"},
+                {"properties", {
+                    {"x", {{"type", "number"}, {"description", "X component"}}},
+                    {"y", {{"type", "number"}, {"description", "Y component"}}}
+                }},
+                {"required", Json::array({"x", "y"})}
+            };
+        }
+
+        // RGBA color schema
+        inline Json ColorRGBASchema() {
+            return {
+                {"type", "object"},
+                {"description", "RGBA color with alpha"},
+                {"properties", {
+                    {"r", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+                    {"g", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+                    {"b", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+                    {"a", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}
+                }}
+            };
+        }
+
+        // UIComponent schema
+        inline Json UIComponentSchema() {
+            return {
+                {"type", "object"},
+                {"description", "Screen-space anchored UI widget"},
+                {"properties", {
+                    {"anchor", {
+                        {"type", "string"},
+                        {"enum", Json::array({"top_left", "top_center", "top_right", 
+                                               "middle_left", "middle_center", "middle_right",
+                                               "bottom_left", "bottom_center", "bottom_right"})}
+                    }},
+                    {"offset", Vec2Schema()},
+                    {"size", Vec2Schema()},
+                    {"pivot", {{"type", "string"}}},
+                    {"type", {
+                        {"type", "string"},
+                        {"enum", Json::array({"none", "label", "health_bar", "progress_bar", 
+                                               "panel", "crosshair", "objective_marker",
+                                               "mini_map", "message_box", "alert_box", "custom"})}
+                    }},
+                    {"widgetId", {{"type", "string"}}},
+                    {"text", {{"type", "string"}}},
+                    {"color", ColorRGBASchema()},
+                    {"backgroundColor", ColorRGBASchema()},
+                    {"fontSize", {{"type", "number"}, {"minimum", 1.0}}},
+                    {"fontFamily", {{"type", "string"}}},
+                    {"visible", {{"type", "boolean"}}},
+                    {"interactive", {{"type", "boolean"}}},
+                    {"zOrder", {{"type", "integer"}}},
+                    {"progress", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+                    {"fadeIn", {{"type", "boolean"}}},
+                    {"fadeOut", {{"type", "boolean"}}},
+                    {"fadeDuration", {{"type", "number"}, {"minimum", 0.0}}}
+                }}
+            };
+        }
+
+        // WorldUIComponent schema
+        inline Json WorldUIComponentSchema() {
+            return {
+                {"type", "object"},
+                {"description", "3D world-space positioned UI widget"},
+                {"properties", {
+                    {"localOffset", Vec3Schema()},
+                    {"screenOffset", Vec2Schema()},
+                    {"size", Vec2Schema()},
+                    {"scaleWithDistance", {{"type", "boolean"}}},
+                    {"minScale", {{"type", "number"}, {"minimum", 0.0}}},
+                    {"maxScale", {{"type", "number"}, {"minimum", 0.0}}},
+                    {"referenceDistance", {{"type", "number"}, {"minimum", 0.0}}},
+                    {"billboard", {
+                        {"type", "string"},
+                        {"enum", Json::array({"none", "face_camera", "face_camera_y", "face_camera_up"})}
+                    }},
+                    {"type", {{"type", "string"}}},
+                    {"widgetId", {{"type", "string"}}},
+                    {"text", {{"type", "string"}}},
+                    {"color", ColorRGBASchema()},
+                    {"backgroundColor", ColorRGBASchema()},
+                    {"fontSize", {{"type", "number"}, {"minimum", 1.0}}},
+                    {"fontFamily", {{"type", "string"}}},
+                    {"enableDistanceFade", {{"type", "boolean"}}},
+                    {"fadeStartDistance", {{"type", "number"}, {"minimum", 0.0}}},
+                    {"fadeEndDistance", {{"type", "number"}, {"minimum", 0.0}}},
+                    {"occludeByGeometry", {{"type", "boolean"}}},
+                    {"clampToScreen", {{"type", "boolean"}}},
+                    {"visible", {{"type", "boolean"}}},
+                    {"progress", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+                    {"zOrder", {{"type", "integer"}}}
+                }}
+            };
+        }
+
         // Entity schema
         inline Json EntitySchema() {
             return {
@@ -204,7 +306,9 @@ namespace MCP {
                             {"mesh", MeshSchema()},
                             {"camera", CameraSchema()},
                             {"collider", ColliderSchema()},
-                            {"rigidBody", RigidBodySchema()}
+                            {"rigidBody", RigidBodySchema()},
+                            {"ui", UIComponentSchema()},
+                            {"worldUI", WorldUIComponentSchema()}
                         }}
                     }},
                     {"parent", {{"type", "integer"}, {"description", "Parent entity ID, null if root"}}},
@@ -573,6 +677,195 @@ namespace MCP {
         return rb;
     }
 
+    // ============================================================================
+    // UIComponent Serialization
+    // ============================================================================
+
+    // Anchor serialization
+    inline std::string AnchorToString(UI::Anchor anchor) {
+        switch (anchor) {
+            case UI::Anchor::TopLeft: return "top_left";
+            case UI::Anchor::TopCenter: return "top_center";
+            case UI::Anchor::TopRight: return "top_right";
+            case UI::Anchor::MiddleLeft: return "middle_left";
+            case UI::Anchor::MiddleCenter: return "middle_center";
+            case UI::Anchor::MiddleRight: return "middle_right";
+            case UI::Anchor::BottomLeft: return "bottom_left";
+            case UI::Anchor::BottomCenter: return "bottom_center";
+            case UI::Anchor::BottomRight: return "bottom_right";
+            default: return "top_left";
+        }
+    }
+
+    inline UI::Anchor StringToAnchor(const std::string& s) {
+        if (s == "top_center") return UI::Anchor::TopCenter;
+        if (s == "top_right") return UI::Anchor::TopRight;
+        if (s == "middle_left") return UI::Anchor::MiddleLeft;
+        if (s == "middle_center") return UI::Anchor::MiddleCenter;
+        if (s == "middle_right") return UI::Anchor::MiddleRight;
+        if (s == "bottom_left") return UI::Anchor::BottomLeft;
+        if (s == "bottom_center") return UI::Anchor::BottomCenter;
+        if (s == "bottom_right") return UI::Anchor::BottomRight;
+        return UI::Anchor::TopLeft;
+    }
+
+    // Vec2 serialization for UI
+    inline Json SerializeVec2(const glm::vec2& v) {
+        return {{"x", v.x}, {"y", v.y}};
+    }
+
+    inline glm::vec2 DeserializeVec2(const Json& j, const glm::vec2& defaultVal = glm::vec2(0.0f)) {
+        if (!j.is_object()) return defaultVal;
+        return glm::vec2(
+            j.value("x", defaultVal.x),
+            j.value("y", defaultVal.y)
+        );
+    }
+
+    // Vec4 deserialization (for colors with alpha)
+    inline glm::vec4 DeserializeVec4(const Json& j, const glm::vec4& defaultVal = glm::vec4(1.0f)) {
+        if (!j.is_object()) return defaultVal;
+        return glm::vec4(
+            j.value("r", defaultVal.r),
+            j.value("g", defaultVal.g),
+            j.value("b", defaultVal.b),
+            j.value("a", defaultVal.a)
+        );
+    }
+
+    // Color with alpha serialization (Vec4 as RGBA)
+    inline Json SerializeColorRGBA(const glm::vec4& c) {
+        return {{"r", c.r}, {"g", c.g}, {"b", c.b}, {"a", c.a}};
+    }
+
+    inline Json SerializeUIComponent(const ECS::UIComponent& ui) {
+        return {
+            {"anchor", AnchorToString(ui.Anchor)},
+            {"offset", SerializeVec2(ui.Offset)},
+            {"size", SerializeVec2(ui.Size)},
+            {"pivot", AnchorToString(ui.Pivot)},
+            {"type", ECS::WidgetTypeToString(ui.Type)},
+            {"widgetId", ui.WidgetId},
+            {"text", ui.Text},
+            {"color", SerializeColorRGBA(ui.Color)},
+            {"backgroundColor", SerializeColorRGBA(ui.BackgroundColor)},
+            {"fontSize", ui.FontSize},
+            {"fontFamily", ui.FontFamily},
+            {"visible", ui.Visible},
+            {"interactive", ui.Interactive},
+            {"zOrder", ui.ZOrder},
+            {"progress", ui.Progress},
+            {"fadeIn", ui.FadeIn},
+            {"fadeOut", ui.FadeOut},
+            {"fadeDuration", ui.FadeDuration}
+        };
+    }
+
+    inline ECS::UIComponent DeserializeUIComponent(const Json& j) {
+        ECS::UIComponent ui;
+        ui.Anchor = StringToAnchor(j.value("anchor", "top_left"));
+        ui.Offset = DeserializeVec2(j.value("offset", Json::object()));
+        ui.Size = DeserializeVec2(j.value("size", Json::object()), glm::vec2(100.0f, 100.0f));
+        ui.Pivot = StringToAnchor(j.value("pivot", "top_left"));
+        ui.Type = ECS::StringToWidgetType(j.value("type", "none"));
+        ui.WidgetId = j.value("widgetId", "");
+        ui.Text = j.value("text", "");
+        ui.Color = DeserializeVec4(j.value("color", Json::object()));
+        ui.BackgroundColor = DeserializeVec4(j.value("backgroundColor", Json::object()), 
+                                              glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
+        ui.FontSize = j.value("fontSize", 16.0f);
+        ui.FontFamily = j.value("fontFamily", "default");
+        ui.Visible = j.value("visible", true);
+        ui.Interactive = j.value("interactive", false);
+        ui.ZOrder = j.value("zOrder", 0);
+        ui.Progress = j.value("progress", 1.0f);
+        ui.FadeIn = j.value("fadeIn", false);
+        ui.FadeOut = j.value("fadeOut", false);
+        ui.FadeDuration = j.value("fadeDuration", 0.3f);
+        ui.IsDirty = true;
+        return ui;
+    }
+
+    // ============================================================================
+    // WorldUIComponent Serialization
+    // ============================================================================
+
+    inline std::string BillboardModeToJsonString(ECS::BillboardMode mode) {
+        switch (mode) {
+            case ECS::BillboardMode::None: return "none";
+            case ECS::BillboardMode::FaceCamera: return "face_camera";
+            case ECS::BillboardMode::FaceCameraY: return "face_camera_y";
+            case ECS::BillboardMode::FaceCameraUp: return "face_camera_up";
+            default: return "face_camera";
+        }
+    }
+
+    inline ECS::BillboardMode JsonStringToBillboardMode(const std::string& s) {
+        if (s == "none") return ECS::BillboardMode::None;
+        if (s == "face_camera_y") return ECS::BillboardMode::FaceCameraY;
+        if (s == "face_camera_up") return ECS::BillboardMode::FaceCameraUp;
+        return ECS::BillboardMode::FaceCamera;
+    }
+
+    inline Json SerializeWorldUIComponent(const ECS::WorldUIComponent& wui) {
+        return {
+            {"localOffset", SerializeVec3(Math::Vec3(wui.LocalOffset))},
+            {"screenOffset", SerializeVec2(wui.ScreenOffset)},
+            {"size", SerializeVec2(wui.Size)},
+            {"scaleWithDistance", wui.ScaleWithDistance},
+            {"minScale", wui.MinScale},
+            {"maxScale", wui.MaxScale},
+            {"referenceDistance", wui.ReferenceDistance},
+            {"billboard", BillboardModeToJsonString(wui.Billboard)},
+            {"type", ECS::WidgetTypeToString(wui.Type)},
+            {"widgetId", wui.WidgetId},
+            {"text", wui.Text},
+            {"color", SerializeColorRGBA(wui.Color)},
+            {"backgroundColor", SerializeColorRGBA(wui.BackgroundColor)},
+            {"fontSize", wui.FontSize},
+            {"fontFamily", wui.FontFamily},
+            {"enableDistanceFade", wui.EnableDistanceFade},
+            {"fadeStartDistance", wui.FadeStartDistance},
+            {"fadeEndDistance", wui.FadeEndDistance},
+            {"occludeByGeometry", wui.OccludeByGeometry},
+            {"clampToScreen", wui.ClampToScreen},
+            {"visible", wui.Visible},
+            {"progress", wui.Progress},
+            {"zOrder", wui.ZOrder}
+        };
+    }
+
+    inline ECS::WorldUIComponent DeserializeWorldUIComponent(const Json& j) {
+        ECS::WorldUIComponent wui;
+        auto localOffsetVec3 = DeserializeVec3(j.value("localOffset", Json::object()));
+        wui.LocalOffset = glm::vec3(localOffsetVec3.x, localOffsetVec3.y, localOffsetVec3.z);
+        wui.ScreenOffset = DeserializeVec2(j.value("screenOffset", Json::object()));
+        wui.Size = DeserializeVec2(j.value("size", Json::object()), glm::vec2(100.0f, 20.0f));
+        wui.ScaleWithDistance = j.value("scaleWithDistance", true);
+        wui.MinScale = j.value("minScale", 0.5f);
+        wui.MaxScale = j.value("maxScale", 2.0f);
+        wui.ReferenceDistance = j.value("referenceDistance", 10.0f);
+        wui.Billboard = JsonStringToBillboardMode(j.value("billboard", "face_camera"));
+        wui.Type = ECS::StringToWidgetType(j.value("type", "label"));
+        wui.WidgetId = j.value("widgetId", "");
+        wui.Text = j.value("text", "");
+        wui.Color = DeserializeVec4(j.value("color", Json::object()));
+        wui.BackgroundColor = DeserializeVec4(j.value("backgroundColor", Json::object()),
+                                               glm::vec4(0.0f, 0.0f, 0.0f, 0.7f));
+        wui.FontSize = j.value("fontSize", 14.0f);
+        wui.FontFamily = j.value("fontFamily", "default");
+        wui.EnableDistanceFade = j.value("enableDistanceFade", true);
+        wui.FadeStartDistance = j.value("fadeStartDistance", 30.0f);
+        wui.FadeEndDistance = j.value("fadeEndDistance", 50.0f);
+        wui.OccludeByGeometry = j.value("occludeByGeometry", false);
+        wui.ClampToScreen = j.value("clampToScreen", true);
+        wui.Visible = j.value("visible", true);
+        wui.Progress = j.value("progress", 1.0f);
+        wui.ZOrder = j.value("zOrder", 0);
+        wui.IsDirty = true;
+        return wui;
+    }
+
     // HierarchyComponent
     inline Json SerializeHierarchy(const ECS::HierarchyComponent& h) {
         Json children = Json::array();
@@ -633,6 +926,14 @@ namespace MCP {
 
         if (auto* rigidBody = registry.try_get<ECS::RigidBodyComponent>(entity)) {
             components["rigidBody"] = SerializeRigidBody(*rigidBody);
+        }
+
+        if (auto* uiComponent = registry.try_get<ECS::UIComponent>(entity)) {
+            components["ui"] = SerializeUIComponent(*uiComponent);
+        }
+
+        if (auto* worldUI = registry.try_get<ECS::WorldUIComponent>(entity)) {
+            components["worldUI"] = SerializeWorldUIComponent(*worldUI);
         }
 
         if (auto* hierarchy = registry.try_get<ECS::HierarchyComponent>(entity)) {
@@ -748,6 +1049,35 @@ namespace MCP {
             ss << indentStr << "  RigidBody [" << MotionTypeToString(rb->Type) << "]:\n";
             ss << indentStr << "    Mass: " << rb->Mass << "\n";
             ss << indentStr << "    Gravity: " << (rb->GravityEnabled ? "enabled" : "disabled") << "\n";
+        }
+
+        // UIComponent
+        if (auto* ui = registry.try_get<ECS::UIComponent>(entity)) {
+            ss << indentStr << "  UI [" << ECS::WidgetTypeToString(ui->Type) << "]:\n";
+            ss << indentStr << "    Anchor: " << AnchorToString(ui->Anchor) << "\n";
+            ss << indentStr << "    Offset: (" << ui->Offset.x << ", " << ui->Offset.y << ")\n";
+            ss << indentStr << "    Size: (" << ui->Size.x << ", " << ui->Size.y << ")\n";
+            if (!ui->Text.empty()) {
+                ss << indentStr << "    Text: \"" << ui->Text << "\"\n";
+            }
+            ss << indentStr << "    Visible: " << (ui->Visible ? "yes" : "no") << "\n";
+            ss << indentStr << "    ZOrder: " << ui->ZOrder << "\n";
+        }
+
+        // WorldUIComponent
+        if (auto* wui = registry.try_get<ECS::WorldUIComponent>(entity)) {
+            ss << indentStr << "  WorldUI [" << ECS::WidgetTypeToString(wui->Type) << "]:\n";
+            ss << indentStr << "    LocalOffset: (" << wui->LocalOffset.x << ", " 
+               << wui->LocalOffset.y << ", " << wui->LocalOffset.z << ")\n";
+            ss << indentStr << "    Size: (" << wui->Size.x << ", " << wui->Size.y << ")\n";
+            ss << indentStr << "    Billboard: " << BillboardModeToJsonString(wui->Billboard) << "\n";
+            if (!wui->Text.empty()) {
+                ss << indentStr << "    Text: \"" << wui->Text << "\"\n";
+            }
+            ss << indentStr << "    Visible: " << (wui->Visible ? "yes" : "no") << "\n";
+            if (wui->EnableDistanceFade) {
+                ss << indentStr << "    Fade: " << wui->FadeStartDistance << "-" << wui->FadeEndDistance << "m\n";
+            }
         }
 
         return ss.str();
