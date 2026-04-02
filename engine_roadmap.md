@@ -162,6 +162,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [X]  Step 16.1: Add a lightweight UI rendering library (like `RmlUi` or a custom Signed-Distance Field text renderer) to draw HUD elements independently of the 3D scene.
   * [X] Sub-step 16.1.1: Dear ImGui Vulkan Integration (v0.16.1.1)
+  * [X] Sub-step 16.1.2: MSDF Font Atlas Pipeline (v0.16.1.2)
 * [ ]  Step 16.2: Implement the `UIComponent` to anchor 2D screens to the viewport or project 3D world-space widgets (like health bars floating above enemies).
 * [ ]  Step 16.3: Build a robust Save/Load state system, utilizing the JSON schemas you defined in Phase 10 to serialize the entire `EnTT` registry and player state to the disk.
 * [ ]  Step 16.4: Implement asynchronous Scene Loading and transition management (building the architecture for loading screens and level streaming).

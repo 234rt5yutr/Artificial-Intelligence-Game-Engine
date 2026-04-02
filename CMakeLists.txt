@@ -40,6 +40,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Lua REQUIRED)
 find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
 find_package(imgui CONFIG REQUIRED)
+find_package(Stb REQUIRED)
 
 # Core Engine Library
 add_library(EngineCore
@@ -222,10 +223,12 @@ add_library(EngineCore
     # Phase 16: UI Framework
     Core/UI/ImGuiSubsystem.h
     Core/UI/ImGuiSubsystem.cpp
+    Core/UI/FontAtlas.h
+    Core/UI/FontAtlas.cpp
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui)
-target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS} ${LUA_INCLUDE_DIR} ${MINIAUDIO_INCLUDE_DIRS})
+target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS} ${LUA_INCLUDE_DIR} ${MINIAUDIO_INCLUDE_DIRS} ${Stb_INCLUDE_DIR})
 
 # Option to enable Tracy profiling
 option(ENABLE_PROFILING "Enable Tracy Profiling" ON)
