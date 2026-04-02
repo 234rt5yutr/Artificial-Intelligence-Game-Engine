@@ -20,6 +20,10 @@
     "cpp-httplib",
     "nlohmann-json",
     "lua",
-    "miniaudio"
+    "miniaudio",
+    {
+      "name": "imgui",
+      "features": ["vulkan-binding", "sdl3-binding", "docking-experimental"]
+    }
   ]
 }

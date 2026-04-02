@@ -72,3 +72,10 @@ vcpkg_installed/
 
 # Helper scripts
 update_app.py
+
+# ImGui settings
+imgui.ini
+
+# Font atlas generated files
+*.atlas.json
+*.atlas.png
