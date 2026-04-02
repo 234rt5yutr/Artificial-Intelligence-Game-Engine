@@ -165,6 +165,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [X] Sub-step 16.1.2: MSDF Font Atlas Pipeline (v0.16.1.2)
   * [X] Sub-step 16.1.4: Text Shaders (v0.16.1.4)
 * [ ]  Step 16.2: Implement the `UIComponent` to anchor 2D screens to the viewport or project 3D world-space widgets (like health bars floating above enemies).
+  * [X] Sub-step 16.2.1: Anchor System (v0.16.2.1)
 * [ ]  Step 16.3: Build a robust Save/Load state system, utilizing the JSON schemas you defined in Phase 10 to serialize the entire `EnTT` registry and player state to the disk.
 * [ ]  Step 16.4: Implement asynchronous Scene Loading and transition management (building the architecture for loading screens and level streaming).
 * [ ]  Step 16.5: **MCP Server Update:** Implement the `DisplayScreenMessage`, `UpdateHUD`, and `TriggerSaveState` MCP tools. The AI can now act as a dynamic Game Master—speaking directly to the player via on-screen text, updating objective trackers, and forcing save points before generating a boss encounter.

@@ -225,6 +225,7 @@ add_library(EngineCore
     Core/UI/ImGuiSubsystem.cpp
     Core/UI/FontAtlas.h
     Core/UI/FontAtlas.cpp
+    Core/UI/Anchoring.h
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui)
