@@ -6,7 +6,10 @@
     "spdlog",
     "glm",
     "tracy",
-    "sdl3",
+    {
+      "name": "sdl3",
+      "features": ["vulkan"]
+    },
     "vulkan",
     "vulkan-memory-allocator",
     "shaderc",

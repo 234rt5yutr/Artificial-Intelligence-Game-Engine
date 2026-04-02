@@ -16,8 +16,8 @@
 #endif
 
 #ifdef ENGINE_ENABLE_ASSERTS
-    #define ENGINE_ASSERT(condition, ...) { if(!(condition)) { ENGINE_ERROR("Assertion Failed: {0}", __VA_ARGS__); ENGINE_DEBUG_BREAK(); } }
-    #define ENGINE_CORE_ASSERT(condition, ...) { if(!(condition)) { ENGINE_CORE_ERROR("Assertion Failed: {0}", __VA_ARGS__); ENGINE_DEBUG_BREAK(); } }
+    #define ENGINE_ASSERT(condition, ...) { if(!(condition)) { ENGINE_ERROR("Assertion Failed: " __VA_ARGS__); ENGINE_DEBUG_BREAK(); } }
+    #define ENGINE_CORE_ASSERT(condition, ...) { if(!(condition)) { ENGINE_CORE_ERROR("Assertion Failed: " __VA_ARGS__); ENGINE_DEBUG_BREAK(); } }
 #else
     #define ENGINE_ASSERT(condition, ...)
     #define ENGINE_CORE_ASSERT(condition, ...)

@@ -69,6 +69,9 @@ namespace RHI {
         if (m_Window) {
             CreateSwapchain(m_Window->GetWidth(), m_Window->GetHeight());
             CreateImageViews();
+            CreateRenderPass();
+            CreateGraphicsPipeline();
+            CreateFramebuffers();
         }
     }
 
