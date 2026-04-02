@@ -163,13 +163,38 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 16.1: Add a lightweight UI rendering library (like `RmlUi` or a custom Signed-Distance Field text renderer) to draw HUD elements independently of the 3D scene.
   * [X] Sub-step 16.1.1: Dear ImGui Vulkan Integration (v0.16.1.1)
   * [X] Sub-step 16.1.2: MSDF Font Atlas Pipeline (v0.16.1.2)
+  * [X] Sub-step 16.1.3: MSDF Text Renderer (v0.16.1.3)
   * [X] Sub-step 16.1.4: Text Shaders (v0.16.1.4)
-* [ ]  Step 16.2: Implement the `UIComponent` to anchor 2D screens to the viewport or project 3D world-space widgets (like health bars floating above enemies).
+  * [X] Sub-step 16.1.5: UIManager Singleton (v0.16.1.5)
+* [X]  Step 16.2: Implement the `UIComponent` to anchor 2D screens to the viewport or project 3D world-space widgets (like health bars floating above enemies).
   * [X] Sub-step 16.2.1: Anchor System (v0.16.2.1)
-* [ ]  Step 16.3: Build a robust Save/Load state system, utilizing the JSON schemas you defined in Phase 10 to serialize the entire `EnTT` registry and player state to the disk.
+  * [X] Sub-step 16.2.2: UIComponent ECS Integration (v0.16.3.1)
+  * [X] Sub-step 16.2.3: UISystem for World Widgets (v0.16.2.3)
+  * [X] Sub-step 16.2.4: Base Widget Class (v0.16.2.4)
+  * [X] Sub-step 16.2.5: HUD Widgets (HealthBar, ProgressBar, Label, Crosshair, etc.) (v0.16.2.5)
+  * [X] Sub-step 16.2.6: World Widget Renderer (v0.16.2.6)
+  * [X] Sub-step 16.2.7: Widget Batching System (v0.16.2.7)
+* [X]  Step 16.3: Build a robust Save/Load state system, utilizing the JSON schemas you defined in Phase 10 to serialize the entire `EnTT` registry and player state to the disk.
   * [X] Sub-step 16.3.1: Extended Scene Serialization (v0.16.3.1)
-* [ ]  Step 16.4: Implement asynchronous Scene Loading and transition management (building the architecture for loading screens and level streaming).
-* [ ]  Step 16.5: **MCP Server Update:** Implement the `DisplayScreenMessage`, `UpdateHUD`, and `TriggerSaveState` MCP tools. The AI can now act as a dynamic Game Master—speaking directly to the player via on-screen text, updating objective trackers, and forcing save points before generating a boss encounter.
+  * [X] Sub-step 16.3.2: Save File Format (v0.16.3.2)
+  * [X] Sub-step 16.3.3: SaveManager Implementation (v0.16.3.3)
+  * [X] Sub-step 16.3.4: Async Save/Load (v0.16.3.4)
+  * [X] Sub-step 16.3.5: Auto-Save System (v0.16.3.5)
+  * [X] Sub-step 16.3.6: Player State Serialization (v0.16.3.6)
+* [X]  Step 16.4: Implement asynchronous Scene Loading and transition management (building the architecture for loading screens and level streaming).
+  * [X] Sub-step 16.4.1: SceneLoader Core (v0.16.4.1)
+  * [X] Sub-step 16.4.2: Async Loading Pipeline (v0.16.4.2)
+  * [X] Sub-step 16.4.3: TransitionManager (v0.16.4.3)
+  * [X] Sub-step 16.4.4: Loading Screen Widget (v0.16.4.4)
+  * [X] Sub-step 16.4.5: Level Streaming Infrastructure (v0.16.4.5)
+  * [X] Sub-step 16.4.6: Scene Callbacks (v0.16.4.6)
+* [X]  Step 16.5: **MCP Server Update:** Implement the `DisplayScreenMessage`, `UpdateHUD`, and `TriggerSaveState` MCP tools. The AI can now act as a dynamic Game Master—speaking directly to the player via on-screen text, updating objective trackers, and forcing save points before generating a boss encounter.
+  * [X] Sub-step 16.5.1: MCPUITools Header (v0.16.5.1)
+  * [X] Sub-step 16.5.2: DisplayScreenMessage Tool (v0.16.5.2)
+  * [X] Sub-step 16.5.3: UpdateHUD Tool (v0.16.5.3)
+  * [X] Sub-step 16.5.4: TriggerSaveState Tool (v0.16.5.4)
+  * [X] Sub-step 16.5.5: ShowLoadingScreen Tool (v0.16.5.5)
+  * [X] Sub-step 16.5.6: Tool Registration (v0.16.5.6)
 
 ## Phase 17: Navigation & AI Pathfinding (Weeks 40-42)
 

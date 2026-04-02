@@ -1,7 +1,7 @@
 #pragma once
 
 // MCP All Tools Factory
-// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools + world tools + post-process tools) into a single collection
+// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools + world tools + post-process tools + UI tools) into a single collection
 // This file exists to avoid circular dependencies between MCPSceneTools.h and AutoLevelDesigner.h
 
 #include "MCPTool.h"
@@ -12,6 +12,7 @@
 #include "MCPParticleTools.h"
 #include "MCPWorldTools.h"
 #include "MCPPostProcessTools.h"
+#include "MCPUITools.h"
 
 namespace Core {
 namespace MCP {
@@ -44,6 +45,10 @@ namespace MCP {
     // - SetPostProcessProfile: Apply cinematic mood presets
     // - BlendCameraEffects: Smooth transitions for DoF, motion blur, etc.
     // - GetPostProcessInfo: Query current post-process state
+    // - DisplayScreenMessage: Show text messages on screen
+    // - UpdateHUD: Modify HUD widget values
+    // - TriggerSaveState: Save or load game state
+    // - ShowLoadingScreen: Display loading screen with progress
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -74,6 +79,10 @@ namespace MCP {
         // Add post-process tools (SetPostProcessProfile, BlendCameraEffects, GetPostProcessInfo)
         auto postProcessTools = CreatePostProcessTools();
         tools.insert(tools.end(), postProcessTools.begin(), postProcessTools.end());
+
+        // Add UI tools (DisplayScreenMessage, UpdateHUD, TriggerSaveState, ShowLoadingScreen)
+        auto uiTools = CreateUITools();
+        tools.insert(tools.end(), uiTools.begin(), uiTools.end());
 
         return tools;
     }
