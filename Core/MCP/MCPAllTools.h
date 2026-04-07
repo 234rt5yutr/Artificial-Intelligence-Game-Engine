@@ -1,7 +1,7 @@
 #pragma once
 
 // MCP All Tools Factory
-// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools + world tools + post-process tools + UI tools) into a single collection
+// Combines all MCP tools (scene tools + auto-level designer + audio tools + animation tools + particle tools + world tools + post-process tools + UI tools + navigation tools) into a single collection
 // This file exists to avoid circular dependencies between MCPSceneTools.h and AutoLevelDesigner.h
 
 #include "MCPTool.h"
@@ -13,6 +13,7 @@
 #include "MCPWorldTools.h"
 #include "MCPPostProcessTools.h"
 #include "MCPUITools.h"
+#include "MCPNavigationTools.h"
 
 namespace Core {
 namespace MCP {
@@ -49,6 +50,12 @@ namespace MCP {
     // - UpdateHUD: Modify HUD widget values
     // - TriggerSaveState: Save or load game state
     // - ShowLoadingScreen: Display loading screen with progress
+    // - RebuildNavMesh: Build navigation mesh from scene
+    // - CommandAgentMove: Direct agents to navigate to positions
+    // - SetPatrolRoute: Define patrol waypoints for agents
+    // - QueryNavMesh: Pathfinding and point queries
+    // - AddNavMeshObstacle: Add dynamic obstacles
+    // - GetNavigationStats: Query navigation system state
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -83,6 +90,10 @@ namespace MCP {
         // Add UI tools (DisplayScreenMessage, UpdateHUD, TriggerSaveState, ShowLoadingScreen)
         auto uiTools = CreateUITools();
         tools.insert(tools.end(), uiTools.begin(), uiTools.end());
+
+        // Add navigation tools (RebuildNavMesh, CommandAgentMove, SetPatrolRoute, QueryNavMesh, etc.)
+        auto navigationTools = CreateNavigationTools();
+        tools.insert(tools.end(), navigationTools.begin(), navigationTools.end());
 
         return tools;
     }

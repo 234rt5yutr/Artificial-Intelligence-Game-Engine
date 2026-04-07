@@ -198,11 +198,44 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 17: Navigation & AI Pathfinding (Weeks 40-42)
 
-* [ ]  Step 17.1: Add a navigation mesh dependency (like `RecastNavigation` / `Detour`) to generate walkable surfaces from your collision geometry.
-* [ ]  Step 17.2: Implement dynamic NavMesh building to allow real-time "carving" when obstacles (like a spawned wall or destroyed bridge) alter the environment.
-* [ ]  Step 17.3: Create the `NavAgentComponent` to handle A\* path calculation, smooth corner rounding, and basic steering behaviors.
-* [ ]  Step 17.4: Implement Crowd Simulation algorithms (like RVO / Reciprocal Velocity Obstacles) so dozens of NPCs can navigate without colliding into one another.
-* [ ]  Step 17.5: **MCP Server Update:** Implement the `RebuildNavMesh`, `CommandAgentMove`, and `SetAgentPatrolRoute` MCP tools. Your AI can now command hordes of enemies, dynamically generate mazes while ensuring they remain solvable, and orchestrate complex NPC movements.
+* [X]  Step 17.1: Add a navigation mesh dependency (like `RecastNavigation` / `Detour`) to generate walkable surfaces from your collision geometry.
+  * [X] Sub-step 17.1.1: RecastNavigation vcpkg Integration (v0.17.1.1)
+  * [X] Sub-step 17.1.2: NavMeshConfig & Types (v0.17.1.2)
+  * [X] Sub-step 17.1.3: NavMeshBuilder Implementation (v0.17.1.3)
+  * [X] Sub-step 17.1.4: NavMeshManager Singleton (v0.17.1.4)
+  * [X] Sub-step 17.1.5: Tile-Based NavMesh Support (v0.17.1.5)
+  * [X] Sub-step 17.1.6: NavMesh Debug Visualization (v0.17.1.6)
+  * [X] Sub-step 17.1.7: NavMeshComponent ECS Integration (v0.17.1.7)
+* [X]  Step 17.2: Implement dynamic NavMesh building to allow real-time "carving" when obstacles (like a spawned wall or destroyed bridge) alter the environment.
+  * [X] Sub-step 17.2.1: TileCache Integration (v0.17.2.1)
+  * [X] Sub-step 17.2.2: NavObstacleComponent (v0.17.2.2)
+  * [X] Sub-step 17.2.3: Dynamic Obstacle Carving (v0.17.2.3)
+  * [X] Sub-step 17.2.4: Dirty Tile Tracking (v0.17.2.4)
+  * [X] Sub-step 17.2.5: Async Tile Rebuild (v0.17.2.5)
+  * [X] Sub-step 17.2.6: Off-Mesh Connections (v0.17.2.6)
+  * [X] Sub-step 17.2.7: Area Masking (v0.17.2.7)
+* [X]  Step 17.3: Create the `NavAgentComponent` to handle A\* path calculation, smooth corner rounding, and basic steering behaviors.
+  * [X] Sub-step 17.3.1: NavAgentComponent (v0.17.3.1)
+  * [X] Sub-step 17.3.2: CrowdManager Core (v0.17.3.2)
+  * [X] Sub-step 17.3.3: Path Request System (v0.17.3.3)
+  * [X] Sub-step 17.3.4: Path Corridor & Smoothing (v0.17.3.4)
+  * [X] Sub-step 17.3.5: Steering Behaviors (v0.17.3.5)
+  * [X] Sub-step 17.3.6: CharacterController Integration (v0.17.3.6)
+  * [X] Sub-step 17.3.7: NavigationSystem (v0.17.3.7)
+* [X]  Step 17.4: Implement Crowd Simulation algorithms (like RVO / Reciprocal Velocity Obstacles) so dozens of NPCs can navigate without colliding into one another.
+  * [X] Sub-step 17.4.1: RVO Integration via DetourCrowd (v0.17.4.1)
+  * [X] Sub-step 17.4.2: Agent Priority System (v0.17.4.2)
+  * [X] Sub-step 17.4.3: Separation Steering (v0.17.4.3)
+  * [X] Sub-step 17.4.4: Parallel Crowd Update (v0.17.4.4)
+  * [X] Sub-step 17.4.5: Velocity Obstacle Visualization (v0.17.4.5)
+  * [X] Sub-step 17.4.6: Crowd Statistics (v0.17.4.6)
+* [X]  Step 17.5: **MCP Server Update:** Implement the `RebuildNavMesh`, `CommandAgentMove`, and `SetAgentPatrolRoute` MCP tools. Your AI can now command hordes of enemies, dynamically generate mazes while ensuring they remain solvable, and orchestrate complex NPC movements.
+  * [X] Sub-step 17.5.1: MCPNavigationTools Header (v0.17.5.1)
+  * [X] Sub-step 17.5.2: RebuildNavMesh Tool (v0.17.5.2)
+  * [X] Sub-step 17.5.3: CommandAgentMove Tool (v0.17.5.3)
+  * [X] Sub-step 17.5.4: SetAgentPatrolRoute Tool (v0.17.5.4)
+  * [X] Sub-step 17.5.5: QueryNavMesh & GetNavigationStats Tools (v0.17.5.5)
+  * [X] Sub-step 17.5.6: Tool Registration in MCPAllTools (v0.17.5.6)
 
 ## Phase 18: Advanced Gameplay Systems & Logic (Weeks 43-45)
 

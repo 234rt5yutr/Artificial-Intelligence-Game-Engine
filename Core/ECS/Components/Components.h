@@ -36,3 +36,7 @@
 // Phase 16: UI Framework & State Management
 #include "Core/ECS/Components/UIComponent.h"
 #include "Core/ECS/Components/WorldUIComponent.h"
+
+// Phase 17: Navigation & AI Pathfinding
+#include "Core/ECS/Components/NavMeshComponent.h"
+#include "Core/ECS/Components/NavAgentComponent.h"
