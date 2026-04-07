@@ -14,6 +14,7 @@
 #include "MCPPostProcessTools.h"
 #include "MCPUITools.h"
 #include "MCPNavigationTools.h"
+#include "MCPGameplayTools.h"
 
 namespace Core {
 namespace MCP {
@@ -56,6 +57,12 @@ namespace MCP {
     // - QueryNavMesh: Pathfinding and point queries
     // - AddNavMeshObstacle: Add dynamic obstacles
     // - GetNavigationStats: Query navigation system state
+    // - InjectDialogueNode: Inject dynamic dialogue nodes
+    // - UpdateQuestObjective: Update quest progress
+    // - ModifyInventory: Add/remove inventory items
+    // - GetGameplayState: Query gameplay systems state
+    // - SetAIState: Modify AI behavior/FSM state
+    // - StartDialogue: Start dialogue conversations
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -94,6 +101,10 @@ namespace MCP {
         // Add navigation tools (RebuildNavMesh, CommandAgentMove, SetPatrolRoute, QueryNavMesh, etc.)
         auto navigationTools = CreateNavigationTools();
         tools.insert(tools.end(), navigationTools.begin(), navigationTools.end());
+
+        // Add gameplay tools (InjectDialogueNode, UpdateQuestObjective, ModifyInventory, GetGameplayState, SetAIState, StartDialogue)
+        auto gameplayTools = CreateGameplayTools();
+        tools.insert(tools.end(), gameplayTools.begin(), gameplayTools.end());
 
         return tools;
     }

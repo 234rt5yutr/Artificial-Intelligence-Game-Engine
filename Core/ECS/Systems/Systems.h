@@ -25,3 +25,7 @@
 
 // Phase 15: Post-Processing
 #include "Core/ECS/Systems/PostProcessSystem.h"
+
+// Phase 18: Advanced Gameplay Systems - AI
+#include "Core/ECS/Systems/BehaviorTreeSystem.h"
+#include "Core/ECS/Systems/FSMSystem.h"

@@ -40,3 +40,7 @@
 // Phase 17: Navigation & AI Pathfinding
 #include "Core/ECS/Components/NavMeshComponent.h"
 #include "Core/ECS/Components/NavAgentComponent.h"
+
+// Phase 18: Advanced Gameplay Systems - AI
+#include "Core/ECS/Components/BehaviorTreeComponent.h"
+#include "Core/ECS/Components/FSMComponent.h"

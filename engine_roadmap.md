@@ -239,11 +239,11 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 18: Advanced Gameplay Systems & Logic (Weeks 43-45)
 
-* [ ]  Step 18.1: Implement a data-driven Behavior Tree or Finite State Machine (FSM) framework for complex, hierarchical NPC decision-making.
-* [ ]  Step 18.2: Implement a global Event/Message Bus pattern. This allows decoupled systems (like Health, UI, and Audio) to listen for generic events (e.g., `OnPlayerDamaged`) without hard dependencies.
-* [ ]  Step 18.3: Build a structured Quest and Inventory System, serializing item data and objective states alongside the player's profile.
-* [ ]  Step 18.4: Create a branching Dialogue Data structure, capable of triggering camera cuts and animations during conversations.
-* [ ]  Step 18.5: **MCP Server Update:** Implement the `InjectDialogueNode`, `UpdateQuestObjective`, and `ModifyInventory` MCP tools. The AI can now act as a dynamic storyteller—generating personalized quests on the fly, altering NPC dialogue based on player actions, and rewarding players with procedurally generated loot.
+* [X]  Step 18.1: Implement a data-driven Behavior Tree or Finite State Machine (FSM) framework for complex, hierarchical NPC decision-making. (v0.18.1)
+* [X]  Step 18.2: Implement a global Event/Message Bus pattern. This allows decoupled systems (like Health, UI, and Audio) to listen for generic events (e.g., `OnPlayerDamaged`) without hard dependencies. (v0.18.2)
+* [X]  Step 18.3: Build a structured Quest and Inventory System, serializing item data and objective states alongside the player's profile. (v0.18.3)
+* [X]  Step 18.4: Create a branching Dialogue Data structure, capable of triggering camera cuts and animations during conversations. (v0.18.4)
+* [X]  Step 18.5: **MCP Server Update:** Implement the `InjectDialogueNode`, `UpdateQuestObjective`, and `ModifyInventory` MCP tools. The AI can now act as a dynamic storyteller—generating personalized quests on the fly, altering NPC dialogue based on player actions, and rewarding players with procedurally generated loot. (v0.18.5)
 
 ## Phase 19: Hardware Ray Tracing & Modern Illumination (Weeks 46-49)
 
