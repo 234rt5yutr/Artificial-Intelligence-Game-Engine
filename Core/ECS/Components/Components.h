@@ -44,3 +44,12 @@
 // Phase 18: Advanced Gameplay Systems - AI
 #include "Core/ECS/Components/BehaviorTreeComponent.h"
 #include "Core/ECS/Components/FSMComponent.h"
+
+// Phase 19: Physics - Ragdoll
+#include "Core/ECS/Components/RagdollComponent.h"
+
+// Physics - Cloth Simulation
+#include "Core/ECS/Components/ClothComponent.h"
+
+// Physics - Soft Body Simulation
+#include "Core/ECS/Components/SoftBodyComponent.h"

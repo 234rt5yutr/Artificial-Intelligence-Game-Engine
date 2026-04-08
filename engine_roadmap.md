@@ -255,8 +255,8 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 20: Advanced Physics & Destruction (Weeks 50-52)
 
-* [ ]  Step 20.1: Extend your Phase 6 Jolt Physics integration to support complex constraints (Hinges, Sliders, Springs) for vehicles, doors, and machinery.
-* [ ]  Step 20.2: Implement a Ragdoll generation system, translating the `AnimatorComponent` skeletal hierarchy into a network of rigidbodies and constraints upon entity death.
-* [ ]  Step 20.3: Implement a Destructible Mesh pipeline using Voronoi fracturing, allowing static meshes to dynamically shatter into physics-enabled debris based on impact force.
-* [ ]  Step 20.4: Integrate Cloth or Soft Body simulation for capes, flags, and vegetation wind interaction.
-* [ ]  Step 20.5: **MCP Server Update:** Implement the `TriggerDestruction`, `SpawnRagdoll`, and `ModifyConstraint` MCP tools. The AI can now blow up level geometry in front of the player, unlock doors by snapping virtual hinges, or dynamically drop the player into an active physics simulation.
+* [X]  Step 20.1: Extend your Phase 6 Jolt Physics integration to support complex constraints (Hinges, Sliders, Springs) for vehicles, doors, and machinery. (v0.20.1)
+* [X]  Step 20.2: Implement a Ragdoll generation system, translating the `AnimatorComponent` skeletal hierarchy into a network of rigidbodies and constraints upon entity death. (v0.20.2)
+* [X]  Step 20.3: Implement a Destructible Mesh pipeline using Voronoi fracturing, allowing static meshes to dynamically shatter into physics-enabled debris based on impact force. (v0.20.3)
+* [X]  Step 20.4: Integrate Cloth or Soft Body simulation for capes, flags, and vegetation wind interaction. (v0.20.4)
+* [X]  Step 20.5: **MCP Server Update:** Implement the `TriggerDestruction`, `SpawnRagdoll`, and `ModifyConstraint` MCP tools. The AI can now blow up level geometry in front of the player, unlock doors by snapping virtual hinges, or dynamically drop the player into an active physics simulation. (v0.20.5)

@@ -16,6 +16,7 @@
 #include "MCPNavigationTools.h"
 #include "MCPGameplayTools.h"
 #include "MCPRayTracingTools.h"
+#include "MCPPhysicsTools.h"
 
 namespace Core {
 namespace MCP {
@@ -68,6 +69,11 @@ namespace MCP {
     // - BakeGlobalIllumination: Bake GI probes for indirect lighting
     // - SetReflectionQuality: Control reflection quality per material/scene
     // - QueryRTCapabilities: Query RT hardware capabilities and settings
+    // - TriggerDestruction: Trigger physics-based destruction
+    // - SpawnRagdoll: Convert skeletal mesh to ragdoll
+    // - ModifyConstraint: Modify constraint properties at runtime
+    // - QueryPhysicsState: Query physics body state
+    // - ApplyForce: Apply force/impulse/torque to physics body
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -114,6 +120,10 @@ namespace MCP {
         // Add ray tracing tools (ToggleRayTracingFeatures, BakeGlobalIllumination, SetReflectionQuality, QueryRTCapabilities)
         auto rayTracingTools = CreateRayTracingTools();
         tools.insert(tools.end(), rayTracingTools.begin(), rayTracingTools.end());
+
+        // Add physics tools (TriggerDestruction, SpawnRagdoll, ModifyConstraint, QueryPhysicsState, ApplyForce)
+        auto physicsTools = CreatePhysicsTools();
+        tools.insert(tools.end(), physicsTools.begin(), physicsTools.end());
 
         return tools;
     }
