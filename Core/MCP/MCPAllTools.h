@@ -15,6 +15,7 @@
 #include "MCPUITools.h"
 #include "MCPNavigationTools.h"
 #include "MCPGameplayTools.h"
+#include "MCPRayTracingTools.h"
 
 namespace Core {
 namespace MCP {
@@ -63,6 +64,10 @@ namespace MCP {
     // - GetGameplayState: Query gameplay systems state
     // - SetAIState: Modify AI behavior/FSM state
     // - StartDialogue: Start dialogue conversations
+    // - ToggleRayTracingFeatures: Enable/disable RT features with quality control
+    // - BakeGlobalIllumination: Bake GI probes for indirect lighting
+    // - SetReflectionQuality: Control reflection quality per material/scene
+    // - QueryRTCapabilities: Query RT hardware capabilities and settings
     inline std::vector<MCPToolPtr> CreateAllMCPTools() {
         std::vector<MCPToolPtr> tools;
 
@@ -105,6 +110,10 @@ namespace MCP {
         // Add gameplay tools (InjectDialogueNode, UpdateQuestObjective, ModifyInventory, GetGameplayState, SetAIState, StartDialogue)
         auto gameplayTools = CreateGameplayTools();
         tools.insert(tools.end(), gameplayTools.begin(), gameplayTools.end());
+
+        // Add ray tracing tools (ToggleRayTracingFeatures, BakeGlobalIllumination, SetReflectionQuality, QueryRTCapabilities)
+        auto rayTracingTools = CreateRayTracingTools();
+        tools.insert(tools.end(), rayTracingTools.begin(), rayTracingTools.end());
 
         return tools;
     }

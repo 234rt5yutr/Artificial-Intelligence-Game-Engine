@@ -247,11 +247,11 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 19: Hardware Ray Tracing & Modern Illumination (Weeks 46-49)
 
-* [ ]  Step 19.1: Expand your Render Hardware Interface (RHI) to support Vulkan Ray Tracing or DX12 DXR.
-* [ ]  Step 19.2: Build the Acceleration Structures (Bottom-Level BLAS for meshes, Top-Level TLAS for the scene) and update them seamlessly as entities move.
-* [ ]  Step 19.3: Implement Ray-Traced Hard/Soft Shadows and Ray-Traced Reflections, offering a high-end alternative to Phase 4's shadow maps and standard screen-space reflections.
-* [ ]  Step 19.4: Implement a Global Illumination (GI) solution (either Voxel-based or Screen-Space) to simulate light bouncing realistically in indoor environments.
-* [ ]  Step 19.5: **MCP Server Update:** Implement the `ToggleRayTracingFeatures` and `BakeGlobalIllumination` MCP tools. The AI can dynamically scale the engine's graphical fidelity or adjust GI bounce intensity to instantly transform a bright, sunny room into a moody, terrifying dungeon.
+* [X]  Step 19.1: Expand your Render Hardware Interface (RHI) to support Vulkan Ray Tracing or DX12 DXR. (v0.19.1)
+* [X]  Step 19.2: Build the Acceleration Structures (Bottom-Level BLAS for meshes, Top-Level TLAS for the scene) and update them seamlessly as entities move. (v0.19.2)
+* [X]  Step 19.3: Implement Ray-Traced Hard/Soft Shadows and Ray-Traced Reflections, offering a high-end alternative to Phase 4's shadow maps and standard screen-space reflections. (v0.19.3)
+* [X]  Step 19.4: Implement a Global Illumination (GI) solution (either Voxel-based or Screen-Space) to simulate light bouncing realistically in indoor environments. (v0.19.4)
+* [X]  Step 19.5: **MCP Server Update:** Implement the `ToggleRayTracingFeatures` and `BakeGlobalIllumination` MCP tools. The AI can dynamically scale the engine's graphical fidelity or adjust GI bounce intensity to instantly transform a bright, sunny room into a moody, terrifying dungeon. (v0.19.5)
 
 ## Phase 20: Advanced Physics & Destruction (Weeks 50-52)
 
