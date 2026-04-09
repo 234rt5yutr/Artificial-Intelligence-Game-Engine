@@ -36,7 +36,7 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
 
     // Get initial viewport size
     int width, height;
-    SDL_GetWindowSize(window->GetSDLWindow(), &width, &height);
+    SDL_GetWindowSize(window->GetNativeWindow(), &width, &height);
     m_ViewportSize = {static_cast<float>(width), static_cast<float>(height)};
 
     // Initialize ImGui subsystem
@@ -124,7 +124,7 @@ void UIManager::Update(float deltaTime) {
     }
 }
 
-void UIManager::Render(VkCommandBuffer commandBuffer) {
+void UIManager::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     if (!m_Initialized || !m_InFrame) {
         return;
     }
@@ -139,7 +139,7 @@ void UIManager::Render(VkCommandBuffer commandBuffer) {
 
     // Render ImGui last (on top)
     if (m_ImGui) {
-        m_ImGui->Render(commandBuffer);
+        m_ImGui->Render(commandBuffer, imageIndex);
     }
 }
 
@@ -314,6 +314,10 @@ void UIManager::OnResize(uint32_t width, uint32_t height) {
     
     if (m_TextRenderer) {
         m_TextRenderer->SetViewportSize(width, height);
+    }
+
+    if (m_ImGui) {
+        m_ImGui->OnSwapchainRecreated();
     }
 }
 

@@ -224,6 +224,10 @@ add_library(EngineCore
     # Phase 16: UI Framework
     Core/UI/ImGuiSubsystem.h
     Core/UI/ImGuiSubsystem.cpp
+    Core/UI/UIManager.h
+    Core/UI/UIManager.cpp
+    Core/UI/TextRenderer.h
+    Core/UI/TextRenderer.cpp
     Core/UI/FontAtlas.h
     Core/UI/FontAtlas.cpp
     Core/UI/Anchoring.h

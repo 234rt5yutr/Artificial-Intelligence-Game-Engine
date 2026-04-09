@@ -4,6 +4,7 @@
 #include "Core/Profile.h"
 #include "Core/Assert.h"
 #include "Core/Input.h"
+#include "Core/UI/UIManager.h"
 #include <thread>
 #include <chrono>
 
@@ -22,9 +23,24 @@ namespace Core {
         Input::Init();
         m_VulkanContext = std::make_unique<RHI::VulkanContext>(m_Window.get());
         m_VulkanContext->Init();
+
+        // Initialize debug/development UI
+        UI::UIManager::Get().Initialize(
+            m_VulkanContext.get(),
+            m_Window.get(),
+            m_VulkanContext->GetRenderPass()
+        );
+
+        if (UI::UIManager::Get().IsInitialized()) {
+            UI::UIManager::Get().SetDebugOverlayEnabled(true);
+            // Keep the interactive demo visible to confirm UI input works in release.
+            UI::UIManager::Get().GetImGui().GetConfig().showDemoWindow = true;
+            UI::UIManager::Get().GetImGui().GetConfig().showRenderStats = true;
+        }
     }
 
     Application::~Application() {
+        UI::UIManager::Get().Shutdown();
     }
 
     void Application::Close() {
@@ -35,11 +51,26 @@ namespace Core {
         PROFILE_FUNCTION();
         ENGINE_CORE_INFO("Application initialized and running.");
 
+        auto lastFrameTime = std::chrono::high_resolution_clock::now();
+
         while (m_Running) {
             PROFILE_SCOPE("Application Loop");
 
             m_Window->OnUpdate();
-            if (m_VulkanContext) m_VulkanContext->DrawFrame();
+
+            auto now = std::chrono::high_resolution_clock::now();
+            float deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
+            lastFrameTime = now;
+
+            auto& uiManager = UI::UIManager::Get();
+            uiManager.BeginFrame();
+            uiManager.Update(deltaTime);
+
+            if (m_VulkanContext) {
+                m_VulkanContext->DrawFrame();
+            }
+
+            uiManager.EndFrame();
         }
 
         ENGINE_CORE_INFO("Application shutting down.");
@@ -59,14 +90,22 @@ namespace Core {
 
     bool Application::OnWindowResize(WindowResizeEvent& e) {
         if (e.GetWidth() == 0 || e.GetHeight() == 0) {
-            return false;
+            return true;
         }
 
-        // Notify renderer of resize later
-        return false;
+        if (m_VulkanContext) {
+            m_VulkanContext->RecreateSwapchain(e.GetWidth(), e.GetHeight());
+        }
+
+        return true;
     }
 
     bool Application::OnKeyPress(KeyPressedEvent& e) {
+        // Don't hijack keyboard if UI currently owns input.
+        if (UI::UIManager::Get().WantsKeyboardInput()) {
+            return false;
+        }
+
         // Use the native input polling if you want, but since we get the event:
         // We'll close the app when Escape is pressed.
         // SDL3 defines SDLK_ESCAPE.

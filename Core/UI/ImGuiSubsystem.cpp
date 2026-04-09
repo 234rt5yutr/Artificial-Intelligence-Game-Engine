@@ -281,7 +281,7 @@ void ImGuiSubsystem::UpdateStats(const PerformanceStats& stats) {
     m_Stats = stats;
 }
 
-void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer) {
+void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     if (!m_Initialized) {
         return;
     }
@@ -311,10 +311,13 @@ void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer) {
     // Finalize ImGui rendering
     ImGui::Render();
 
-    // Get current swapchain image index
-    // Note: This assumes you're calling Render with the correct swapchain index
-    // In a real implementation, you'd pass the image index or get it from VulkanContext
-    uint32_t imageIndex = 0; // TODO: Get from VulkanContext during DrawFrame
+    if (imageIndex >= m_Framebuffers.size()) {
+        ENGINE_CORE_WARN("ImGuiSubsystem: Invalid framebuffer index {}, recreating framebuffers", imageIndex);
+        OnSwapchainRecreated();
+        if (imageIndex >= m_Framebuffers.size()) {
+            return;
+        }
+    }
 
     // Begin render pass
     VkRenderPassBeginInfo renderPassInfo = {};
@@ -334,6 +337,46 @@ void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer) {
 
 void ImGuiSubsystem::EndFrame() {
     // Handled in Render() with ImGui::Render()
+}
+
+void ImGuiSubsystem::OnSwapchainRecreated() {
+    if (!m_Initialized || !m_VulkanContext || m_RenderPass == VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkDevice device = m_VulkanContext->GetDevice();
+
+    for (auto framebuffer : m_Framebuffers) {
+        if (framebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+    }
+    m_Framebuffers.clear();
+
+    const auto& imageViews = m_VulkanContext->GetSwapchainImageViews();
+    VkExtent2D extent = m_VulkanContext->GetSwapchainExtent();
+    m_Framebuffers.resize(imageViews.size());
+
+    for (size_t i = 0; i < imageViews.size(); ++i) {
+        VkFramebufferCreateInfo framebufferInfo = {};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = m_RenderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = &imageViews[i];
+        framebufferInfo.width = extent.width;
+        framebufferInfo.height = extent.height;
+        framebufferInfo.layers = 1;
+
+        if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &m_Framebuffers[i]) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("ImGuiSubsystem: Failed to recreate framebuffer {}", i);
+            m_Framebuffers.resize(i);
+            break;
+        }
+    }
+
+    if (!imageViews.empty()) {
+        ImGui_ImplVulkan_SetMinImageCount(static_cast<uint32_t>(imageViews.size()));
+    }
 }
 
 bool ImGuiSubsystem::WantsKeyboardInput() const {

@@ -72,12 +72,16 @@ namespace UI {
         /// @param stats Current frame performance stats
         void UpdateStats(const PerformanceStats& stats);
 
-        /// @brief Render ImGui draw data - call during render pass
+        /// @brief Render ImGui draw data for a swapchain image
         /// @param commandBuffer The Vulkan command buffer to record into
-        void Render(VkCommandBuffer commandBuffer);
+        /// @param imageIndex Current swapchain image index
+        void Render(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
         /// @brief End ImGui frame - call at end of frame
         void EndFrame();
+
+        /// @brief Recreate ImGui framebuffers after swapchain resize/recreation
+        void OnSwapchainRecreated();
 
         /// @brief Check if ImGui wants to capture keyboard input
         bool WantsKeyboardInput() const;

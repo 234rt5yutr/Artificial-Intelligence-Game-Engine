@@ -449,7 +449,6 @@ glm::vec2 TextRenderer::MeasureText(std::string_view text, const TextStyle& styl
     }
     
     const auto& metrics = fontAtlas->GetMetrics();
-    float scale = style.fontSize / metrics.emSize;
     
     // Calculate width using FontAtlas helper (in em units)
     float widthEm = fontAtlas->CalculateTextWidth(text);
@@ -524,8 +523,6 @@ void TextRenderer::Flush(VkCommandBuffer cmdBuffer) {
     vkCmdBindIndexBuffer(cmdBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
     
     // Render each batch
-    size_t vertexOffset = 0;
-    size_t indexOffset = 0;
     size_t drawCalls = 0;
     
     for (auto& [atlas, batch] : batches) {
@@ -946,7 +943,6 @@ void TextRenderer::GenerateTextVertices(const TextDrawCommand& cmd,
     }
     
     const auto& metrics = atlas->GetMetrics();
-    float scale = cmd.style.fontSize / metrics.emSize;
     
     // Measure text for alignment
     glm::vec2 textSize = MeasureText(cmd.text, cmd.style);
@@ -957,7 +953,6 @@ void TextRenderer::GenerateTextVertices(const TextDrawCommand& cmd,
     float baselineY = position.y + metrics.ascender * cmd.style.fontSize;
     
     uint32_t prevChar = 0;
-    uint32_t baseIndex = static_cast<uint32_t>(outVertices.size());
     
     // Iterate through UTF-8 text
     for (size_t i = 0; i < cmd.text.size();) {

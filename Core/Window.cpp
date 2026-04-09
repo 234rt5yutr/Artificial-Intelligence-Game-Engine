@@ -2,6 +2,7 @@
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include "Core/Assert.h"
+#include "Core/UI/UIManager.h"
 
 namespace Core {
 
@@ -69,6 +70,9 @@ namespace Core {
         
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            // Feed raw SDL events to UI first so ImGui widgets remain interactive.
+            UI::UIManager::Get().ProcessEvent(event);
+
             if (event.type == SDL_EVENT_QUIT) {
                 WindowCloseEvent e;
                 if (m_Data.EventCallback) {

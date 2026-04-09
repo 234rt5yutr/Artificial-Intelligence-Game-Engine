@@ -86,7 +86,7 @@ namespace UI {
 
         /// @brief Render all UI elements
         /// @param commandBuffer Active command buffer within render pass
-        void Render(VkCommandBuffer commandBuffer);
+        void Render(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
         /// @brief End the UI frame
         void EndFrame();

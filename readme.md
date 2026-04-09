@@ -29,9 +29,9 @@ Implemented foundation (code present and wired into build):
 - MCP server, HTTP interface, and scene serialization/tool scaffolding
 
 Roadmap snapshot from `engine_roadmap.md`:
-- Completed: Phases 1-9 and Phase 10 steps 10.1-10.6
-- Remaining in Phase 10: `ExecuteScript`, sandboxed action validation, auto-level designer loop
-- Future phases (11-13): spatial audio, advanced skeletal animation/IK, procedural world systems
+- Completed: Foundational phases through advanced gameplay/ray tracing/physics integration milestones (latest reviewed up to Phase 20)
+- Latest hardening pass: security and code-quality review updates released as `v0.20.1`
+- Ongoing work: stabilization, toolchain/documentation polish, and runtime UX improvements
 
 ## Architecture Overview
 
@@ -75,6 +75,11 @@ Key directories:
 - `src/` - Entry point (`main.cpp`)
 - `build/` - Local build outputs and generated project files
 
+## Documentation
+
+- Build guide: [`BUILD_GUIDE.md`](BUILD_GUIDE.md)
+- MCP server guide: [`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md)
+
 ## Build Prerequisites
 
 Windows-oriented setup (current workspace target):
@@ -94,10 +99,11 @@ cmake -S . -B build `
   -DVCPKG_TARGET_TRIPLET=x64-windows
 
 cmake --build build --config Release
-.\build\Release\AIGameEngine.exe
+.\build\release\AIGameEngine.exe
 ```
 
 For debug builds, replace `Release` with `Debug`.
+For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.md).
 
 ## Known Limitations
 

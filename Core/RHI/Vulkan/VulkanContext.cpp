@@ -3,6 +3,7 @@
 #include "Core/Log.h"
 #include "Core/Assert.h"
 #include "Core/Window.h"
+#include "Core/UI/UIManager.h"
 #include "Core/RHI/ShaderCompiler.h"
 
 // SDL extensions support
@@ -76,6 +77,13 @@ namespace RHI {
     }
 
     void VulkanContext::CleanupSwapchain() {
+        for (auto framebuffer : m_SwapchainFramebuffers) {
+            if (framebuffer != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+            }
+        }
+        m_SwapchainFramebuffers.clear();
+
         for (auto imageView : m_SwapchainImageViews) {
             vkDestroyImageView(m_Device, imageView, nullptr);
         }
@@ -88,51 +96,82 @@ namespace RHI {
     }
 
     void VulkanContext::RecreateSwapchain(uint32_t width, uint32_t height) {
-        if (width == 0 || height == 0) return;
+        if (width == 0 || height == 0 || m_Device == VK_NULL_HANDLE) return;
         
         vkDeviceWaitIdle(m_Device);
         
         CleanupSwapchain();
+
+        if (m_GraphicsPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
+            m_GraphicsPipeline = VK_NULL_HANDLE;
+        }
+        if (m_PipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
+            m_PipelineLayout = VK_NULL_HANDLE;
+        }
+        if (m_RenderPass != VK_NULL_HANDLE) {
+            vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+            m_RenderPass = VK_NULL_HANDLE;
+        }
+
         CreateSwapchain(width, height);
         CreateImageViews();
+        CreateRenderPass();
+        CreateGraphicsPipeline();
+        CreateFramebuffers();
+
+        UI::UIManager::Get().OnResize(width, height);
     }
 
     void VulkanContext::Shutdown() {
-        vkDeviceWaitIdle(m_Device);
+        if (m_Device != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(m_Device);
+            CleanupSwapchain();
 
-        CleanupSwapchain();
+            if (m_GraphicsPipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
+                m_GraphicsPipeline = VK_NULL_HANDLE;
+            }
+            if (m_PipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
+                m_PipelineLayout = VK_NULL_HANDLE;
+            }
+            if (m_RenderPass != VK_NULL_HANDLE) {
+                vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+                m_RenderPass = VK_NULL_HANDLE;
+            }
 
-        if (m_RenderFinishedSemaphore) {
-            vkDestroySemaphore(m_Device, m_RenderFinishedSemaphore, nullptr);
-            m_RenderFinishedSemaphore = VK_NULL_HANDLE;
-        }
+            if (m_RenderFinishedSemaphore) {
+                vkDestroySemaphore(m_Device, m_RenderFinishedSemaphore, nullptr);
+                m_RenderFinishedSemaphore = VK_NULL_HANDLE;
+            }
 
-        if (m_ImageAvailableSemaphore) {
-            vkDestroySemaphore(m_Device, m_ImageAvailableSemaphore, nullptr);
-            m_ImageAvailableSemaphore = VK_NULL_HANDLE;
-        }
+            if (m_ImageAvailableSemaphore) {
+                vkDestroySemaphore(m_Device, m_ImageAvailableSemaphore, nullptr);
+                m_ImageAvailableSemaphore = VK_NULL_HANDLE;
+            }
 
-        if (m_InFlightFence) {
-            vkDestroyFence(m_Device, m_InFlightFence, nullptr);
-            m_InFlightFence = VK_NULL_HANDLE;
-        }
+            if (m_InFlightFence) {
+                vkDestroyFence(m_Device, m_InFlightFence, nullptr);
+                m_InFlightFence = VK_NULL_HANDLE;
+            }
 
-        if (m_TransferCommandPool) {
-            vkDestroyCommandPool(m_Device, m_TransferCommandPool, nullptr);
-            m_TransferCommandPool = VK_NULL_HANDLE;
-        }
+            if (m_TransferCommandPool) {
+                vkDestroyCommandPool(m_Device, m_TransferCommandPool, nullptr);
+                m_TransferCommandPool = VK_NULL_HANDLE;
+            }
 
-        if (m_CommandPool) {
-            vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
-            m_CommandPool = VK_NULL_HANDLE;
-        }
+            if (m_CommandPool) {
+                vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
+                m_CommandPool = VK_NULL_HANDLE;
+            }
 
-        if (m_Allocator) {
-            vmaDestroyAllocator(m_Allocator);
-            m_Allocator = VK_NULL_HANDLE;
-        }
+            if (m_Allocator) {
+                vmaDestroyAllocator(m_Allocator);
+                m_Allocator = VK_NULL_HANDLE;
+            }
 
-        if (m_Device) {
             vkDestroyDevice(m_Device, nullptr);
             m_Device = VK_NULL_HANDLE;
         }
@@ -851,6 +890,10 @@ namespace RHI {
         VkRenderPassBeginInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         renderPassInfo.renderPass = m_RenderPass;
+        if (imageIndex >= m_SwapchainFramebuffers.size()) {
+            RecreateSwapchain(m_Window->GetWidth(), m_Window->GetHeight());
+            return;
+        }
         renderPassInfo.framebuffer = m_SwapchainFramebuffers[imageIndex];
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = m_SwapchainExtent;
@@ -880,6 +923,9 @@ namespace RHI {
         vkCmdDraw(m_CommandBuffer, 3, 1, 0, 0);
 
         vkCmdEndRenderPass(m_CommandBuffer);
+
+        // Render development/debug UI on top of the scene.
+        UI::UIManager::Get().Render(m_CommandBuffer, imageIndex);
 
         if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "failed to record command buffer!");

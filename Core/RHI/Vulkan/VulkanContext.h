@@ -50,6 +50,7 @@ namespace RHI {
         VkFormat GetSwapchainImageFormat() const { return m_SwapchainImageFormat; }
         VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
         const std::vector<VkImageView>& GetSwapchainImageViews() const { return m_SwapchainImageViews; }
+        VkRenderPass GetRenderPass() const { return m_RenderPass; }
         
         VkCommandPool GetCommandPool() const { return m_CommandPool; }
         VkCommandPool GetTransferCommandPool() const { return m_TransferCommandPool; }
