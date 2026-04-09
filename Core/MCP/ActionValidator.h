@@ -568,7 +568,36 @@ namespace MCP {
 
             for (const auto& pattern : dangerousPatterns) {
                 if (lowerScript.find(pattern) != std::string::npos) {
-                    result.AddWarning("Script contains potentially dangerous pattern: " + pattern);
+                    // SECURITY FIX: Block dangerous patterns instead of just warning
+                    result.AddError("Script contains blocked pattern: " + pattern);
+                    return result;  // Reject immediately - do not allow execution
+                }
+            }
+
+            // Check for obfuscation attempts (Unicode homoglyphs, string concatenation tricks)
+            static const std::vector<std::string> obfuscationPatterns = {
+                "_g[",       // Accessing _G table via indexing
+                "getfenv",   // Environment manipulation
+                "setfenv",   // Environment manipulation
+                "rawget",    // Raw table access
+                "rawset",    // Raw table manipulation
+                "getmetatable", // Metatable access
+                "setmetatable", // Metatable manipulation
+                "load(",     // Dynamic code loading
+                "loadstring", // Dynamic string loading
+                "string.dump", // Can serialize bytecode
+                "pcall",     // Can suppress errors from blocked functions
+                "xpcall",    // Same as pcall
+                "_env",      // Lua 5.2+ environment access
+                "coroutine", // Control flow attacks
+                "\\x",       // Hex escape sequences for obfuscation
+                "\\u"        // Unicode escape sequences for obfuscation
+            };
+
+            for (const auto& pattern : obfuscationPatterns) {
+                if (lowerScript.find(pattern) != std::string::npos) {
+                    result.AddError("Script contains blocked obfuscation pattern: " + pattern);
+                    return result;
                 }
             }
 

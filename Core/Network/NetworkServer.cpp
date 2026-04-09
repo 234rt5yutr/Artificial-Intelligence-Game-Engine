@@ -306,7 +306,18 @@ namespace Network {
         }
 
         switch (pInfo->m_info.m_eState) {
-            case k_ESteamNetworkingConnectionState_Connecting:
+            case k_ESteamNetworkingConnectionState_Connecting: {
+                // SECURITY: Rate limiting check
+                uint32_t ipKey = ExtractIPKey(pInfo->m_hConn);
+                if (ipKey != 0 && ShouldRateLimitConnection(ipKey)) {
+                    NetworkManager::Get().GetSockets()->CloseConnection(
+                        pInfo->m_hConn, 0, "Rate limited", false);
+                    return;
+                }
+
+                // Clean up stale rate limit entries periodically
+                CleanupStaleConnectionAttempts();
+
                 // New incoming connection - accept or reject
                 if (GetClientCount() >= m_Config.MaxClients) {
                     ENGINE_CORE_WARN("Rejecting connection: server full ({}/{})",
@@ -318,6 +329,7 @@ namespace Network {
                     AcceptConnection(pInfo->m_hConn);
                 }
                 break;
+            }
 
             case k_ESteamNetworkingConnectionState_Connected: {
                 uint32_t clientId = FindClientIdByConnection(pInfo->m_hConn);
@@ -696,6 +708,82 @@ namespace Network {
         for (uint32_t clientId : timedOutClients) {
             RejectClient(clientId, RejectionReason::Timeout, "Handshake timed out");
         }
+    }
+
+    //==========================================================================
+    // Security: Rate Limiting
+    //==========================================================================
+
+    bool NetworkServer::ShouldRateLimitConnection(uint32_t ipKey)
+    {
+        uint64_t now = static_cast<uint64_t>(NetworkManager::Get().GetCurrentTime() / 1000);
+        
+        auto it = m_ConnectionAttempts.find(ipKey);
+        if (it == m_ConnectionAttempts.end()) {
+            // First connection from this IP
+            m_ConnectionAttempts[ipKey] = { 1, now };
+            return false;
+        }
+
+        ConnectionAttempt& attempt = it->second;
+        
+        // Reset if window has passed
+        if (now - attempt.FirstAttemptTime > CONNECTION_RATE_WINDOW_MS) {
+            attempt.Count = 1;
+            attempt.FirstAttemptTime = now;
+            return false;
+        }
+
+        // Increment and check limit
+        attempt.Count++;
+        if (attempt.Count > MAX_CONNECTIONS_PER_IP) {
+            ENGINE_CORE_WARN("Rate limiting connection from IP key: {} (attempts: {})",
+                             ipKey, attempt.Count);
+            return true;
+        }
+
+        return false;
+    }
+
+    void NetworkServer::CleanupStaleConnectionAttempts()
+    {
+        uint64_t now = static_cast<uint64_t>(NetworkManager::Get().GetCurrentTime() / 1000);
+        
+        // Only cleanup every 30 seconds
+        if (now - m_LastRateLimitCleanup < 30000) {
+            return;
+        }
+        m_LastRateLimitCleanup = now;
+
+        // Remove entries older than 2x the rate window
+        auto it = m_ConnectionAttempts.begin();
+        while (it != m_ConnectionAttempts.end()) {
+            if (now - it->second.FirstAttemptTime > CONNECTION_RATE_WINDOW_MS * 2) {
+                it = m_ConnectionAttempts.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    uint32_t NetworkServer::ExtractIPKey(HSteamNetConnection connection) const
+    {
+        ISteamNetworkingSockets* sockets = NetworkManager::Get().GetSockets();
+        SteamNetConnectionInfo_t connInfo;
+        if (!sockets->GetConnectionInfo(connection, &connInfo)) {
+            return 0;
+        }
+        
+        // Extract IP as a simple hash key (IPv4 focused, but works for IPv6 too)
+        uint32_t ipKey = 0;
+        const uint8_t* addr = connInfo.m_addrRemote.m_ipv6;
+        for (int i = 0; i < 16; i += 4) {
+            ipKey ^= (static_cast<uint32_t>(addr[i]) << 24) |
+                     (static_cast<uint32_t>(addr[i+1]) << 16) |
+                     (static_cast<uint32_t>(addr[i+2]) << 8) |
+                     static_cast<uint32_t>(addr[i+3]);
+        }
+        return ipKey;
     }
 
 } // namespace Network

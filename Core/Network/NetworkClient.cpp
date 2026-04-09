@@ -2,6 +2,8 @@
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include <cstring>
+#include <cctype>
+#include <algorithm>
 
 #ifdef _MSC_VER
 #define SAFE_STRCPY(dest, src, size) strncpy_s(dest, size, src, _TRUNCATE)
@@ -47,7 +49,24 @@ namespace Network {
         }
 
         m_Config = config;
-        m_ClientName = clientName ? clientName : "Player";
+        
+        // Validate and sanitize client name
+        constexpr size_t MAX_CLIENT_NAME = 63;  // Leave room for null terminator
+        if (clientName) {
+            std::string name(clientName);
+            if (name.length() > MAX_CLIENT_NAME) {
+                ENGINE_CORE_WARN("Client name truncated from {} to {} chars", 
+                               name.length(), MAX_CLIENT_NAME);
+                name = name.substr(0, MAX_CLIENT_NAME);
+            }
+            // Sanitize non-printable characters
+            name.erase(std::remove_if(name.begin(), name.end(), 
+                [](unsigned char c) { return !std::isprint(c); }), name.end());
+            m_ClientName = name.empty() ? "Player" : name;
+        } else {
+            m_ClientName = "Player";
+        }
+        
         m_ReconnectAttempts = 0;
 
         // Parse server address
@@ -444,13 +463,22 @@ namespace Network {
 
         m_AssignedClientId = packet.AssignedClientId;
         m_ServerTickRate = packet.ServerTickRate;
-        m_ServerName = packet.ServerName;
+        
+        // SECURITY: Force null-termination for string fields from network
+        char safeName[sizeof(packet.ServerName) + 1] = {0};
+        std::memcpy(safeName, packet.ServerName, sizeof(packet.ServerName));
+        safeName[sizeof(packet.ServerName)] = '\0';
+        m_ServerName = safeName;
 
         ENGINE_CORE_INFO("Received ServerWelcome: ClientID={}, Server='{}', TickRate={}Hz",
                          m_AssignedClientId, m_ServerName, m_ServerTickRate);
 
-        if (packet.Message[0] != '\0') {
-            ENGINE_CORE_INFO("Server message: {}", packet.Message);
+        // SECURITY: Force null-termination for message field
+        char safeMessage[sizeof(packet.Message) + 1] = {0};
+        std::memcpy(safeMessage, packet.Message, sizeof(packet.Message));
+        safeMessage[sizeof(packet.Message)] = '\0';
+        if (safeMessage[0] != '\0') {
+            ENGINE_CORE_INFO("Server message: {}", safeMessage);
         }
 
         // Send acknowledgment
@@ -485,14 +513,19 @@ namespace Network {
     {
         PROFILE_FUNCTION();
 
+        // SECURITY: Force null-termination for reason field from network
+        char safeReason[sizeof(packet.Reason) + 1] = {0};
+        std::memcpy(safeReason, packet.Reason, sizeof(packet.Reason));
+        safeReason[sizeof(packet.Reason)] = '\0';
+
         ENGINE_CORE_WARN("Connection rejected: {} (code: {})", 
-                         packet.Reason, packet.ReasonCode);
+                         safeReason, packet.ReasonCode);
 
         m_HandshakeState = HandshakeState::Failed;
         m_State = ConnectionState::Failed;
 
         if (m_OnConnectionFailed) {
-            m_OnConnectionFailed(packet.Reason);
+            m_OnConnectionFailed(safeReason);
         }
 
         // Clean up

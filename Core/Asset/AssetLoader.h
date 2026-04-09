@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetTypes.h"
+#include "Core/Security/PathValidator.h"
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -61,7 +62,8 @@ namespace Asset {
         static std::optional<CookedAssetHeader> ReadHeader(const std::filesystem::path& cookedPath);
         
     private:
-        static bool ReadFile(const std::filesystem::path& path, std::vector<uint8_t>& data);
+        static bool ReadFile(const std::filesystem::path& path, std::vector<uint8_t>& data, 
+                              size_t maxSize = Security::MAX_GENERIC_SIZE);
     };
 
     // Streaming asset loader for large assets

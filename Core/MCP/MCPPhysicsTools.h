@@ -11,6 +11,9 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <cstdint>
+#include <cmath>
+#include <algorithm>
+#include <unordered_set>
 
 namespace Core {
 
@@ -31,6 +34,54 @@ namespace MCP {
     // Helper Functions
     //=========================================================================
 
+    /// @brief Safely extracts and validates an entity ID from JSON
+    /// @param params The JSON parameters object
+    /// @param outId Output for the validated entity ID
+    /// @param error Output for error message if validation fails
+    /// @return True if entity ID is valid, false otherwise
+    inline bool SafeGetEntityId(const json& params, uint32_t& outId, std::string& error) {
+        if (!params.contains("entityId")) {
+            error = "entityId is required";
+            return false;
+        }
+
+        const auto& idValue = params["entityId"];
+        
+        // Check if it's a number
+        if (!idValue.is_number()) {
+            error = "entityId must be a number";
+            return false;
+        }
+
+        // Get as int64 to check range
+        int64_t rawValue = 0;
+        if (idValue.is_number_integer()) {
+            rawValue = idValue.get<int64_t>();
+        } else if (idValue.is_number_float()) {
+            double floatVal = idValue.get<double>();
+            // Check if it's a whole number
+            if (floatVal != static_cast<double>(static_cast<int64_t>(floatVal))) {
+                error = "entityId must be a whole number";
+                return false;
+            }
+            rawValue = static_cast<int64_t>(floatVal);
+        }
+
+        // Validate range
+        if (rawValue < 0) {
+            error = "entityId cannot be negative";
+            return false;
+        }
+        
+        if (rawValue > static_cast<int64_t>(UINT32_MAX)) {
+            error = "entityId exceeds maximum valid value";
+            return false;
+        }
+
+        outId = static_cast<uint32_t>(rawValue);
+        return true;
+    }
+
     /// @brief Validates that an entity exists in the scene
     /// @param entityId The entity ID to validate
     /// @param scene The scene to check
@@ -43,24 +94,44 @@ namespace MCP {
         return scene->GetRegistry().valid(entity);
     }
 
-    /// @brief Parses a Vec3 from JSON object
+    /// @brief Parses a Vec3 from JSON object with validation
     /// @param j The JSON object containing x, y, z fields
-    /// @return Parsed Vec3, defaults to (0,0,0) if fields are missing
-    inline Vec3 ParseVec3(const json& j) {
+    /// @param maxMagnitude Maximum allowed magnitude (default 1e6)
+    /// @return Parsed Vec3, clamped to safe values
+    inline Vec3 ParseVec3(const json& j, float maxMagnitude = 1e6f) {
         float x = j.value("x", 0.0f);
         float y = j.value("y", 0.0f);
         float z = j.value("z", 0.0f);
+        
+        // Clamp individual components to prevent NaN/Inf
+        x = std::clamp(x, -maxMagnitude, maxMagnitude);
+        y = std::clamp(y, -maxMagnitude, maxMagnitude);
+        z = std::clamp(z, -maxMagnitude, maxMagnitude);
+        
+        // Check for NaN
+        if (std::isnan(x)) x = 0.0f;
+        if (std::isnan(y)) y = 0.0f;
+        if (std::isnan(z)) z = 0.0f;
+        
         return Vec3(x, y, z);
     }
 
-    /// @brief Safely retrieves a float value from JSON with a default
+    /// @brief Safely retrieves a float value from JSON with bounds checking
     /// @param j The JSON object to search
     /// @param key The key to look for
     /// @param defaultValue The default value if key is not found
-    /// @return The float value or default
-    inline float SafeGetFloat(const json& j, const std::string& key, float defaultValue) {
+    /// @param minValue Minimum allowed value
+    /// @param maxValue Maximum allowed value
+    /// @return The clamped float value or default
+    inline float SafeGetFloat(const json& j, const std::string& key, float defaultValue,
+                               float minValue = -1e6f, float maxValue = 1e6f) {
         if (j.contains(key) && j[key].is_number()) {
-            return j[key].get<float>();
+            float value = j[key].get<float>();
+            // Check for NaN/Inf
+            if (std::isnan(value) || std::isinf(value)) {
+                return defaultValue;
+            }
+            return std::clamp(value, minValue, maxValue);
         }
         return defaultValue;
     }
@@ -122,15 +193,21 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            // Extract parameters
-            uint32_t entityId = params.value("entityId", 0u);
+            // SECURITY FIX: Use safe entity ID extraction with range validation
+            uint32_t entityId;
+            std::string error;
+            if (!SafeGetEntityId(params, entityId, error)) {
+                return ToolResult::Error(error);
+            }
             
             if (!ValidateEntityExists(entityId, scene)) {
-                return ToolResult::Error("Entity " + std::to_string(entityId) + " does not exist");
+                return ToolResult::Error("Entity not found");  // Don't reveal ID in error
             }
 
-            Vec3 impactPoint = ParseVec3(params.value("impactPoint", json::object()));
-            float impactForce = SafeGetFloat(params, "impactForce", 100.0f);
+            // SECURITY FIX: Validate impact point with bounds
+            Vec3 impactPoint = ParseVec3(params.value("impactPoint", json::object()), 10000.0f);
+            // SECURITY FIX: Clamp impact force to safe range
+            float impactForce = SafeGetFloat(params, "impactForce", 100.0f, 0.0f, 100000.0f);
             bool chainReaction = params.value("chainReaction", false);
 
             auto entity = static_cast<entt::entity>(entityId);
@@ -203,14 +280,20 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            uint32_t entityId = params.value("entityId", 0u);
-
-            if (!ValidateEntityExists(entityId, scene)) {
-                return ToolResult::Error("Entity " + std::to_string(entityId) + " does not exist");
+            // SECURITY FIX: Use safe entity ID extraction
+            uint32_t entityId;
+            std::string error;
+            if (!SafeGetEntityId(params, entityId, error)) {
+                return ToolResult::Error(error);
             }
 
-            Vec3 initialVelocity = ParseVec3(params.value("initialVelocity", json::object()));
-            float blendTime = SafeGetFloat(params, "blendTime", 0.2f);
+            if (!ValidateEntityExists(entityId, scene)) {
+                return ToolResult::Error("Entity not found");
+            }
+
+            // SECURITY FIX: Validate velocity with bounds
+            Vec3 initialVelocity = ParseVec3(params.value("initialVelocity", json::object()), 1000.0f);
+            float blendTime = SafeGetFloat(params, "blendTime", 0.2f, 0.0f, 2.0f);
 
             auto entity = static_cast<entt::entity>(entityId);
 
@@ -280,21 +363,38 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            uint32_t entityId = params.value("entityId", 0u);
+            // SECURITY FIX: Use safe entity ID extraction
+            uint32_t entityId;
+            std::string error;
+            if (!SafeGetEntityId(params, entityId, error)) {
+                return ToolResult::Error(error);
+            }
 
             if (!ValidateEntityExists(entityId, scene)) {
-                return ToolResult::Error("Entity " + std::to_string(entityId) + " does not exist");
+                return ToolResult::Error("Entity not found");
             }
 
             std::string constraintType = params.value("constraintType", "");
             std::string property = params.value("property", "");
-            float value = SafeGetFloat(params, "value", 0.0f);
+            
+            // SECURITY FIX: Validate constraint value with appropriate bounds
+            float value = SafeGetFloat(params, "value", 0.0f, -1e6f, 1e6f);
 
-            if (constraintType.empty()) {
-                return ToolResult::Error("constraintType is required");
+            // Validate constraintType against whitelist
+            static const std::unordered_set<std::string> validConstraintTypes = {
+                "hinge", "ball_socket", "slider", "fixed", "distance", "cone_twist", "generic_6dof"
+            };
+            if (validConstraintTypes.find(constraintType) == validConstraintTypes.end()) {
+                return ToolResult::Error("Invalid constraint type");
             }
-            if (property.empty()) {
-                return ToolResult::Error("property is required");
+
+            // Validate property against whitelist
+            static const std::unordered_set<std::string> validProperties = {
+                "lowerLimit", "upperLimit", "motorSpeed", "motorForce", 
+                "damping", "stiffness", "breakingForce", "enabled"
+            };
+            if (validProperties.find(property) == validProperties.end()) {
+                return ToolResult::Error("Invalid property name");
             }
 
             auto entity = static_cast<entt::entity>(entityId);
@@ -349,13 +449,26 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            uint32_t entityId = params.value("entityId", 0u);
+            // SECURITY FIX: Use safe entity ID extraction
+            uint32_t entityId;
+            std::string error;
+            if (!SafeGetEntityId(params, entityId, error)) {
+                return ToolResult::Error(error);
+            }
 
             if (!ValidateEntityExists(entityId, scene)) {
-                return ToolResult::Error("Entity " + std::to_string(entityId) + " does not exist");
+                return ToolResult::Error("Entity not found");
             }
 
             std::string queryType = params.value("queryType", "all");
+            
+            // Validate queryType against whitelist
+            static const std::unordered_set<std::string> validQueryTypes = {
+                "velocity", "position", "constraints", "ragdollState", "all"
+            };
+            if (validQueryTypes.find(queryType) == validQueryTypes.end()) {
+                return ToolResult::Error("Invalid query type");
+            }
 
             auto entity = static_cast<entt::entity>(entityId);
 
@@ -456,18 +569,36 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            uint32_t entityId = params.value("entityId", 0u);
-
-            if (!ValidateEntityExists(entityId, scene)) {
-                return ToolResult::Error("Entity " + std::to_string(entityId) + " does not exist");
+            // SECURITY FIX: Use safe entity ID extraction
+            uint32_t entityId;
+            std::string error;
+            if (!SafeGetEntityId(params, entityId, error)) {
+                return ToolResult::Error(error);
             }
 
-            Vec3 force = ParseVec3(params.value("force", json::object()));
+            if (!ValidateEntityExists(entityId, scene)) {
+                return ToolResult::Error("Entity not found");
+            }
+
+            // SECURITY FIX: Validate force with bounds to prevent physics explosion
+            constexpr float MAX_FORCE = 100000.0f;  // 100kN max
+            Vec3 force = ParseVec3(params.value("force", json::object()), MAX_FORCE);
+            
+            // Clamp total magnitude
+            float forceMagnitude = glm::length(force);
+            if (forceMagnitude > MAX_FORCE) {
+                force = glm::normalize(force) * MAX_FORCE;
+                forceMagnitude = MAX_FORCE;
+            }
+            
             std::string forceType = params.value("forceType", "impulse");
 
-            // Validate force type
-            if (forceType != "impulse" && forceType != "continuous" && forceType != "torque") {
-                return ToolResult::Error("Invalid forceType. Must be 'impulse', 'continuous', or 'torque'");
+            // Validate force type against whitelist
+            static const std::unordered_set<std::string> validForceTypes = {
+                "impulse", "continuous", "torque"
+            };
+            if (validForceTypes.find(forceType) == validForceTypes.end()) {
+                return ToolResult::Error("Invalid force type");
             }
 
             auto entity = static_cast<entt::entity>(entityId);
@@ -481,7 +612,7 @@ namespace MCP {
             // if (forceType == "impulse") {
             //     Physics::PhysicsSystem::Get().ApplyImpulse(entity, force);
             // } else if (forceType == "continuous") {
-            //     float duration = SafeGetFloat(params, "duration", 0.0f);
+            //     float duration = SafeGetFloat(params, "duration", 0.0f, 0.0f, 10.0f);
             //     Physics::PhysicsSystem::Get().ApplyContinuousForce(entity, force, duration);
             // } else if (forceType == "torque") {
             //     Physics::PhysicsSystem::Get().ApplyTorque(entity, force);
@@ -492,14 +623,14 @@ namespace MCP {
             result["entityId"] = entityId;
             result["force"] = Vec3ToJson(force);
             result["forceType"] = forceType;
-            result["forceMagnitude"] = glm::length(force);
+            result["forceMagnitude"] = forceMagnitude;
 
             if (params.contains("applicationPoint")) {
-                result["applicationPoint"] = Vec3ToJson(ParseVec3(params["applicationPoint"]));
+                result["applicationPoint"] = Vec3ToJson(ParseVec3(params["applicationPoint"], 10000.0f));
             }
 
             if (forceType == "continuous") {
-                result["duration"] = SafeGetFloat(params, "duration", 0.0f);
+                result["duration"] = SafeGetFloat(params, "duration", 0.0f, 0.0f, 10.0f);
             }
 
             result["message"] = "Force applied successfully";

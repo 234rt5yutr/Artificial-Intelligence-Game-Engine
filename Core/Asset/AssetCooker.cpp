@@ -1,5 +1,6 @@
 #include "AssetCooker.h"
 #include "Core/Log.h"
+#include "Core/Security/PathValidator.h"
 #include <fstream>
 #include <chrono>
 #include <cstring>
@@ -24,12 +25,25 @@ namespace Asset {
         const std::filesystem::path& sourcePath,
         const std::filesystem::path& outputPath) const {
 
-        if (!std::filesystem::exists(outputPath)) {
+        std::error_code ec;
+        
+        // Check output exists (no TOCTOU issue for output - we'll overwrite anyway)
+        if (!std::filesystem::exists(outputPath, ec) || ec) {
             return true;
         }
 
-        auto sourceTime = std::filesystem::last_write_time(sourcePath);
-        auto outputTime = std::filesystem::last_write_time(outputPath);
+        // Get timestamps with error handling
+        auto sourceTime = std::filesystem::last_write_time(sourcePath, ec);
+        if (ec) {
+            LOG_WARN("Failed to get source timestamp: {}", 
+                     Security::PathValidator::SanitizeForLogging(sourcePath));
+            return true; // Assume needs cooking if we can't check
+        }
+        
+        auto outputTime = std::filesystem::last_write_time(outputPath, ec);
+        if (ec) {
+            return true; // Assume needs cooking if we can't check output
+        }
         
         return sourceTime > outputTime;
     }
@@ -39,12 +53,30 @@ namespace Asset {
         const std::filesystem::path& outputPath,
         const CookOptions& options) {
 
-        if (!std::filesystem::exists(sourcePath)) {
-            LOG_ERROR("Texture source not found: {}", sourcePath.string());
+        // Validate source path
+        auto validatedSource = Security::PathValidator::ValidateAssetPath(sourcePath);
+        if (!validatedSource) {
+            LOG_ERROR("Invalid source path: {}", 
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+        
+        // Validate output path
+        auto validatedOutput = Security::PathValidator::ValidateCookedPath(outputPath);
+        if (!validatedOutput) {
+            LOG_ERROR("Invalid output path: {}", 
+                      Security::PathValidator::SanitizeForLogging(outputPath));
+            return CookResult::WriteFailed;
+        }
+        
+        std::error_code ec;
+        if (!std::filesystem::exists(*validatedSource, ec)) {
+            LOG_ERROR("Texture source not found: {}", 
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
             return CookResult::SourceNotFound;
         }
 
-        if (!options.ForceRebuild && !NeedsCooking(sourcePath, outputPath)) {
+        if (!options.ForceRebuild && !NeedsCooking(*validatedSource, *validatedOutput)) {
             return CookResult::UpToDate;
         }
 
@@ -251,12 +283,23 @@ namespace Asset {
         const std::filesystem::path& sourcePath,
         const std::filesystem::path& outputPath) const {
 
-        if (!std::filesystem::exists(outputPath)) {
+        std::error_code ec;
+        
+        if (!std::filesystem::exists(outputPath, ec) || ec) {
             return true;
         }
 
-        auto sourceTime = std::filesystem::last_write_time(sourcePath);
-        auto outputTime = std::filesystem::last_write_time(outputPath);
+        auto sourceTime = std::filesystem::last_write_time(sourcePath, ec);
+        if (ec) {
+            LOG_WARN("Failed to get source timestamp: {}", 
+                     Security::PathValidator::SanitizeForLogging(sourcePath));
+            return true;
+        }
+        
+        auto outputTime = std::filesystem::last_write_time(outputPath, ec);
+        if (ec) {
+            return true;
+        }
         
         return sourceTime > outputTime;
     }
@@ -266,12 +309,30 @@ namespace Asset {
         const std::filesystem::path& outputPath,
         const CookOptions& options) {
 
-        if (!std::filesystem::exists(sourcePath)) {
-            LOG_ERROR("Mesh source not found: {}", sourcePath.string());
+        // Validate source path
+        auto validatedSource = Security::PathValidator::ValidateAssetPath(sourcePath);
+        if (!validatedSource) {
+            LOG_ERROR("Invalid source path: {}", 
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+        
+        // Validate output path
+        auto validatedOutput = Security::PathValidator::ValidateCookedPath(outputPath);
+        if (!validatedOutput) {
+            LOG_ERROR("Invalid output path: {}", 
+                      Security::PathValidator::SanitizeForLogging(outputPath));
+            return CookResult::WriteFailed;
+        }
+        
+        std::error_code ec;
+        if (!std::filesystem::exists(*validatedSource, ec)) {
+            LOG_ERROR("Mesh source not found: {}", 
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
             return CookResult::SourceNotFound;
         }
 
-        if (!options.ForceRebuild && !NeedsCooking(sourcePath, outputPath)) {
+        if (!options.ForceRebuild && !NeedsCooking(*validatedSource, *validatedOutput)) {
             return CookResult::UpToDate;
         }
 
@@ -418,12 +479,23 @@ namespace Asset {
         const std::filesystem::path& sourcePath,
         const std::filesystem::path& outputPath) const {
 
-        if (!std::filesystem::exists(outputPath)) {
+        std::error_code ec;
+        
+        if (!std::filesystem::exists(outputPath, ec) || ec) {
             return true;
         }
 
-        auto sourceTime = std::filesystem::last_write_time(sourcePath);
-        auto outputTime = std::filesystem::last_write_time(outputPath);
+        auto sourceTime = std::filesystem::last_write_time(sourcePath, ec);
+        if (ec) {
+            LOG_WARN("Failed to get source timestamp: {}", 
+                     Security::PathValidator::SanitizeForLogging(sourcePath));
+            return true;
+        }
+        
+        auto outputTime = std::filesystem::last_write_time(outputPath, ec);
+        if (ec) {
+            return true;
+        }
         
         return sourceTime > outputTime;
     }
@@ -433,12 +505,30 @@ namespace Asset {
         const std::filesystem::path& outputPath,
         const CookOptions& options) {
 
-        if (!std::filesystem::exists(sourcePath)) {
-            LOG_ERROR("Shader source not found: {}", sourcePath.string());
+        // Validate source path
+        auto validatedSource = Security::PathValidator::ValidateShaderPath(sourcePath);
+        if (!validatedSource) {
+            LOG_ERROR("Invalid source path: {}", 
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+        
+        // Validate output path
+        auto validatedOutput = Security::PathValidator::ValidateCookedPath(outputPath);
+        if (!validatedOutput) {
+            LOG_ERROR("Invalid output path: {}", 
+                      Security::PathValidator::SanitizeForLogging(outputPath));
+            return CookResult::WriteFailed;
+        }
+        
+        std::error_code ec;
+        if (!std::filesystem::exists(*validatedSource, ec)) {
+            LOG_ERROR("Shader source not found: {}", 
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
             return CookResult::SourceNotFound;
         }
 
-        if (!options.ForceRebuild && !NeedsCooking(sourcePath, outputPath)) {
+        if (!options.ForceRebuild && !NeedsCooking(*validatedSource, *validatedOutput)) {
             return CookResult::UpToDate;
         }
 

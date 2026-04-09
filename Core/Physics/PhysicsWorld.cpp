@@ -99,8 +99,12 @@ namespace Physics {
         JPH::Trace = JoltTrace;
         JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = JoltAssertFailed;)
 
-        // Create factory
-        JPH::Factory::sInstance = new JPH::Factory();
+        // Create factory once for the process lifetime
+        if (JPH::Factory::sInstance == nullptr) {
+            JPH::Factory::sInstance = new JPH::Factory();
+        } else {
+            ENGINE_CORE_WARN("Jolt factory already exists, reusing existing instance");
+        }
 
         // Register all Jolt physics types
         JPH::RegisterTypes();
@@ -186,8 +190,10 @@ namespace Physics {
 
         // Unregister types and destroy factory
         JPH::UnregisterTypes();
-        delete JPH::Factory::sInstance;
-        JPH::Factory::sInstance = nullptr;
+        if (JPH::Factory::sInstance != nullptr) {
+            delete JPH::Factory::sInstance;
+            JPH::Factory::sInstance = nullptr;
+        }
 
         m_Initialized = false;
         ENGINE_CORE_INFO("Jolt Physics shutdown complete");

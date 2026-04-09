@@ -1,5 +1,6 @@
 #include "AssetLoader.h"
 #include "Core/Log.h"
+#include "Core/Security/PathValidator.h"
 #include <fstream>
 #include <cstring>
 
@@ -10,13 +11,36 @@
 namespace Core {
 namespace Asset {
 
-    bool AssetLoader::ReadFile(const std::filesystem::path& path, std::vector<uint8_t>& data) {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
+    bool AssetLoader::ReadFile(const std::filesystem::path& path, std::vector<uint8_t>& data, 
+                                size_t maxSize) {
+        // Validate path against traversal attacks
+        auto validatedPath = Security::PathValidator::ValidateCookedPath(path);
+        if (!validatedPath) {
+            LOG_ERROR("Path validation failed: {}", 
+                      Security::PathValidator::SanitizeForLogging(path));
+            return false;
+        }
+        
+        std::ifstream file(*validatedPath, std::ios::binary | std::ios::ate);
         if (!file) {
             return false;
         }
         
         std::streamsize size = file.tellg();
+        
+        // Validate file size against limit
+        if (size < 0) {
+            LOG_ERROR("Invalid file size for: {}", 
+                      Security::PathValidator::SanitizeForLogging(path));
+            return false;
+        }
+        
+        if (static_cast<size_t>(size) > maxSize) {
+            LOG_ERROR("File size {} exceeds limit {} for: {}", 
+                      size, maxSize, Security::PathValidator::SanitizeForLogging(path));
+            return false;
+        }
+        
         file.seekg(0, std::ios::beg);
         
         data.resize(static_cast<size_t>(size));
@@ -78,13 +102,15 @@ namespace Asset {
         LoadedTexture result;
         
         std::vector<uint8_t> fileData;
-        if (!ReadFile(cookedPath, fileData)) {
-            LOG_ERROR("Failed to read texture file: {}", cookedPath.string());
+        if (!ReadFile(cookedPath, fileData, Security::MAX_TEXTURE_SIZE)) {
+            LOG_ERROR("Failed to read texture file: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
         if (fileData.size() < sizeof(CookedAssetHeader) + sizeof(CookedTextureHeader)) {
-            LOG_ERROR("Texture file too small: {}", cookedPath.string());
+            LOG_ERROR("Texture file too small: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -93,12 +119,14 @@ namespace Asset {
         std::memcpy(&assetHeader, fileData.data(), sizeof(assetHeader));
         
         if (assetHeader.Magic != COOKED_ASSET_MAGIC) {
-            LOG_ERROR("Invalid magic in texture: {}", cookedPath.string());
+            LOG_ERROR("Invalid magic in texture: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
         if (assetHeader.Type != AssetType::Texture) {
-            LOG_ERROR("Asset is not a texture: {}", cookedPath.string());
+            LOG_ERROR("Asset is not a texture: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -110,7 +138,8 @@ namespace Asset {
         size_t dataSize = assetHeader.DataSize;
         
         if (dataOffset + dataSize > fileData.size()) {
-            LOG_ERROR("Corrupt texture data: {}", cookedPath.string());
+            LOG_ERROR("Corrupt texture data: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -128,13 +157,15 @@ namespace Asset {
         LoadedMesh result;
         
         std::vector<uint8_t> fileData;
-        if (!ReadFile(cookedPath, fileData)) {
-            LOG_ERROR("Failed to read mesh file: {}", cookedPath.string());
+        if (!ReadFile(cookedPath, fileData, Security::MAX_MESH_SIZE)) {
+            LOG_ERROR("Failed to read mesh file: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
         if (fileData.size() < sizeof(CookedAssetHeader) + sizeof(CookedMeshHeader)) {
-            LOG_ERROR("Mesh file too small: {}", cookedPath.string());
+            LOG_ERROR("Mesh file too small: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -143,12 +174,14 @@ namespace Asset {
         std::memcpy(&assetHeader, fileData.data(), sizeof(assetHeader));
         
         if (assetHeader.Magic != COOKED_ASSET_MAGIC) {
-            LOG_ERROR("Invalid magic in mesh: {}", cookedPath.string());
+            LOG_ERROR("Invalid magic in mesh: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
         if (assetHeader.Type != AssetType::Mesh) {
-            LOG_ERROR("Asset is not a mesh: {}", cookedPath.string());
+            LOG_ERROR("Asset is not a mesh: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -157,7 +190,8 @@ namespace Asset {
         
         // Copy vertex data
         if (result.Header.VertexDataOffset + result.Header.VertexDataSize > fileData.size()) {
-            LOG_ERROR("Corrupt vertex data: {}", cookedPath.string());
+            LOG_ERROR("Corrupt vertex data: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -168,7 +202,8 @@ namespace Asset {
         
         // Copy index data
         if (result.Header.IndexDataOffset + result.Header.IndexDataSize > fileData.size()) {
-            LOG_ERROR("Corrupt index data: {}", cookedPath.string());
+            LOG_ERROR("Corrupt index data: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -189,13 +224,15 @@ namespace Asset {
         LoadedShader result;
         
         std::vector<uint8_t> fileData;
-        if (!ReadFile(cookedPath, fileData)) {
-            LOG_ERROR("Failed to read shader file: {}", cookedPath.string());
+        if (!ReadFile(cookedPath, fileData, Security::MAX_SHADER_SIZE)) {
+            LOG_ERROR("Failed to read shader file: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
         if (fileData.size() < sizeof(CookedAssetHeader) + sizeof(CookedShaderHeader)) {
-            LOG_ERROR("Shader file too small: {}", cookedPath.string());
+            LOG_ERROR("Shader file too small: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -204,12 +241,14 @@ namespace Asset {
         std::memcpy(&assetHeader, fileData.data(), sizeof(assetHeader));
         
         if (assetHeader.Magic != COOKED_ASSET_MAGIC) {
-            LOG_ERROR("Invalid magic in shader: {}", cookedPath.string());
+            LOG_ERROR("Invalid magic in shader: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
         if (assetHeader.Type != AssetType::Shader) {
-            LOG_ERROR("Asset is not a shader: {}", cookedPath.string());
+            LOG_ERROR("Asset is not a shader: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -221,7 +260,8 @@ namespace Asset {
         size_t spirvSize = result.Header.SpirvSize;
         
         if (spirvOffset + spirvSize > fileData.size()) {
-            LOG_ERROR("Corrupt shader data: {}", cookedPath.string());
+            LOG_ERROR("Corrupt shader data: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
         
@@ -273,21 +313,32 @@ namespace Asset {
         
         StreamHandle handle;
         
-        handle.Stream.open(cookedPath, std::ios::binary);
+        // Validate path against traversal attacks
+        auto validatedPath = Security::PathValidator::ValidateCookedPath(cookedPath);
+        if (!validatedPath) {
+            LOG_ERROR("Path validation failed: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return handle;
+        }
+        
+        handle.Stream.open(*validatedPath, std::ios::binary);
         if (!handle.Stream) {
-            LOG_ERROR("Failed to open asset for streaming: {}", cookedPath.string());
+            LOG_ERROR("Failed to open asset for streaming: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             return handle;
         }
         
         if (!handle.Stream.read(reinterpret_cast<char*>(&handle.Header), 
                                 sizeof(handle.Header))) {
-            LOG_ERROR("Failed to read asset header: {}", cookedPath.string());
+            LOG_ERROR("Failed to read asset header: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             handle.Stream.close();
             return handle;
         }
         
         if (handle.Header.Magic != COOKED_ASSET_MAGIC) {
-            LOG_ERROR("Invalid magic in streamed asset: {}", cookedPath.string());
+            LOG_ERROR("Invalid magic in streamed asset: {}", 
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
             handle.Stream.close();
             return handle;
         }

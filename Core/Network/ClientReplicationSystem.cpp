@@ -159,6 +159,18 @@ namespace Network {
 
         const PacketHeader* header = static_cast<const PacketHeader*>(data);
 
+        // SECURITY: Validate PayloadSize matches actual data
+        if (header->PayloadSize > MAX_PAYLOAD_SIZE) {
+            LOG_WARN("Packet payload size exceeds maximum ({} > {})", 
+                     header->PayloadSize, MAX_PAYLOAD_SIZE);
+            return;
+        }
+        uint32_t expectedTotalSize = sizeof(PacketHeader) + header->PayloadSize;
+        if (size < expectedTotalSize) {
+            LOG_WARN("Packet size mismatch (claimed: {}, actual: {})", expectedTotalSize, size);
+            return;
+        }
+
         m_TotalBytesReceived += size;
         m_TotalPacketsReceived++;
 
@@ -186,7 +198,8 @@ namespace Network {
                 break;
 
             default:
-                // Unknown or unhandled packet type - let other handlers deal with it
+                // SECURITY: Log unknown packet types for monitoring
+                LOG_WARN("Unknown packet type received: {}", static_cast<int>(header->Type));
                 break;
         }
     }
@@ -204,14 +217,22 @@ namespace Network {
 
         const TransformSyncPacket* packet = static_cast<const TransformSyncPacket*>(data);
         
+        // SECURITY: Validate TransformCount against protocol limits
+        if (packet->TransformCount > MAX_ENTITIES_PER_SNAPSHOT) {
+            LOG_WARN("TransformSync has invalid TransformCount: {} (max: {})", 
+                     packet->TransformCount, MAX_ENTITIES_PER_SNAPSHOT);
+            return;
+        }
+
         // Update server tick
         if (packet->ServerTick > m_LastServerTick) {
             m_LastServerTick = packet->ServerTick;
         }
 
-        // Calculate expected size
-        size_t expectedSize = sizeof(TransformSyncPacket) + packet->TransformCount * sizeof(NetTransform);
-        if (size < expectedSize) {
+        // Calculate expected size with overflow check
+        size_t transformDataSize = static_cast<size_t>(packet->TransformCount) * sizeof(NetTransform);
+        size_t expectedSize = sizeof(TransformSyncPacket) + transformDataSize;
+        if (size < expectedSize || size > MAX_PAYLOAD_SIZE + sizeof(PacketHeader)) {
             LOG_WARN("TransformSync packet size mismatch (expected {}, got {})", expectedSize, size);
             return;
         }
@@ -283,6 +304,13 @@ namespace Network {
 
         const WorldSnapshotPacket* packet = static_cast<const WorldSnapshotPacket*>(data);
 
+        // SECURITY: Validate EntityCount against protocol limits
+        if (packet->EntityCount > MAX_ENTITIES_PER_SNAPSHOT) {
+            LOG_WARN("WorldSnapshot has invalid EntityCount: {} (max: {})",
+                     packet->EntityCount, MAX_ENTITIES_PER_SNAPSHOT);
+            return;
+        }
+
         // Update server tick
         if (packet->ServerTick > m_LastServerTick) {
             m_LastServerTick = packet->ServerTick;
@@ -292,9 +320,11 @@ namespace Network {
         size_t offset = sizeof(WorldSnapshotPacket);
         const uint8_t* bytes = static_cast<const uint8_t*>(data);
 
-        // World snapshot contains NetTransform structs
-        uint32_t transformCount = (size - sizeof(WorldSnapshotPacket)) / sizeof(NetTransform);
-        transformCount = std::min(transformCount, packet->EntityCount);
+        // World snapshot contains NetTransform structs - calculate safe count
+        uint32_t maxTransforms = (size - sizeof(WorldSnapshotPacket)) / sizeof(NetTransform);
+        uint32_t transformCount = std::min(maxTransforms, packet->EntityCount);
+        // SECURITY: Cap at protocol limit to prevent excessive processing
+        transformCount = std::min(transformCount, MAX_ENTITIES_PER_SNAPSHOT);
 
         for (uint32_t i = 0; i < transformCount && offset + sizeof(NetTransform) <= size; i++) {
             const NetTransform* netTrans = reinterpret_cast<const NetTransform*>(bytes + offset);
@@ -304,7 +334,7 @@ namespace Network {
             auto it = m_ProxyEntities.find(networkId);
             if (it == m_ProxyEntities.end()) {
                 // Entity not yet spawned - this can happen if snapshot arrives before spawn
-                LOG_DEBUG("Snapshot contains unknown entity {}, skipping", networkId);
+                LOG_DEBUG("Snapshot contains unknown entity, skipping");
             } else {
                 // Update existing entity
                 UpdateProxyTransform(scene, networkId, *netTrans, packet->ServerTick, packet->Header.Timestamp);

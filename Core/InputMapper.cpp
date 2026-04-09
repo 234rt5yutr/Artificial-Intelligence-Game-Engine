@@ -179,6 +179,14 @@ namespace Core {
         m_MouseDeltaY = 0.0f;
     }
 
+    // Input validation limits based on SDL3 constants
+    namespace InputLimits {
+        constexpr int MAX_GAMEPAD_AXIS = SDL_GAMEPAD_AXIS_COUNT;
+        constexpr int MAX_GAMEPAD_BUTTON = SDL_GAMEPAD_BUTTON_COUNT;
+        constexpr int MAX_MOUSE_BUTTON = 5;
+        constexpr int MAX_MOUSE_AXIS = 2;
+    }
+
     float InputMapper::PollBinding(const InputBinding& binding)
     {
         float value = 0.0f;
@@ -195,6 +203,11 @@ namespace Core {
             }
 
             case InputSource::MouseButton: {
+                // Validate mouse button index
+                if (binding.PrimaryCode < 0 || binding.PrimaryCode >= InputLimits::MAX_MOUSE_BUTTON) {
+                    ENGINE_CORE_WARN("Invalid mouse button code: {}", binding.PrimaryCode);
+                    break;
+                }
                 if (Input::IsMouseButtonPressed(static_cast<uint8_t>(binding.PrimaryCode))) {
                     value = 1.0f;
                 }
@@ -202,6 +215,11 @@ namespace Core {
             }
 
             case InputSource::MouseAxis: {
+                // Validate mouse axis index
+                if (binding.PrimaryCode < 0 || binding.PrimaryCode >= InputLimits::MAX_MOUSE_AXIS) {
+                    ENGINE_CORE_WARN("Invalid mouse axis code: {}", binding.PrimaryCode);
+                    break;
+                }
                 if (binding.PrimaryCode == 0) {
                     value = m_MouseDeltaX;
                 }
@@ -212,6 +230,11 @@ namespace Core {
             }
 
             case InputSource::GamepadButton: {
+                // Validate gamepad button index
+                if (binding.PrimaryCode < 0 || binding.PrimaryCode >= InputLimits::MAX_GAMEPAD_BUTTON) {
+                    ENGINE_CORE_WARN("Invalid gamepad button code: {}", binding.PrimaryCode);
+                    break;
+                }
                 if (Input::IsGamepadButtonPressed(binding.GamepadIndex, static_cast<uint8_t>(binding.PrimaryCode))) {
                     value = 1.0f;
                 }
@@ -219,6 +242,11 @@ namespace Core {
             }
 
             case InputSource::GamepadAxis: {
+                // Validate gamepad axis index
+                if (binding.PrimaryCode < 0 || binding.PrimaryCode >= InputLimits::MAX_GAMEPAD_AXIS) {
+                    ENGINE_CORE_WARN("Invalid gamepad axis code: {}", binding.PrimaryCode);
+                    break;
+                }
                 float axisValue = Input::GetGamepadAxis(binding.GamepadIndex, static_cast<uint8_t>(binding.PrimaryCode));
                 value = ApplyDeadzone(axisValue, m_GamepadDeadzone);
                 break;

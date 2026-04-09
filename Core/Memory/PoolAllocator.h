@@ -17,9 +17,12 @@ public:
     PoolAllocator(PoolAllocator&&) = delete;
     PoolAllocator& operator=(PoolAllocator&&) = delete;
 
-    void* Allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
+    [[nodiscard]] void* Allocate(size_t size, size_t alignment = alignof(std::max_align_t)) override;
     void Free(void* ptr) override;
-    void Init() override;
+    [[nodiscard]] bool Init() override;
+    
+    // Returns true if the allocator has been successfully initialized
+    bool IsInitialized() const { return m_StartPtr != nullptr; }
 
 private:
     struct Node {

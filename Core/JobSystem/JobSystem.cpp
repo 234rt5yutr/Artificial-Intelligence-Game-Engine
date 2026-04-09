@@ -1,11 +1,14 @@
 #include "JobSystem.h"
 #include "Core/Profile.h"
+#include "Core/Log.h"
 #include <algorithm>
 
 namespace Core {
 namespace JobSystem {
 
     namespace {
+        constexpr size_t MAX_JOB_QUEUE_SIZE = 65536;
+        
         uint32_t numThreads = 0;
         std::vector<std::thread> threadPool;
         std::queue<std::function<void()>> jobQueue;
@@ -70,13 +73,25 @@ namespace JobSystem {
 
     void Execute(Context& ctx, const std::function<void()>& job) {
         PROFILE_FUNCTION();
-        ctx.counter.fetch_add(1, std::memory_order_relaxed);
+        if (!ctx.counter) {
+            ctx.counter = std::make_shared<std::atomic<uint32_t>>(0u);
+        }
+        auto counter = ctx.counter;
+        counter->fetch_add(1, std::memory_order_relaxed);
 
         {
             std::lock_guard<std::mutex> lock(queueMutex);
-            jobQueue.push([&ctx, job]() {
+            
+            // Prevent unbounded queue growth
+            if (jobQueue.size() >= MAX_JOB_QUEUE_SIZE) {
+                ENGINE_CORE_ERROR("Job queue full, dropping job");
+                counter->fetch_sub(1, std::memory_order_release);
+                return;
+            }
+            
+            jobQueue.push([counter, job]() {
                 job();
-                ctx.counter.fetch_sub(1, std::memory_order_release);
+                counter->fetch_sub(1, std::memory_order_release);
             });
         }
         wakeCondition.notify_one();
@@ -85,14 +100,26 @@ namespace JobSystem {
     void Dispatch(Context& ctx, uint32_t jobCount, uint32_t groupSize, const std::function<void(uint32_t)>& job) {
         PROFILE_FUNCTION();
         if (jobCount == 0 || groupSize == 0) return;
+        if (!ctx.counter) {
+            ctx.counter = std::make_shared<std::atomic<uint32_t>>(0u);
+        }
 
         uint32_t groupCount = (jobCount + groupSize - 1) / groupSize;
-        ctx.counter.fetch_add(groupCount, std::memory_order_relaxed);
+        auto counter = ctx.counter;
+        counter->fetch_add(groupCount, std::memory_order_relaxed);
 
         {
             std::lock_guard<std::mutex> lock(queueMutex);
+            
+            // Check queue capacity before adding all groups
+            if (jobQueue.size() + groupCount > MAX_JOB_QUEUE_SIZE) {
+                ENGINE_CORE_ERROR("Job queue full, dropping dispatch of {} groups", groupCount);
+                counter->fetch_sub(groupCount, std::memory_order_release);
+                return;
+            }
+            
             for (uint32_t groupIndex = 0; groupIndex < groupCount; ++groupIndex) {
-                jobQueue.push([groupIndex, groupSize, jobCount, &ctx, job]() {
+                jobQueue.push([groupIndex, groupSize, jobCount, counter, job]() {
                     uint32_t groupJobOffset = groupIndex * groupSize;
                     uint32_t groupJobEnd = std::min(groupJobOffset + groupSize, jobCount);
 
@@ -100,7 +127,7 @@ namespace JobSystem {
                         job(i);
                     }
 
-                    ctx.counter.fetch_sub(1, std::memory_order_release);
+                    counter->fetch_sub(1, std::memory_order_release);
                 });
             }
         }
@@ -108,14 +135,23 @@ namespace JobSystem {
     }
 
     bool IsBusy(const Context& ctx) {
-        return ctx.counter.load(std::memory_order_acquire) > 0;
+        return ctx.counter && ctx.counter->load(std::memory_order_acquire) > 0;
     }
 
     void Wait(const Context& ctx) {
         PROFILE_FUNCTION();
+        // Use exponential backoff instead of busy spinning
+        uint32_t spinCount = 0;
+        constexpr uint32_t MAX_SPIN_COUNT = 1000;
+        
         while (IsBusy(ctx)) {
-            // Optional: calling thread can help execute jobs instead of just yielding
-            std::this_thread::yield();
+            if (spinCount < MAX_SPIN_COUNT) {
+                // First spin a bit
+                ++spinCount;
+            } else {
+                // Then yield to other threads
+                std::this_thread::yield();
+            }
         }
     }
 

@@ -1,6 +1,8 @@
 #include "LinearAllocator.h"
 #include "Core/Profile.h"
+#include "Core/Log.h"
 #include <cstdlib>
+#include <cstdint>
 #include <memory>
 
 namespace Core {
@@ -8,6 +10,10 @@ namespace Memory {
 
 LinearAllocator::LinearAllocator(size_t totalSize)
     : m_TotalSize(totalSize), m_Offset(0), m_StartPtr(nullptr) {
+    // SECURITY: Ensure minimum size to prevent useless allocator
+    if (m_TotalSize == 0) {
+        m_TotalSize = 1;
+    }
 }
 
 LinearAllocator::~LinearAllocator() {
@@ -18,33 +24,47 @@ LinearAllocator::~LinearAllocator() {
     }
 }
 
-void LinearAllocator::Init() {
+bool LinearAllocator::Init() {
     PROFILE_FUNCTION();
     if (m_StartPtr == nullptr) {
         m_StartPtr = std::malloc(m_TotalSize);
+        if (m_StartPtr == nullptr) {
+            ENGINE_CORE_ERROR("LinearAllocator::Init failed to allocate {} bytes", m_TotalSize);
+            return false;
+        }
     }
+    return true;
 }
 
 void* LinearAllocator::Allocate(size_t size, size_t alignment) {
     PROFILE_FUNCTION();
-    if (m_StartPtr == nullptr) {
-        return nullptr; // Allocator not initialized
+    
+    // SECURITY: Validate inputs
+    if (m_StartPtr == nullptr || size == 0) {
+        return nullptr;
     }
 
-    std::size_t currentAddress = reinterpret_cast<std::size_t>(m_StartPtr) + m_Offset;
+    // SECURITY: Ensure alignment is at least 1 to prevent division issues
+    if (alignment == 0) {
+        alignment = 1;
+    }
+
+    std::uintptr_t currentAddress = reinterpret_cast<std::uintptr_t>(m_StartPtr) + m_Offset;
     std::size_t padding = 0;
 
     // Calculate required padding for alignment
-    if (alignment != 0 && currentAddress % alignment != 0) {
+    if (currentAddress % alignment != 0) {
         padding = alignment - (currentAddress % alignment);
     }
 
-    if (m_Offset + padding + size > m_TotalSize) {
-        return nullptr; // Out of memory
+    // SECURITY: Safe overflow check - avoid integer overflow in bounds checking
+    size_t remainingSpace = m_TotalSize - m_Offset;
+    if (padding > remainingSpace || size > remainingSpace - padding) {
+        return nullptr;  // Out of memory
     }
 
     m_Offset += padding;
-    std::size_t nextAddress = currentAddress + padding;
+    std::uintptr_t nextAddress = currentAddress + padding;
     m_Offset += size;
 
     return reinterpret_cast<void*>(nextAddress);

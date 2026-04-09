@@ -4,6 +4,7 @@
 // Define miniaudio implementation in this translation unit
 #define MINIAUDIO_IMPLEMENTATION
 #include "AudioSystem.h"
+#include "Core/Security/PathValidator.h"
 
 #include <algorithm>
 #include <cstring>
@@ -41,17 +42,34 @@ namespace Audio {
             Unload();
         }
 
-        ma_result result = ma_sound_init_from_file(engine, filePath.c_str(), 
+        // Validate path against traversal attacks
+        std::filesystem::path path(filePath);
+        auto validatedPath = Security::PathValidator::ValidateAssetPath(path);
+        if (!validatedPath) {
+            ENGINE_CORE_ERROR("AudioBuffer: Path validation failed for '{}'", 
+                             Security::PathValidator::SanitizeForLogging(path));
+            return false;
+        }
+        
+        // Check file size limit
+        if (!Security::PathValidator::ValidateFileSize(*validatedPath, Security::MAX_AUDIO_SIZE)) {
+            ENGINE_CORE_ERROR("AudioBuffer: File size exceeds limit for '{}'", 
+                             Security::PathValidator::SanitizeForLogging(path));
+            return false;
+        }
+
+        ma_result result = ma_sound_init_from_file(engine, validatedPath->string().c_str(), 
             MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_PITCH | MA_SOUND_FLAG_NO_SPATIALIZATION,
             nullptr, nullptr, &m_Sound);
 
         if (result != MA_SUCCESS) {
-            ENGINE_CORE_ERROR("AudioBuffer: Failed to load '{}', error: {}", filePath, static_cast<int>(result));
+            ENGINE_CORE_ERROR("AudioBuffer: Failed to load '{}', error: {}", 
+                             Security::PathValidator::SanitizeForLogging(path), static_cast<int>(result));
             return false;
         }
 
         // Get sound info
-        m_Info.FilePath = filePath;
+        m_Info.FilePath = validatedPath->string();
         
         ma_sound_get_data_format(&m_Sound, nullptr, &m_Info.Channels, &m_Info.SampleRate, nullptr, 0);
         
@@ -63,7 +81,7 @@ namespace Audio {
 
         m_Loaded = true;
         ENGINE_CORE_INFO("AudioBuffer: Loaded '{}' ({:.2f}s, {}ch, {}Hz)", 
-                        filePath, m_Info.DurationSeconds, m_Info.Channels, m_Info.SampleRate);
+                        path.filename().string(), m_Info.DurationSeconds, m_Info.Channels, m_Info.SampleRate);
         
         return true;
     }

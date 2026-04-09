@@ -121,9 +121,23 @@ namespace Network {
     void ServerReconciliationSystem::ReceiveInput(uint32_t clientId, const ClientInputPacket& packet,
                                                   const InputSample* samples, uint32_t sampleCount)
     {
+        // SECURITY: Validate packet ClientId matches connection's client ID
+        if (packet.ClientId != clientId) {
+            LOG_WARN("Client {} attempted to send input as client {} - rejecting",
+                     clientId, packet.ClientId);
+            return;
+        }
+
+        // SECURITY: Validate sample count against protocol limits
+        if (sampleCount > MAX_INPUTS_PER_PACKET) {
+            LOG_WARN("Client {} sent too many inputs: {} (max: {})",
+                     clientId, sampleCount, MAX_INPUTS_PER_PACKET);
+            return;
+        }
+
         auto it = m_ClientStates.find(clientId);
         if (it == m_ClientStates.end()) {
-            LOG_WARN("Received input from unregistered client {}", clientId);
+            LOG_WARN("Received input from unregistered client");
             return;
         }
 
@@ -133,6 +147,12 @@ namespace Network {
 
         // Buffer each input sample
         for (uint32_t i = 0; i < sampleCount; i++) {
+            // SECURITY: Check buffer size BEFORE insertion
+            if (state.InputBuffer.size() >= m_Config.InputBufferSize) {
+                LOG_WARN("Input buffer full for client");
+                break;
+            }
+
             const InputSample& sample = samples[i];
 
             // Skip if already processed
@@ -164,15 +184,9 @@ namespace Network {
                     return a.Sample.InputSequence < b.Sample.InputSequence;
                 });
             state.InputBuffer.insert(insertPos, buffered);
-
-            // Trim buffer if too large
-            while (state.InputBuffer.size() > m_Config.InputBufferSize) {
-                state.InputBuffer.pop_front();
-            }
         }
 
         state.LastInputTimestamp = now;
-        (void)packet; // Packet header used for timing if needed
     }
 
     void ServerReconciliationSystem::ProcessInputs(ECS::Scene& scene, float deltaTime)

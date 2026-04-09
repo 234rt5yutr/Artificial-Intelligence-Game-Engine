@@ -243,7 +243,9 @@ namespace Network {
 
         // Accumulate time for input sending
         m_InputSendAccumulator += deltaTime;
-        float sendInterval = 1.0f / m_Config.InputSendRate;
+        // SECURITY: Prevent division by zero
+        float safeSendRate = (m_Config.InputSendRate > 0.0f) ? m_Config.InputSendRate : 1.0f;
+        float sendInterval = 1.0f / safeSendRate;
 
         if (m_InputSendAccumulator >= sendInterval) {
             SendInputs();

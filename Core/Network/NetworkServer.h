@@ -136,6 +136,15 @@ namespace Network {
         // Check handshake timeouts
         void UpdateHandshakeTimeouts();
 
+        // SECURITY: Rate limiting helpers
+        struct ConnectionAttempt {
+            uint32_t Count = 0;
+            uint64_t FirstAttemptTime = 0;
+        };
+        bool ShouldRateLimitConnection(uint32_t ipKey);
+        void CleanupStaleConnectionAttempts();
+        uint32_t ExtractIPKey(HSteamNetConnection connection) const;
+
     private:
         bool m_Running = false;
         ServerConfig m_Config;
@@ -146,6 +155,10 @@ namespace Network {
         std::unordered_map<uint32_t, ClientInfo> m_Clients;
         std::unordered_map<HSteamNetConnection, uint32_t> m_ConnectionToClientId;
         uint32_t m_NextClientId = 1;
+
+        // SECURITY: Connection rate limiting
+        std::unordered_map<uint32_t, ConnectionAttempt> m_ConnectionAttempts;
+        uint64_t m_LastRateLimitCleanup = 0;
 
         // Callbacks
         ClientConnectedCallback m_OnClientConnected;

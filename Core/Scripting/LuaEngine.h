@@ -252,17 +252,43 @@ namespace Scripting {
             lua_setglobal(m_State, func);
         }
 
+        // SECURITY: Explicitly nil out debug library if somehow loaded
+        lua_pushnil(m_State);
+        lua_setglobal(m_State, "debug");
+        
+        // SECURITY: Nil out coroutine to prevent control flow attacks
+        lua_pushnil(m_State);
+        lua_setglobal(m_State, "coroutine");
+        
+        // SECURITY: Disable dangerous string functions that could be used for obfuscation
+        lua_getglobal(m_State, "string");
+        if (lua_istable(m_State, -1)) {
+            lua_pushnil(m_State);
+            lua_setfield(m_State, -2, "dump");  // Can serialize bytecode
+        }
+        lua_pop(m_State, 1);
+        
+        // SECURITY: Remove _ENV access (Lua 5.2+)
+        lua_pushnil(m_State);
+        lua_setglobal(m_State, "_ENV");
+
         // Set instruction count hook for limiting execution
         lua_sethook(m_State, InstructionHook, LUA_MASKCOUNT, 1000);
     }
 
     inline void LuaEngine::StoreEnginePointer() {
+        // SECURITY: Store in registry instead of globals (not accessible from Lua scripts)
         lua_pushlightuserdata(m_State, this);
-        lua_setglobal(m_State, "__engine");
+        lua_setfield(m_State, LUA_REGISTRYINDEX, "core.engine");
     }
 
     inline LuaEngine* LuaEngine::GetEngineFromState(lua_State* L) {
-        lua_getglobal(L, "__engine");
+        lua_getfield(L, LUA_REGISTRYINDEX, "core.engine");
+        // SECURITY: Type validation before cast
+        if (!lua_islightuserdata(L, -1)) {
+            lua_pop(L, 1);
+            return nullptr;
+        }
         auto* engine = static_cast<LuaEngine*>(lua_touserdata(L, -1));
         lua_pop(L, 1);
         return engine;
@@ -276,6 +302,16 @@ namespace Scripting {
         if (engine->m_InstructionCount > engine->m_Limits.MaxInstructions) {
             luaL_error(L, "Script exceeded maximum instruction count (%d)", 
                        engine->m_Limits.MaxInstructions);
+        }
+        
+        // SECURITY: Check recursion depth to prevent stack overflow attacks
+        lua_Debug info;
+        int depth = 0;
+        while (lua_getstack(L, depth, &info)) {
+            depth++;
+            if (depth > 200) {  // Max recursion depth
+                luaL_error(L, "Script exceeded maximum recursion depth");
+            }
         }
     }
 
@@ -376,9 +412,9 @@ namespace Scripting {
         // Capture output via a string buffer
         std::string output;
         
-        // Store output buffer in registry for access by print function
+        // SECURITY: Store output buffer in registry instead of globals (not accessible from scripts)
         lua_pushlightuserdata(m_State, &output);
-        lua_setglobal(m_State, "__output");
+        lua_setfield(m_State, LUA_REGISTRYINDEX, "core.output");
 
         // Load the script
         int loadResult = luaL_loadstring(m_State, script.c_str());
@@ -450,14 +486,17 @@ namespace Scripting {
             }
         }
         
-        // Append to output buffer
-        lua_getglobal(L, "__output");
-        auto* output = static_cast<std::string*>(lua_touserdata(L, -1));
-        lua_pop(L, 1);
-        if (output) {
-            if (!output->empty()) *output += "\n";
-            *output += message;
+        // SECURITY: Append to output buffer stored in registry
+        lua_getfield(L, LUA_REGISTRYINDEX, "core.output");
+        // SECURITY: Type validation before cast
+        if (lua_islightuserdata(L, -1)) {
+            auto* output = static_cast<std::string*>(lua_touserdata(L, -1));
+            if (output) {
+                if (!output->empty()) *output += "\n";
+                *output += message;
+            }
         }
+        lua_pop(L, 1);
         
         ENGINE_CORE_INFO("Lua: {}", message);
         return 0;
@@ -476,6 +515,11 @@ namespace Scripting {
     }
 
     inline int LuaEngine::Lua_CreateEntity(lua_State* L) {
+        // SECURITY: Stack space check
+        if (!lua_checkstack(L, 4)) {
+            return luaL_error(L, "Lua stack overflow");
+        }
+        
         auto* engine = GetEngineFromState(L);
         if (!engine || !engine->m_Scene) {
             lua_pushnil(L);
@@ -493,6 +537,16 @@ namespace Scripting {
         return 1;
     }
 
+    // Helper to validate and convert entity ID from Lua
+    inline bool ValidateEntityId(lua_Integer luaId, entt::entity& outEntity) {
+        // Check for negative values or overflow beyond uint32 range
+        if (luaId < 0 || luaId > static_cast<lua_Integer>(UINT32_MAX)) {
+            return false;
+        }
+        outEntity = static_cast<entt::entity>(static_cast<uint32_t>(luaId));
+        return true;
+    }
+
     inline int LuaEngine::Lua_DestroyEntity(lua_State* L) {
         auto* engine = GetEngineFromState(L);
         if (!engine || !engine->m_Scene) {
@@ -501,7 +555,14 @@ namespace Scripting {
         }
 
         lua_Integer entityId = luaL_checkinteger(L, 1);
-        auto entity = static_cast<entt::entity>(static_cast<uint32_t>(entityId));
+        entt::entity entity;
+        
+        // Validate entity ID is within uint32 range
+        if (!ValidateEntityId(entityId, entity)) {
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        
         auto& registry = engine->m_Scene->GetRegistry();
         
         if (registry.valid(entity)) {
@@ -543,7 +604,14 @@ namespace Scripting {
         }
 
         lua_Integer entityId = luaL_checkinteger(L, 1);
-        auto entity = static_cast<entt::entity>(static_cast<uint32_t>(entityId));
+        entt::entity entity;
+        
+        // Validate entity ID is within uint32 range
+        if (!ValidateEntityId(entityId, entity)) {
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        
         lua_pushboolean(L, engine->m_Scene->GetRegistry().valid(entity));
         return 1;
     }

@@ -184,9 +184,23 @@ void UIManager::DrawTextAnchored(std::string_view text, Anchor anchor, glm::vec2
 // ============================================================================
 
 void UIManager::ShowMessage(std::string_view text, float duration, DisplayMessage::Type type) {
+    constexpr size_t MAX_MESSAGE_LENGTH = 1024;
+    constexpr float MIN_DURATION = 0.1f;
+    constexpr float MAX_DURATION = 60.0f;
+    
     DisplayMessage msg;
-    msg.text = std::string(text);
-    msg.duration = duration;
+    
+    // Truncate if too long
+    if (text.length() > MAX_MESSAGE_LENGTH) {
+        msg.text = std::string(text.substr(0, MAX_MESSAGE_LENGTH)) + "...";
+        ENGINE_CORE_WARN("UIManager: Message truncated from {} to {} chars", 
+                        text.length(), MAX_MESSAGE_LENGTH);
+    } else {
+        msg.text = std::string(text);
+    }
+    
+    // Validate duration is reasonable
+    msg.duration = std::clamp(duration, MIN_DURATION, MAX_DURATION);
     msg.type = type;
     msg.color = GetMessageTypeColor(type);
     

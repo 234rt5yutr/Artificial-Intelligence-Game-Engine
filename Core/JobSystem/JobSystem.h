@@ -7,13 +7,15 @@
 #include <condition_variable>
 #include <queue>
 #include <atomic>
+#include <memory>
 
 namespace Core {
 namespace JobSystem {
 
     // A job context allows waiting for a set of jobs to finish
     struct Context {
-        std::atomic<uint32_t> counter{0};
+        std::shared_ptr<std::atomic<uint32_t>> counter =
+            std::make_shared<std::atomic<uint32_t>>(0u);
     };
 
     // Initialize the Job System with the maximum number of logical cores

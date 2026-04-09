@@ -63,26 +63,34 @@ namespace Core {
     }
 
     bool Input::IsGamepadConnected(int gamepadIndex) {
-        if (s_Gamepads.empty()) return false;
+        // Validate gamepad index - must be non-negative and within valid range
+        if (s_Gamepads.empty() || gamepadIndex < 0) return false;
+        
+        size_t index = static_cast<size_t>(gamepadIndex);
+        if (index >= s_Gamepads.size()) return false;
         
         auto it = s_Gamepads.begin();
-        std::advance(it, (gamepadIndex < s_Gamepads.size()) ? gamepadIndex : 0);
+        std::advance(it, index);
         return it != s_Gamepads.end();
     }
 
     bool Input::IsGamepadButtonPressed(int gamepadIndex, uint8_t button) {
-        if (!IsGamepadConnected(gamepadIndex)) return false;
+        // Validate gamepad index bounds
+        if (gamepadIndex < 0 || static_cast<size_t>(gamepadIndex) >= s_Gamepads.size()) 
+            return false;
 
         auto it = s_Gamepads.begin();
-        std::advance(it, gamepadIndex);
+        std::advance(it, static_cast<size_t>(gamepadIndex));
         return SDL_GetGamepadButton(it->second, static_cast<SDL_GamepadButton>(button));
     }
 
     float Input::GetGamepadAxis(int gamepadIndex, uint8_t axis) {
-        if (!IsGamepadConnected(gamepadIndex)) return 0.0f;
+        // Validate gamepad index bounds
+        if (gamepadIndex < 0 || static_cast<size_t>(gamepadIndex) >= s_Gamepads.size()) 
+            return 0.0f;
 
         auto it = s_Gamepads.begin();
-        std::advance(it, gamepadIndex);
+        std::advance(it, static_cast<size_t>(gamepadIndex));
         
         int16_t value = SDL_GetGamepadAxis(it->second, static_cast<SDL_GamepadAxis>(axis));
         

@@ -13,6 +13,10 @@ namespace Network {
     constexpr uint32_t MAX_ENTITIES_PER_SNAPSHOT = 64;
     constexpr uint32_t MAX_INPUTS_PER_PACKET = 32;
     constexpr uint32_t MAX_EVENTS_PER_PACKET = 16;
+    constexpr uint32_t MAX_PAYLOAD_SIZE = 65536;           // 64KB max payload
+    constexpr uint32_t REPLAY_WINDOW_SIZE = 64;            // Sequence replay window
+    constexpr uint32_t MAX_CONNECTIONS_PER_IP = 5;         // Rate limit per IP
+    constexpr uint32_t CONNECTION_RATE_WINDOW_MS = 10000;  // 10 second window
 
     //==========================================================================
     // PACKET TYPE ENUMERATION

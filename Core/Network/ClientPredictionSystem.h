@@ -21,7 +21,7 @@ namespace Network {
     struct PredictionConfig {
         uint32_t MaxPendingInputs = 128;            // Maximum unacknowledged inputs to store
         uint32_t InputRedundancy = 3;               // Number of past inputs to send per packet
-        float InputSendRate = 60.0f;                // Input send rate (Hz)
+        float InputSendRate = 60.0f;                // Input send rate (Hz) - minimum 1.0
         float MaxPredictionTime = 0.5f;             // Max time to predict ahead (seconds)
         float CorrectionSmoothTime = 0.1f;          // Time to smooth corrections (seconds)
         float CorrectionThreshold = 0.01f;          // Min difference to trigger correction
