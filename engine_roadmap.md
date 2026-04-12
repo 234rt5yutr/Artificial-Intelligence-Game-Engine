@@ -260,3 +260,134 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [X]  Step 20.3: Implement a Destructible Mesh pipeline using Voronoi fracturing, allowing static meshes to dynamically shatter into physics-enabled debris based on impact force. (v0.20.3)
 * [X]  Step 20.4: Integrate Cloth or Soft Body simulation for capes, flags, and vegetation wind interaction. (v0.20.4)
 * [X]  Step 20.5: **MCP Server Update:** Implement the `TriggerDestruction`, `SpawnRagdoll`, and `ModifyConstraint` MCP tools. The AI can now blow up level geometry in front of the player, unlock doors by snapping virtual hinges, or dynamically drop the player into an active physics simulation. (v0.20.5)
+
+## Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring (Weeks 53-56)
+
+* [ ]  Step 21.1: Build the core editor panel framework for hierarchy, inspector, and entity editing interactions.
+  * [ ] Sub-step 21.1.1: Implement `OpenSceneHierarchyPanel()` with scene tree virtualization, search, and selection sync. (v0.21.1.1)
+  * [ ] Sub-step 21.1.2: Implement `OpenInspectorPanel()` with dynamic component reflection and category grouping. (v0.21.1.2)
+  * [ ] Sub-step 21.1.3: Implement `SelectEntityInEditor()` to synchronize world selection, hierarchy focus, and gizmo targets. (v0.21.1.3)
+  * [ ] Sub-step 21.1.4: Implement `EditComponentPropertiesInEditor()` with validation, dirty state tracking, and undo integration points. (v0.21.1.4)
+* [ ]  Step 21.2: Add transactional editor history for deterministic undo/redo behavior across entity and component edits.
+  * [ ] Sub-step 21.2.1: Implement `UndoEditorAction()` with grouped command stack playback. (v0.21.2.1)
+  * [ ] Sub-step 21.2.2: Implement `RedoEditorAction()` with divergence handling after branch edits. (v0.21.2.2)
+* [ ]  Step 21.3: Add prefab authoring and instance management pipeline.
+  * [ ] Sub-step 21.3.1: Implement `CreatePrefabAsset()` for serializing selected entity graphs into reusable assets. (v0.21.3.1)
+  * [ ] Sub-step 21.3.2: Implement `InstantiatePrefabAsset()` for scene placement with stable instance IDs. (v0.21.3.2)
+  * [ ] Sub-step 21.3.3: Implement `ApplyPrefabOverrides()` for writing instance deltas back to source prefab assets. (v0.21.3.3)
+  * [ ] Sub-step 21.3.4: Implement `CreatePrefabVariant()` for inheritance-based prefab specialization. (v0.21.3.4)
+* [ ]  Step 21.4: Build graph-based non-code authoring for gameplay and sequencing.
+  * [ ] Sub-step 21.4.1: Implement `OpenVisualScriptingGraphEditor()` for node graph authoring and serialization. (v0.21.4.1)
+  * [ ] Sub-step 21.4.2: Implement `CompileVisualScriptingGraph()` into runtime-executable intermediate representation. (v0.21.4.2)
+  * [ ] Sub-step 21.4.3: Implement `ExecuteVisualScriptingGraph()` with deterministic frame stepping and event hooks. (v0.21.4.3)
+* [ ]  Step 21.5: Add cinematic timeline authoring in-editor.
+  * [ ] Sub-step 21.5.1: Implement `OpenCinematicSequencerEditor()` with track view, clip lanes, and playhead controls. (v0.21.5.1)
+  * [ ] Sub-step 21.5.2: Implement `AddTimelineTrack()` for camera, animation, audio, and event channels. (v0.21.5.2)
+  * [ ] Sub-step 21.5.3: Implement `AddTimelineClip()` with blend and easing metadata. (v0.21.5.3)
+  * [ ] Sub-step 21.5.4: Implement `EvaluateTimelineAtTime()` for scrub-time preview and runtime playback parity. (v0.21.5.4)
+  * [ ] Sub-step 21.5.5: Implement `RecordAnimationTake()` for live capture into timeline clips. (v0.21.5.5)
+
+## Phase 22: Scene Serialization, Streaming & Open-World Runtime (Weeks 57-59)
+
+* [ ]  Step 22.1: Build additive scene streaming runtime and lifecycle hooks.
+  * [ ] Sub-step 22.1.1: Implement `LoadSceneAdditiveAsync()` with staged asset prefetch and non-blocking activation. (v0.22.1.1)
+  * [ ] Sub-step 22.1.2: Implement `UnloadSceneAsync()` with dependency-aware release and safe teardown callbacks. (v0.22.1.2)
+* [ ]  Step 22.2: Extend scene persistence beyond current context dump helpers.
+  * [ ] Sub-step 22.2.1: Implement `SerializeSceneToAsset()` for full scene-asset authoring from runtime/editor state. (v0.22.2.1)
+  * [ ] Sub-step 22.2.2: Implement `DeserializeSceneFromAsset()` for complete reconstruction of entities, components, and references. (v0.22.2.2)
+* [ ]  Step 22.3: Add large-world partitioning and streaming controls.
+  * [ ] Sub-step 22.3.1: Implement `StreamWorldPartitionCellIn()` with cell-level dependency graph hydration. (v0.22.3.1)
+  * [ ] Sub-step 22.3.2: Implement `StreamWorldPartitionCellOut()` with ownership transfer and memory budget enforcement. (v0.22.3.2)
+  * [ ] Sub-step 22.3.3: Implement `BuildHierarchicalLOD()` for streaming-friendly distant representation generation. (v0.22.3.3)
+  * [ ] Sub-step 22.3.4: Implement `RebaseWorldOrigin()` with physics/network-safe coordinate remapping. (v0.22.3.4)
+
+## Phase 23: Addressable Assets, Bundles & Hot Content Delivery (Weeks 60-62)
+
+* [ ]  Step 23.1: Build addressable catalog generation and runtime query system.
+  * [ ] Sub-step 23.1.1: Implement `BuildAddressablesCatalog()` with deterministic GUID/address mapping and build manifest output. (v0.23.1.1)
+  * [ ] Sub-step 23.1.2: Implement `LoadAddressableAssetAsync()` with dependency resolution, caching, and cancellation. (v0.23.1.2)
+  * [ ] Sub-step 23.1.3: Implement `ReleaseAddressableAsset()` with ref-counted lifecycle and eviction policy. (v0.23.1.3)
+* [ ]  Step 23.2: Build bundle packaging and mount pipeline for DLC/mod/patch workflows.
+  * [ ] Sub-step 23.2.1: Implement `BuildAssetBundle()` with platform-specific compression and chunk layout strategies. (v0.23.2.1)
+  * [ ] Sub-step 23.2.2: Implement `MountAssetBundle()` with integrity validation and mount priority controls. (v0.23.2.2)
+  * [ ] Sub-step 23.2.3: Implement `PatchAssetBundleDelta()` for binary-diff deployment without full rebundles. (v0.23.2.3)
+* [ ]  Step 23.3: Add dependency intelligence and runtime hot-reload tooling.
+  * [ ] Sub-step 23.3.1: Implement `TrackAssetDependencyGraph()` with reverse-lookups and cycle detection. (v0.23.3.1)
+  * [ ] Sub-step 23.3.2: Implement `HotReloadAssetAtRuntime()` with safe rebinding of renderer/audio/animation users. (v0.23.3.2)
+
+## Phase 24: Render Graph, Virtualized Geometry & Advanced Upscaling (Weeks 63-67)
+
+* [ ]  Step 24.1: Move pass scheduling to an explicit render graph architecture.
+  * [ ] Sub-step 24.1.1: Implement `RegisterRenderGraphPass()` for declarative pass resources, barriers, and dependencies. (v0.24.1.1)
+  * [ ] Sub-step 24.1.2: Implement `ExecuteRenderGraph()` with topological scheduling and transient resource aliasing. (v0.24.1.2)
+* [ ]  Step 24.2: Build virtualized geometry streaming path (Nanite-class capability target).
+  * [ ] Sub-step 24.2.1: Implement `BuildVirtualizedGeometryClusters()` from imported mesh topology and material partitions. (v0.24.2.1)
+  * [ ] Sub-step 24.2.2: Implement `StreamVirtualGeometryPages()` with camera-driven residency management. (v0.24.2.2)
+* [ ]  Step 24.3: Add modern shadow/GI and hardware RT fallback hierarchy.
+  * [ ] Sub-step 24.3.1: Implement `BuildVirtualShadowMapCache()` for high-density shadow page reuse. (v0.24.3.1)
+  * [ ] Sub-step 24.3.2: Implement `ComputeDynamicGlobalIllumination()` with hybrid SSGI/RT pathways. (v0.24.3.2)
+  * [ ] Sub-step 24.3.3: Implement `TraceHardwareReflections()` with denoise and fallback blending. (v0.24.3.3)
+  * [ ] Sub-step 24.3.4: Implement `TraceHardwareShadows()` with per-light quality tiers. (v0.24.3.4)
+* [ ]  Step 24.4: Harden shader compilation and runtime warmup behavior.
+  * [ ] Sub-step 24.4.1: Implement `CompileShaderPermutationLibrary()` for platform/material feature matrices. (v0.24.4.1)
+  * [ ] Sub-step 24.4.2: Implement `WarmupPipelineCache()` to reduce runtime hitching. (v0.24.4.2)
+* [ ]  Step 24.5: Add modern temporal upscaling + frame generation controls.
+  * [ ] Sub-step 24.5.1: Implement `SetTemporalUpscalerFSR2()` integration path and quality presets. (v0.24.5.1)
+  * [ ] Sub-step 24.5.2: Implement `SetTemporalUpscalerDLSS()` integration path and quality presets. (v0.24.5.2)
+  * [ ] Sub-step 24.5.3: Implement `SetTemporalUpscalerXeSS()` integration path and quality presets. (v0.24.5.3)
+  * [ ] Sub-step 24.5.4: Implement `EnableFrameGeneration()` with input-latency guardrails and fallback modes. (v0.24.5.4)
+  * [ ] Sub-step 24.5.5: Implement `CaptureGPUFrameTrace()` for graphics diagnostics and regression triage. (v0.24.5.5)
+
+## Phase 25: Animation Runtime 2.0, Rig Retargeting & Motion Matching (Weeks 68-71)
+
+* [ ]  Step 25.1: Upgrade animation state orchestration and blend logic.
+  * [ ] Sub-step 25.1.1: Implement `CreateAnimationStateMachineGraph()` for data-authored, layered runtime state machines. (v0.25.1.1)
+  * [ ] Sub-step 25.1.2: Implement `CreateAnimationBlendTree()` with directional locomotion and additive overlays. (v0.25.1.2)
+  * [ ] Sub-step 25.1.3: Implement `SetAnimatorParameterValue()` with typed parameter channels and event sync. (v0.25.1.3)
+* [ ]  Step 25.2: Add retargeting and procedural rig bake pipeline.
+  * [ ] Sub-step 25.2.1: Implement `RetargetAnimationBetweenSkeletons()` with bone-map templates and retarget profiles. (v0.25.2.1)
+  * [ ] Sub-step 25.2.2: Implement `BakeControlRigToAnimation()` for runtime/editor interchange and cinematic capture. (v0.25.2.2)
+* [ ]  Step 25.3: Add data-driven high-fidelity locomotion.
+  * [ ] Sub-step 25.3.1: Implement `EvaluateMotionMatchingDatabase()` for pose-search locomotion selection. (v0.25.3.1)
+
+## Phase 26: Multiplayer Product Layer, Replay System & Rollback Framework (Weeks 72-76)
+
+* [ ]  Step 26.1: Add dedicated-server and session orchestration APIs.
+  * [ ] Sub-step 26.1.1: Implement `StartDedicatedServerInstance()` with headless runtime profile and server-only feature flags. (v0.26.1.1)
+  * [ ] Sub-step 26.1.2: Implement `JoinSessionByInviteCode()` with session lookup, validation, and secure join flow. (v0.26.1.2)
+  * [ ] Sub-step 26.1.3: Implement `DiscoverLANSessions()` with query broadcast and compatibility filters. (v0.26.1.3)
+* [ ]  Step 26.2: Strengthen replication and RPC contract control.
+  * [ ] Sub-step 26.2.1: Implement `RegisterReplicatedPropertyPolicy()` for update rate, relevance, and quantization rules. (v0.26.2.1)
+  * [ ] Sub-step 26.2.2: Implement `RegisterNetworkRPC()` with reliability class, auth checks, and replay support. (v0.26.2.2)
+* [ ]  Step 26.3: Build deterministic replay and rollback systems.
+  * [ ] Sub-step 26.3.1: Implement `RecordNetworkReplay()` capturing network stream + authoritative frame markers. (v0.26.3.1)
+  * [ ] Sub-step 26.3.2: Implement `PlayNetworkReplay()` with time controls and frame-accurate playback state. (v0.26.3.2)
+  * [ ] Sub-step 26.3.3: Implement `RollbackSimulationFrame()` for corrected authoritative rewinds. (v0.26.3.3)
+  * [ ] Sub-step 26.3.4: Implement `ResimulatePredictedFrames()` for reconciliation without hard snaps. (v0.26.3.4)
+  * [ ] Sub-step 26.3.5: Implement `MigrateHostSession()` for resilient peer-host continuity. (v0.26.3.5)
+
+## Phase 27: Runtime UI Authoring, Data Binding & World Widgets (Weeks 77-79)
+
+* [ ]  Step 27.1: Build declarative widget asset pipeline and runtime loader.
+  * [ ] Sub-step 27.1.1: Implement `CreateWidgetBlueprintAsset()` for reusable UI prefabs and style inheritance. (v0.27.1.1)
+  * [ ] Sub-step 27.1.2: Implement `LoadWidgetLayoutAsset()` with async dependency loading and instance pooling. (v0.27.1.2)
+* [ ]  Step 27.2: Add robust UI data binding and transition system.
+  * [ ] Sub-step 27.2.1: Implement `BindWidgetPropertyToData()` with one-way/two-way binding modes and validation hooks. (v0.27.2.1)
+  * [ ] Sub-step 27.2.2: Implement `AnimateWidgetTransition()` with timeline-driven state changes. (v0.27.2.2)
+* [ ]  Step 27.3: Expand world-space and localized modal UI primitives.
+  * [ ] Sub-step 27.3.1: Implement `RenderWorldSpaceWidget()` with depth-aware compositing and interaction routing. (v0.27.3.1)
+  * [ ] Sub-step 27.3.2: Implement `ShowLocalizedModalDialog()` with locale fallback, focus management, and action callbacks. (v0.27.3.2)
+
+## Phase 28: Profiling, Automation & Production Build Pipeline (Weeks 80-83)
+
+* [ ]  Step 28.1: Add first-class profiling capture APIs across CPU and GPU.
+  * [ ] Sub-step 28.1.1: Implement `StartCPUProfilerCapture()` with scoped capture sessions and marker channels. (v0.28.1.1)
+  * [ ] Sub-step 28.1.2: Implement `StartGPUProfilerCapture()` with pass-level timing and queue breakdowns. (v0.28.1.2)
+  * [ ] Sub-step 28.1.3: Implement `ExportProfilerTrace()` to persistent trace formats for post-analysis. (v0.28.1.3)
+* [ ]  Step 28.2: Integrate automated runtime validation suites.
+  * [ ] Sub-step 28.2.1: Implement `RunAutomatedPlayModeTests()` for deterministic gameplay regression packs. (v0.28.2.1)
+  * [ ] Sub-step 28.2.2: Implement `RunAutomatedPerformanceTests()` for budget regression gates by platform tier. (v0.28.2.2)
+* [ ]  Step 28.3: Build shipping-grade multi-platform packaging flow.
+  * [ ] Sub-step 28.3.1: Implement `BuildForPlatformTarget()` with profile-driven compile/cook/package stages. (v0.28.3.1)
+  * [ ] Sub-step 28.3.2: Implement `PackageStoreSubmissionArtifacts()` for storefront-compliant output bundles. (v0.28.3.2)
+  * [ ] Sub-step 28.3.3: Implement `GenerateDedicatedServerBuildArtifacts()` for headless deploy images and symbols. (v0.28.3.3)
