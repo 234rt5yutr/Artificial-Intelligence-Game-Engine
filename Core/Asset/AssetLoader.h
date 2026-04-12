@@ -59,6 +59,9 @@ namespace Asset {
         static LoadedStructuredAsset LoadPrefab(const std::filesystem::path& cookedPath);
         static LoadedStructuredAsset LoadVisualScriptGraph(const std::filesystem::path& cookedPath);
         static LoadedStructuredAsset LoadTimeline(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadSceneAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadWorldPartitionCellAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadHierarchicalLODAsset(const std::filesystem::path& cookedPath);
         
         // Asynchronous loading
         static std::future<LoadedTexture> LoadTextureAsync(const std::filesystem::path& cookedPath);

@@ -232,9 +232,11 @@ namespace Network {
         uint32_t ServerTick = 0;        // Server tick this transform is from
         uint8_t TransformCount = 0;     // Number of transforms in packet
         uint8_t Padding[3] = {};
+        NetVec3 WorldOriginOffset;      // Current world-origin offset on the authority
+        uint32_t WorldOriginSequence = 0; // Monotonic rebase sequence identifier
         // Followed by TransformCount * NetTransform or NetTransformCompressed
     };
-    static_assert(sizeof(TransformSyncPacket) == 24, "TransformSyncPacket must be 24 bytes");
+    static_assert(sizeof(TransformSyncPacket) == 40, "TransformSyncPacket must be 40 bytes");
 
     //==========================================================================
     // INPUT PACKETS

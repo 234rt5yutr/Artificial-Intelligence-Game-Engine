@@ -289,17 +289,17 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 22: Scene Serialization, Streaming & Open-World Runtime (Weeks 57-59)
 
-* [ ] Step 22.1: Build additive scene streaming runtime and lifecycle hooks.
-  * [ ] Sub-step 22.1.1: Implement `LoadSceneAdditiveAsync()` with staged asset prefetch and non-blocking activation. (v0.22.1.1)
-  * [ ] Sub-step 22.1.2: Implement `UnloadSceneAsync()` with dependency-aware release and safe teardown callbacks. (v0.22.1.2)
-* [ ] Step 22.2: Extend scene persistence beyond current context dump helpers.
-  * [ ] Sub-step 22.2.1: Implement `SerializeSceneToAsset()` for full scene-asset authoring from runtime/editor state. (v0.22.2.1)
-  * [ ] Sub-step 22.2.2: Implement `DeserializeSceneFromAsset()` for complete reconstruction of entities, components, and references. (v0.22.2.2)
-* [ ] Step 22.3: Add large-world partitioning and streaming controls.
-  * [ ] Sub-step 22.3.1: Implement `StreamWorldPartitionCellIn()` with cell-level dependency graph hydration. (v0.22.3.1)
-  * [ ] Sub-step 22.3.2: Implement `StreamWorldPartitionCellOut()` with ownership transfer and memory budget enforcement. (v0.22.3.2)
-  * [ ] Sub-step 22.3.3: Implement `BuildHierarchicalLOD()` for streaming-friendly distant representation generation. (v0.22.3.3)
-  * [ ] Sub-step 22.3.4: Implement `RebaseWorldOrigin()` with physics/network-safe coordinate remapping. (v0.22.3.4)
+* [x] Step 22.1: Build additive scene streaming runtime and lifecycle hooks.
+  * [x] Sub-step 22.1.1: Implement `LoadSceneAdditiveAsync()` with staged asset prefetch and non-blocking activation. (v0.22.1.1)
+  * [x] Sub-step 22.1.2: Implement `UnloadSceneAsync()` with dependency-aware release and safe teardown callbacks. (v0.22.1.2)
+* [x] Step 22.2: Extend scene persistence beyond current context dump helpers.
+  * [x] Sub-step 22.2.1: Implement `SerializeSceneToAsset()` for full scene-asset authoring from runtime/editor state. (v0.22.2.1)
+  * [x] Sub-step 22.2.2: Implement `DeserializeSceneFromAsset()` for complete reconstruction of entities, components, and references. (v0.22.2.2)
+* [x] Step 22.3: Add large-world partitioning and streaming controls.
+  * [x] Sub-step 22.3.1: Implement `StreamWorldPartitionCellIn()` with cell-level dependency graph hydration. (v0.22.3.1)
+  * [x] Sub-step 22.3.2: Implement `StreamWorldPartitionCellOut()` with ownership transfer and memory budget enforcement. (v0.22.3.2)
+  * [x] Sub-step 22.3.3: Implement `BuildHierarchicalLOD()` for streaming-friendly distant representation generation. (v0.22.3.3)
+  * [x] Sub-step 22.3.4: Implement `RebaseWorldOrigin()` with physics/network-safe coordinate remapping. (v0.22.3.4)
 
 ## Phase 23: Addressable Assets, Bundles & Hot Content Delivery (Weeks 60-62)
 

@@ -109,6 +109,16 @@ add_library(EngineCore
     Core/MCP/AutoLevelDesigner.h
     Core/MCP/MCPAllTools.h
     Core/MCP/MCPAudioTools.h
+    Core/State/SceneLoader.h
+    Core/State/SceneLoader.cpp
+    Core/State/TransitionManager.h
+    Core/State/TransitionManager.cpp
+    Core/State/SaveFile.h
+    Core/State/SaveFile.cpp
+    Core/State/SaveManager.h
+    Core/State/SaveManager.cpp
+    Core/World/OpenWorldRuntime.h
+    Core/World/OpenWorldRuntime.cpp
     Core/Scripting/LuaEngine.h
     Core/Audio/AudioSystem.h
     Core/Audio/AudioSystem.cpp

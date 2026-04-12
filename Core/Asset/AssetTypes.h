@@ -25,7 +25,10 @@ namespace Asset {
         Timeline = 9,
         Level = 10,
         Font = 11,
-        Script = 12
+        Script = 12,
+        Scene = 13,
+        WorldPartitionCell = 14,
+        HierarchicalLOD = 15
     };
 
     // Texture-specific enums
@@ -169,6 +172,9 @@ namespace Asset {
             case AssetType::Level: return "Level";
             case AssetType::Font: return "Font";
             case AssetType::Script: return "Script";
+            case AssetType::Scene: return "Scene";
+            case AssetType::WorldPartitionCell: return "WorldPartitionCell";
+            case AssetType::HierarchicalLOD: return "HierarchicalLOD";
             default: return "Unknown";
         }
     }

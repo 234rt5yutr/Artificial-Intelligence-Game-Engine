@@ -651,7 +651,10 @@ namespace Asset {
         return {
             AssetType::Prefab,
             AssetType::VisualScriptGraph,
-            AssetType::Timeline
+            AssetType::Timeline,
+            AssetType::Scene,
+            AssetType::WorldPartitionCell,
+            AssetType::HierarchicalLOD
         };
     }
 
@@ -659,7 +662,10 @@ namespace Asset {
         return {
             ".prefab",
             ".vgraph",
-            ".timeline"
+            ".timeline",
+            ".scene",
+            ".cell",
+            ".hlod"
         };
     }
 
@@ -672,6 +678,15 @@ namespace Asset {
         }
         if (extension == ".timeline") {
             return AssetType::Timeline;
+        }
+        if (extension == ".scene") {
+            return AssetType::Scene;
+        }
+        if (extension == ".cell") {
+            return AssetType::WorldPartitionCell;
+        }
+        if (extension == ".hlod") {
+            return AssetType::HierarchicalLOD;
         }
         return AssetType::Unknown;
     }

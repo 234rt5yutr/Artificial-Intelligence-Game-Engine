@@ -1,6 +1,7 @@
 #include "SaveManager.h"
 #include "Core/Log.h"
 #include "Core/ECS/Scene.h"
+#include "Core/MCP/SceneSerialization.h"
 
 #include <fstream>
 #include <algorithm>
@@ -27,7 +28,7 @@ void SaveManager::Initialize(const std::string& saveDirectory) {
         return;
     }
 
-    m_SaveDirectory = saveDirectory.empty() ? GetSavesDirectory() : saveDirectory;
+    m_SaveDirectory = saveDirectory.empty() ? Core::State::GetSavesDirectory() : saveDirectory;
 
     // Ensure directory exists
     if (!std::filesystem::exists(m_SaveDirectory)) {
@@ -111,6 +112,48 @@ bool SaveManager::Load(const std::string& slotName, ECS::Scene* scene,
 bool SaveManager::QuickLoad(ECS::Scene* scene, PlayerState& outPlayerState) {
     ENGINE_CORE_INFO("SaveManager: Quick load...");
     return Load(QUICK_SAVE_SLOT, scene, outPlayerState);
+}
+
+bool SaveManager::SerializeSceneToAsset(const std::string& assetPath, ECS::Scene* scene) {
+    if (!scene) {
+        ENGINE_CORE_ERROR("SaveManager::SerializeSceneToAsset - Scene is null");
+        return false;
+    }
+
+    if (assetPath.empty()) {
+        ENGINE_CORE_ERROR("SaveManager::SerializeSceneToAsset - Asset path is empty");
+        return false;
+    }
+
+    std::string error;
+    if (!MCP::SerializeSceneToAsset(*scene, std::filesystem::path(assetPath), &error)) {
+        ENGINE_CORE_ERROR("SaveManager::SerializeSceneToAsset - {}", error);
+        return false;
+    }
+
+    ENGINE_CORE_INFO("SaveManager: Serialized scene asset '{}'", assetPath);
+    return true;
+}
+
+bool SaveManager::DeserializeSceneFromAsset(const std::string& assetPath, ECS::Scene* scene) {
+    if (!scene) {
+        ENGINE_CORE_ERROR("SaveManager::DeserializeSceneFromAsset - Scene is null");
+        return false;
+    }
+
+    if (assetPath.empty()) {
+        ENGINE_CORE_ERROR("SaveManager::DeserializeSceneFromAsset - Asset path is empty");
+        return false;
+    }
+
+    std::string error;
+    if (!MCP::DeserializeSceneFromAsset(std::filesystem::path(assetPath), *scene, &error)) {
+        ENGINE_CORE_ERROR("SaveManager::DeserializeSceneFromAsset - {}", error);
+        return false;
+    }
+
+    ENGINE_CORE_INFO("SaveManager: Deserialized scene asset '{}'", assetPath);
+    return true;
 }
 
 // ============================================================================

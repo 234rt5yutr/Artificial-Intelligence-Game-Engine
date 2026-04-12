@@ -1,10 +1,14 @@
 #include "SceneLoader.h"
 #include "../ECS/Scene.h"
+#include "../ECS/Entity.h"
+#include "../ECS/Components/TransformComponent.h"
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <thread>
 #include <chrono>
 #include <filesystem>
+#include <algorithm>
+#include <utility>
 
 namespace Core {
 namespace State {
@@ -42,6 +46,18 @@ void SceneLoader::Shutdown() {
 
     // Unload all preloaded scenes
     m_PreloadedScenes.clear();
+
+    {
+        std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+        for (auto& [layerId, pending] : m_PendingAdditiveLoads) {
+            (void)layerId;
+            if (pending.Future.valid()) {
+                pending.Future.wait();
+            }
+        }
+        m_PendingAdditiveLoads.clear();
+        m_AdditiveLayers.clear();
+    }
 
     m_Initialized = false;
 }
@@ -97,6 +113,163 @@ void SceneLoader::LoadSceneAsync(const std::string& scenePath,
     m_AsyncLoadFuture = std::async(std::launch::async, [this, scenePath]() {
         return ParseSceneFile(scenePath);
     });
+}
+
+bool SceneLoader::LoadSceneAdditiveAsync(const AdditiveSceneLoadRequest& request,
+                                         SceneLayerHandle* outHandle) {
+    if (!m_Initialized || request.ScenePath.empty() || m_IsLoading) {
+        return false;
+    }
+
+    const std::string layerId = ResolveLayerId(request);
+    if (layerId.empty()) {
+        return false;
+    }
+
+    AdditiveSceneLoadRequest loadRequest = request;
+    loadRequest.LayerId = layerId;
+
+    SceneLayerInfo layerInfo;
+    layerInfo.LayerId = layerId;
+    layerInfo.ScenePath = request.ScenePath;
+    layerInfo.Dependencies = request.Dependencies;
+    layerInfo.Status = SceneLayerStatus::PendingPrefetch;
+
+    {
+        std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+
+        if (!loadRequest.AllowReload) {
+            if (m_AdditiveLayers.find(layerId) != m_AdditiveLayers.end() ||
+                m_PendingAdditiveLoads.find(layerId) != m_PendingAdditiveLoads.end()) {
+                return false;
+            }
+        }
+
+        layerInfo.Ticket = m_NextLayerTicket++;
+
+        if (outHandle) {
+            outHandle->Ticket = layerInfo.Ticket;
+            outHandle->LayerId = layerId;
+            outHandle->ScenePath = request.ScenePath;
+        }
+
+        PendingAdditiveLoad pendingLoad;
+        pendingLoad.Info = layerInfo;
+        pendingLoad.Request = loadRequest;
+        pendingLoad.Future = std::async(std::launch::async, [this, loadRequest]() -> std::unique_ptr<ECS::Scene> {
+            // Stage 1: dependency prefetch validation
+            for (const std::string& dependencyPath : loadRequest.Dependencies) {
+                if (dependencyPath.empty()) {
+                    continue;
+                }
+
+                if (!std::filesystem::exists(dependencyPath)) {
+                    return nullptr;
+                }
+
+                auto dependencyScene = ParseSceneFile(dependencyPath);
+                if (!dependencyScene) {
+                    return nullptr;
+                }
+            }
+
+            // Stage 2: load additive scene payload
+            return ParseSceneFile(loadRequest.ScenePath);
+        });
+
+        m_PendingAdditiveLoads[layerId] = std::move(pendingLoad);
+    }
+
+    if (loadRequest.OnProgress) {
+        loadRequest.OnProgress(LoadingProgress{
+            LoadingPhase::LoadingAssets,
+            0.25f,
+            "Prefetching additive scene dependencies for layer '" + layerId + "'"
+        });
+    }
+
+    return true;
+}
+
+bool SceneLoader::UnloadSceneAsync(const AdditiveSceneUnloadRequest& request) {
+    if (!m_Initialized || request.LayerId.empty()) {
+        return false;
+    }
+
+    std::unique_ptr<ECS::Scene> sceneToUnload;
+    SceneLayerInfo unloadedInfo;
+
+    {
+        std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+
+        auto pendingIt = m_PendingAdditiveLoads.find(request.LayerId);
+        if (pendingIt != m_PendingAdditiveLoads.end()) {
+            if (pendingIt->second.Future.valid() &&
+                pendingIt->second.Future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+                return false;
+            }
+            m_PendingAdditiveLoads.erase(pendingIt);
+        }
+
+        auto layerIt = m_AdditiveLayers.find(request.LayerId);
+        if (layerIt == m_AdditiveLayers.end()) {
+            return false;
+        }
+
+        if (!request.Force && IsLayerUnloadBlocked(request.LayerId)) {
+            return false;
+        }
+
+        layerIt->second.Info.Status = SceneLayerStatus::Unloading;
+        unloadedInfo = layerIt->second.Info;
+        sceneToUnload = std::move(layerIt->second.SceneData);
+        m_AdditiveLayers.erase(layerIt);
+    }
+
+    if (sceneToUnload) {
+        if (m_OnSceneUnload) {
+            m_OnSceneUnload(sceneToUnload.get());
+        }
+        if (request.OnUnloaded) {
+            request.OnUnloaded(sceneToUnload.get());
+        }
+    }
+
+    (void)unloadedInfo;
+    return true;
+}
+
+bool SceneLoader::IsSceneLayerActive(const std::string& layerId) const {
+    std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+    auto it = m_AdditiveLayers.find(layerId);
+    return it != m_AdditiveLayers.end() && it->second.Info.Status == SceneLayerStatus::Active;
+}
+
+ECS::Scene* SceneLoader::GetSceneLayer(const std::string& layerId) {
+    std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+    auto it = m_AdditiveLayers.find(layerId);
+    if (it == m_AdditiveLayers.end()) {
+        return nullptr;
+    }
+    return it->second.SceneData.get();
+}
+
+std::vector<SceneLayerInfo> SceneLoader::GetSceneLayerInfos() const {
+    std::vector<SceneLayerInfo> infos;
+    std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+    infos.reserve(m_AdditiveLayers.size() + m_PendingAdditiveLoads.size());
+
+    for (const auto& [layerId, runtime] : m_AdditiveLayers) {
+        (void)layerId;
+        infos.push_back(runtime.Info);
+    }
+
+    for (const auto& [layerId, pending] : m_PendingAdditiveLoads) {
+        (void)layerId;
+        infos.push_back(pending.Info);
+    }
+
+    return infos;
 }
 
 void SceneLoader::CancelAsyncLoad() {
@@ -218,6 +391,8 @@ void SceneLoader::Update(float deltaTime) {
             }
         }
     }
+
+    UpdateAdditiveLoads();
 }
 
 // =============================================================================
@@ -333,6 +508,98 @@ std::unique_ptr<ECS::Scene> SceneLoader::ParseSceneFile(const std::string& scene
     SetProgress(LoadingPhase::InitializingSystems, 0.9f, "Initializing systems...");
 
     return scene;
+}
+
+void SceneLoader::UpdateAdditiveLoads() {
+    std::vector<std::pair<std::string, PendingAdditiveLoad>> completedLoads;
+
+    {
+        std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+        for (auto it = m_PendingAdditiveLoads.begin(); it != m_PendingAdditiveLoads.end();) {
+            auto& pending = it->second;
+            if (!pending.Future.valid() ||
+                pending.Future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+                ++it;
+                continue;
+            }
+
+            pending.Info.Status = SceneLayerStatus::Loading;
+            completedLoads.emplace_back(it->first, std::move(it->second));
+            it = m_PendingAdditiveLoads.erase(it);
+        }
+    }
+
+    for (auto& completed : completedLoads) {
+        const std::string& layerId = completed.first;
+        PendingAdditiveLoad& pending = completed.second;
+
+        std::unique_ptr<ECS::Scene> loadedScene = pending.Future.get();
+        if (!loadedScene) {
+            continue;
+        }
+
+        pending.Info.Status = pending.Request.ActivateOnLoad
+            ? SceneLayerStatus::Activating
+            : SceneLayerStatus::Loading;
+
+        if (pending.Request.OnProgress) {
+            pending.Request.OnProgress(LoadingProgress{
+                LoadingPhase::InitializingSystems,
+                0.85f,
+                "Activating additive scene layer '" + layerId + "'"
+            });
+        }
+
+        if (pending.Request.ActivateOnLoad) {
+            if (m_OnSceneLoad) {
+                m_OnSceneLoad(loadedScene.get());
+            }
+            if (m_OnSceneReady) {
+                m_OnSceneReady(loadedScene.get());
+            }
+            if (pending.Request.OnReady) {
+                pending.Request.OnReady(loadedScene.get());
+            }
+            pending.Info.Status = SceneLayerStatus::Active;
+        }
+
+        if (pending.Request.OnProgress) {
+            pending.Request.OnProgress(LoadingProgress{
+                LoadingPhase::Ready,
+                1.0f,
+                "Additive scene layer '" + layerId + "' is ready"
+            });
+        }
+
+        AdditiveLayerRuntime runtime;
+        runtime.Info = std::move(pending.Info);
+        runtime.SceneData = std::move(loadedScene);
+
+        std::lock_guard<std::mutex> lock(m_AdditiveMutex);
+        m_AdditiveLayers[layerId] = std::move(runtime);
+    }
+}
+
+bool SceneLoader::IsLayerUnloadBlocked(const std::string& targetLayerId) const {
+    for (const auto& [layerId, runtime] : m_AdditiveLayers) {
+        if (layerId == targetLayerId) {
+            continue;
+        }
+
+        const auto& dependencies = runtime.Info.Dependencies;
+        if (std::find(dependencies.begin(), dependencies.end(), targetLayerId) != dependencies.end()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+std::string SceneLoader::ResolveLayerId(const AdditiveSceneLoadRequest& request) {
+    if (!request.LayerId.empty()) {
+        return request.LayerId;
+    }
+    return request.ScenePath;
 }
 
 } // namespace State

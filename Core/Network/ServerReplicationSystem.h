@@ -191,6 +191,11 @@ namespace Network {
         const ReplicationConfig& GetConfig() const { return m_Config; }
         void SetConfig(const ReplicationConfig& config) { m_Config = config; }
 
+        // World-origin offset used for large-world replication safety
+        void SetWorldOriginOffset(const Math::Vec3& offset);
+        const Math::Vec3& GetWorldOriginOffset() const { return m_WorldOriginOffset; }
+        uint32_t GetWorldOriginSequence() const { return m_WorldOriginSequence; }
+
         //----------------------------------------------------------------------
         // Callbacks
         //----------------------------------------------------------------------
@@ -282,6 +287,10 @@ namespace Network {
         // Statistics
         uint64_t m_TotalBytesSent = 0;
         uint64_t m_TotalPacketsSent = 0;
+
+        // Large-world origin tracking
+        Math::Vec3 m_WorldOriginOffset{0.0f};
+        uint32_t m_WorldOriginSequence = 0;
 
         // Packet buffer for building outgoing packets
         std::vector<uint8_t> m_PacketBuffer;

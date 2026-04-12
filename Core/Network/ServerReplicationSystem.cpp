@@ -41,6 +41,8 @@ namespace Network {
         m_NextNetworkId = 1;
         m_TotalBytesSent = 0;
         m_TotalPacketsSent = 0;
+        m_WorldOriginOffset = Math::Vec3(0.0f);
+        m_WorldOriginSequence = 0;
 
         LOG_INFO("ServerReplicationSystem initialized (tick rate: {} Hz)", m_Config.TickRate);
     }
@@ -336,6 +338,12 @@ namespace Network {
         LOG_DEBUG("Full world sync requested for client {}", clientId);
     }
 
+    void ServerReplicationSystem::SetWorldOriginOffset(const Math::Vec3& offset)
+    {
+        m_WorldOriginOffset = offset;
+        ++m_WorldOriginSequence;
+    }
+
     //==========================================================================
     // Internal Methods
     //==========================================================================
@@ -367,7 +375,8 @@ namespace Network {
             return false;
         }
 
-        float distanceSq = glm::length2(entityPosition - it->second.LastKnownPosition);
+        const Math::Vec3 absoluteEntityPosition = entityPosition + m_WorldOriginOffset;
+        float distanceSq = glm::length2(absoluteEntityPosition - it->second.LastKnownPosition);
         return distanceSq <= (m_Config.InterestRadius * m_Config.InterestRadius);
     }
 
@@ -578,6 +587,12 @@ namespace Network {
                 std::chrono::steady_clock::now().time_since_epoch()).count();
             packet->ServerTick = m_CurrentTick;
             packet->TransformCount = static_cast<uint8_t>(count);
+            packet->WorldOriginOffset = {
+                m_WorldOriginOffset.x,
+                m_WorldOriginOffset.y,
+                m_WorldOriginOffset.z
+            };
+            packet->WorldOriginSequence = m_WorldOriginSequence;
 
             // Copy transforms
             std::memcpy(m_PacketBuffer.data() + sizeof(TransformSyncPacket),

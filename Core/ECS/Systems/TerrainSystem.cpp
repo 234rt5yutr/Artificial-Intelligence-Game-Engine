@@ -115,6 +115,33 @@ namespace ECS {
         m_ForceUpdatePending = true;
     }
 
+    void TerrainSystem::SetWorldPartitionCellResident(const std::string& cellId, bool resident)
+    {
+        if (cellId.empty()) {
+            return;
+        }
+
+        if (resident) {
+            m_ResidentWorldPartitionCells.insert(cellId);
+        } else {
+            m_ResidentWorldPartitionCells.erase(cellId);
+        }
+    }
+
+    bool TerrainSystem::IsWorldPartitionCellResident(const std::string& cellId) const
+    {
+        return m_ResidentWorldPartitionCells.find(cellId) != m_ResidentWorldPartitionCells.end();
+    }
+
+    void TerrainSystem::SetStreamingChunkBudget(uint32_t maxLoadedChunks)
+    {
+        if (maxLoadedChunks == 0) {
+            return;
+        }
+
+        m_Config.MaxLoadedChunks = maxLoadedChunks;
+    }
+
     float TerrainSystem::SampleHeight(float worldX, float worldZ, const TerrainComponent& terrain) const
     {
         // Find the chunk containing this position

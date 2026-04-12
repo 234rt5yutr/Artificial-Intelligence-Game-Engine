@@ -7,6 +7,8 @@
 #include <queue>
 #include <unordered_map>
 #include <atomic>
+#include <mutex>
+#include <vector>
 
 namespace Core {
 
@@ -46,6 +48,45 @@ namespace State {
     using LoadingCallback = std::function<void(const LoadingProgress&)>;
     using SceneReadyCallback = std::function<void(ECS::Scene*)>;
     using SceneCallback = std::function<void(ECS::Scene*)>;
+
+    enum class SceneLayerStatus {
+        PendingPrefetch,
+        Loading,
+        Activating,
+        Active,
+        Unloading,
+        Failed
+    };
+
+    struct SceneLayerHandle {
+        uint64_t Ticket = 0;
+        std::string LayerId;
+        std::string ScenePath;
+    };
+
+    struct SceneLayerInfo {
+        std::string LayerId;
+        std::string ScenePath;
+        std::vector<std::string> Dependencies;
+        SceneLayerStatus Status = SceneLayerStatus::PendingPrefetch;
+        uint64_t Ticket = 0;
+    };
+
+    struct AdditiveSceneLoadRequest {
+        std::string ScenePath;
+        std::string LayerId;
+        std::vector<std::string> Dependencies;
+        bool AllowReload = false;
+        bool ActivateOnLoad = true;
+        SceneReadyCallback OnReady = nullptr;
+        LoadingCallback OnProgress = nullptr;
+    };
+
+    struct AdditiveSceneUnloadRequest {
+        std::string LayerId;
+        bool Force = false;
+        SceneCallback OnUnloaded = nullptr;
+    };
 
     /// @brief Asynchronous scene loader with streaming support
     /// 
@@ -89,6 +130,27 @@ namespace State {
         void LoadSceneAsync(const std::string& scenePath,
                             SceneReadyCallback onReady,
                             LoadingCallback onProgress = nullptr);
+
+        /// @brief Load a scene as an additive layer asynchronously
+        /// @param request Additive load request
+        /// @param outHandle Optional handle that tracks this layer request
+        /// @return true when request accepted
+        bool LoadSceneAdditiveAsync(const AdditiveSceneLoadRequest& request,
+                                    SceneLayerHandle* outHandle = nullptr);
+
+        /// @brief Unload an additive scene layer asynchronously
+        /// @param request Additive unload request
+        /// @return true when unload succeeded
+        bool UnloadSceneAsync(const AdditiveSceneUnloadRequest& request);
+
+        /// @brief Check whether an additive scene layer is active
+        bool IsSceneLayerActive(const std::string& layerId) const;
+
+        /// @brief Get active additive scene layer by id
+        ECS::Scene* GetSceneLayer(const std::string& layerId);
+
+        /// @brief Get additive layer metadata for runtime diagnostics
+        std::vector<SceneLayerInfo> GetSceneLayerInfos() const;
 
         /// @brief Cancel pending async load
         void CancelAsyncLoad();
@@ -166,6 +228,26 @@ namespace State {
         /// @brief Parse scene file
         std::unique_ptr<ECS::Scene> ParseSceneFile(const std::string& scenePath);
 
+        /// @brief Update additive layer async jobs
+        void UpdateAdditiveLoads();
+
+        /// @brief Check whether another active layer depends on the target layer
+        bool IsLayerUnloadBlocked(const std::string& targetLayerId) const;
+
+        /// @brief Build deterministic layer id from request
+        static std::string ResolveLayerId(const AdditiveSceneLoadRequest& request);
+
+        struct AdditiveLayerRuntime {
+            SceneLayerInfo Info;
+            std::unique_ptr<ECS::Scene> SceneData;
+        };
+
+        struct PendingAdditiveLoad {
+            SceneLayerInfo Info;
+            AdditiveSceneLoadRequest Request;
+            std::future<std::unique_ptr<ECS::Scene>> Future;
+        };
+
     private:
         bool m_Initialized = false;
         std::atomic<bool> m_IsLoading{false};
@@ -182,6 +264,10 @@ namespace State {
 
         // Preloaded scenes
         std::unordered_map<std::string, std::unique_ptr<ECS::Scene>> m_PreloadedScenes;
+        std::unordered_map<std::string, AdditiveLayerRuntime> m_AdditiveLayers;
+        std::unordered_map<std::string, PendingAdditiveLoad> m_PendingAdditiveLoads;
+        mutable std::mutex m_AdditiveMutex;
+        uint64_t m_NextLayerTicket = 1;
 
         // Lifecycle callbacks
         SceneCallback m_OnSceneUnload;

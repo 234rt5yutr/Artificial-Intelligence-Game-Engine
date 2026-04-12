@@ -41,6 +41,8 @@ namespace Network {
         m_TotalBytesReceived = 0;
         m_TotalPacketsReceived = 0;
         m_AverageLatency = 0.0f;
+        m_ServerWorldOriginOffset = Math::Vec3(0.0f);
+        m_ServerWorldOriginSequence = 0;
 
         LOG_INFO("ClientReplicationSystem initialized (interpolation delay: {}ms)", 
                 m_Config.InterpolationDelay * 1000.0f);
@@ -228,6 +230,11 @@ namespace Network {
         if (packet->ServerTick > m_LastServerTick) {
             m_LastServerTick = packet->ServerTick;
         }
+        m_ServerWorldOriginOffset = Math::Vec3(
+            packet->WorldOriginOffset.X,
+            packet->WorldOriginOffset.Y,
+            packet->WorldOriginOffset.Z);
+        m_ServerWorldOriginSequence = packet->WorldOriginSequence;
 
         // Calculate expected size with overflow check
         size_t transformDataSize = static_cast<size_t>(packet->TransformCount) * sizeof(NetTransform);
@@ -467,7 +474,10 @@ namespace Network {
         }
 
         // Update target state
-        proxyState.TargetPosition = Math::Vec3(transform.Position.X, transform.Position.Y, transform.Position.Z);
+        proxyState.TargetPosition = Math::Vec3(
+            transform.Position.X + m_ServerWorldOriginOffset.x,
+            transform.Position.Y + m_ServerWorldOriginOffset.y,
+            transform.Position.Z + m_ServerWorldOriginOffset.z);
         proxyState.TargetRotation = Math::Quat(transform.Rotation.W, transform.Rotation.X, 
                                                transform.Rotation.Y, transform.Rotation.Z);
         proxyState.TargetScale = Math::Vec3(transform.Scale.X, transform.Scale.Y, transform.Scale.Z);

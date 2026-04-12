@@ -160,6 +160,8 @@ namespace Network {
         uint64_t GetTotalBytesReceived() const { return m_TotalBytesReceived; }
         uint64_t GetTotalPacketsReceived() const { return m_TotalPacketsReceived; }
         float GetAverageLatency() const { return m_AverageLatency; }
+        const Math::Vec3& GetServerWorldOriginOffset() const { return m_ServerWorldOriginOffset; }
+        uint32_t GetServerWorldOriginSequence() const { return m_ServerWorldOriginSequence; }
 
         //----------------------------------------------------------------------
         // Configuration
@@ -247,6 +249,8 @@ namespace Network {
         uint64_t m_ServerTimeOffset = 0;        // Offset to convert local time to server time
         uint64_t m_LastServerTimestamp = 0;     // Last received server timestamp
         float m_AverageLatency = 0.0f;          // Running average of RTT/2
+        Math::Vec3 m_ServerWorldOriginOffset{0.0f};
+        uint32_t m_ServerWorldOriginSequence = 0;
 
         // Statistics
         uint64_t m_TotalBytesReceived = 0;

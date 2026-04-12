@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <filesystem>
+#include <cstdlib>
 
 namespace Core {
 namespace State {
@@ -16,9 +17,18 @@ namespace State {
 std::string SaveMetadata::GetCurrentTimestamp() {
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+
+#ifdef _WIN32
+    localtime_s(&localTime, &time_t_now);
+#else
+    if (const std::tm* resolved = std::localtime(&time_t_now)) {
+        localTime = *resolved;
+    }
+#endif
     
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&time_t_now), "%Y-%m-%dT%H:%M:%S");
+    ss << std::put_time(&localTime, "%Y-%m-%dT%H:%M:%S");
     return ss.str();
 }
 
@@ -160,9 +170,18 @@ bool ReadSaveMetadata(const std::string& filepath, SaveMetadata& outMetadata) {
 std::string GenerateSaveSlotName(const std::string& prefix) {
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+
+#ifdef _WIN32
+    localtime_s(&localTime, &time_t_now);
+#else
+    if (const std::tm* resolved = std::localtime(&time_t_now)) {
+        localTime = *resolved;
+    }
+#endif
     
     std::stringstream ss;
-    ss << prefix << "_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
+    ss << prefix << "_" << std::put_time(&localTime, "%Y%m%d_%H%M%S");
     return ss.str();
 }
 
@@ -171,9 +190,11 @@ std::string GetSavesDirectory() {
     std::filesystem::path savesPath;
 
 #ifdef _WIN32
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) {
-        savesPath = std::filesystem::path(appdata) / "AIGameEngine" / "Saves";
+    char* appdataBuffer = nullptr;
+    size_t appdataLength = 0;
+    if (_dupenv_s(&appdataBuffer, &appdataLength, "APPDATA") == 0 && appdataBuffer != nullptr) {
+        savesPath = std::filesystem::path(appdataBuffer) / "AIGameEngine" / "Saves";
+        std::free(appdataBuffer);
     } else {
         savesPath = std::filesystem::current_path() / "Saves";
     }

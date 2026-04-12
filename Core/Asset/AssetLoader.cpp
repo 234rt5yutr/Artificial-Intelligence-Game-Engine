@@ -373,6 +373,18 @@ namespace {
         return LoadStructuredAssetInternal(cookedPath, AssetType::Timeline);
     }
 
+    LoadedStructuredAsset AssetLoader::LoadSceneAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::Scene);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadWorldPartitionCellAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::WorldPartitionCell);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadHierarchicalLODAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::HierarchicalLOD);
+    }
+
     std::future<LoadedTexture> AssetLoader::LoadTextureAsync(
         const std::filesystem::path& cookedPath) {
         return std::async(std::launch::async, [cookedPath]() {

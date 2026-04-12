@@ -219,5 +219,25 @@ namespace Physics {
         m_PhysicsSystem->SetGravity(gravity);
     }
 
+    bool PhysicsWorld::ShiftBody(const JPH::BodyID& bodyId, const Math::Vec3& worldOffset)
+    {
+        if (!m_Initialized || bodyId.IsInvalid()) {
+            return false;
+        }
+
+        JPH::BodyInterface& bodyInterface = GetBodyInterface();
+        if (!bodyInterface.IsAdded(bodyId)) {
+            return false;
+        }
+
+        const JPH::RVec3 position = bodyInterface.GetPosition(bodyId);
+        const JPH::RVec3 shiftedPosition = position + JPH::RVec3(
+            worldOffset.x,
+            worldOffset.y,
+            worldOffset.z);
+        bodyInterface.SetPosition(bodyId, shiftedPosition, JPH::EActivation::DontActivate);
+        return true;
+    }
+
 } // namespace Physics
 } // namespace Core

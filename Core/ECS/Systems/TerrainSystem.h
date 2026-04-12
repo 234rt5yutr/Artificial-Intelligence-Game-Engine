@@ -17,6 +17,8 @@
 #include <queue>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <unordered_set>
 
 namespace Core {
 namespace ECS {
@@ -67,6 +69,11 @@ namespace ECS {
         uint32_t GetLoadedChunkCount() const { return static_cast<uint32_t>(m_LoadedChunks.size()); }
         uint32_t GetVisibleChunkCount() const { return static_cast<uint32_t>(m_VisibleChunks.size()); }
         uint32_t GetPendingChunkCount() const { return static_cast<uint32_t>(m_ChunksToLoad.size()); }
+
+        // World-partition residency hooks used by the open-world runtime.
+        void SetWorldPartitionCellResident(const std::string& cellId, bool resident);
+        bool IsWorldPartitionCellResident(const std::string& cellId) const;
+        void SetStreamingChunkBudget(uint32_t maxLoadedChunks);
 
         // Sample terrain height at world position
         float SampleHeight(float worldX, float worldZ, const TerrainComponent& terrain) const;
@@ -146,6 +153,7 @@ namespace ECS {
         // State
         bool m_IsInitialized = false;
         bool m_ForceUpdatePending = false;
+        std::unordered_set<std::string> m_ResidentWorldPartitionCells;
     };
 
 } // namespace ECS

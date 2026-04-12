@@ -2,6 +2,7 @@
 
 #include "Core/Physics/PhysicsLayers.h"
 #include "Core/Physics/EngineJobSystemAdapter.h"
+#include "Core/Math/Math.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include <memory>
@@ -88,6 +89,9 @@ namespace Physics {
         // Get gravity
         JPH::Vec3 GetGravity() const;
         void SetGravity(const JPH::Vec3& gravity);
+
+        // Shift a body in world space by a deterministic offset (used for origin rebasing)
+        bool ShiftBody(const JPH::BodyID& bodyId, const Math::Vec3& worldOffset);
 
     private:
         bool m_Initialized = false;

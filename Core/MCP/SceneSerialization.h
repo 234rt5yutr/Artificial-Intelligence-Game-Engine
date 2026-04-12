@@ -8,13 +8,27 @@
 #include "Core/Math/Math.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
-#include "Core/ECS/Components/Components.h"
+#include "Core/ECS/Components/NameComponent.h"
+#include "Core/ECS/Components/TransformComponent.h"
+#include "Core/ECS/Components/LightComponent.h"
+#include "Core/ECS/Components/MeshComponent.h"
+#include "Core/ECS/Components/CameraComponent.h"
+#include "Core/ECS/Components/ColliderComponent.h"
+#include "Core/ECS/Components/RigidBodyComponent.h"
+#include "Core/ECS/Components/HierarchyComponent.h"
+#include "Core/ECS/Components/UIComponent.h"
+#include "Core/ECS/Components/WorldUIComponent.h"
+#include "Core/ECS/Components/PrefabInstanceComponent.h"
 #include "Core/UI/Anchoring.h"
 
 #include <entt/entt.hpp>
 #include <string>
 #include <vector>
 #include <optional>
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <unordered_map>
 
 namespace Core {
 namespace MCP {
@@ -696,9 +710,9 @@ namespace MCP {
             case UI::Anchor::TopLeft: return "top_left";
             case UI::Anchor::TopCenter: return "top_center";
             case UI::Anchor::TopRight: return "top_right";
-            case UI::Anchor::MiddleLeft: return "middle_left";
-            case UI::Anchor::MiddleCenter: return "middle_center";
-            case UI::Anchor::MiddleRight: return "middle_right";
+            case UI::Anchor::CenterLeft: return "middle_left";
+            case UI::Anchor::Center: return "middle_center";
+            case UI::Anchor::CenterRight: return "middle_right";
             case UI::Anchor::BottomLeft: return "bottom_left";
             case UI::Anchor::BottomCenter: return "bottom_center";
             case UI::Anchor::BottomRight: return "bottom_right";
@@ -709,9 +723,9 @@ namespace MCP {
     inline UI::Anchor StringToAnchor(const std::string& s) {
         if (s == "top_center") return UI::Anchor::TopCenter;
         if (s == "top_right") return UI::Anchor::TopRight;
-        if (s == "middle_left") return UI::Anchor::MiddleLeft;
-        if (s == "middle_center") return UI::Anchor::MiddleCenter;
-        if (s == "middle_right") return UI::Anchor::MiddleRight;
+        if (s == "middle_left") return UI::Anchor::CenterLeft;
+        if (s == "middle_center") return UI::Anchor::Center;
+        if (s == "middle_right") return UI::Anchor::CenterRight;
         if (s == "bottom_left") return UI::Anchor::BottomLeft;
         if (s == "bottom_center") return UI::Anchor::BottomCenter;
         if (s == "bottom_right") return UI::Anchor::BottomRight;
@@ -884,6 +898,15 @@ namespace MCP {
         };
     }
 
+    inline ECS::PrefabInstanceComponent DeserializePrefabInstance(const Json& j) {
+        ECS::PrefabInstanceComponent prefabInstance;
+        prefabInstance.PrefabGuid = j.value("prefabGuid", std::string{});
+        prefabInstance.InstanceGuid = j.value("instanceGuid", std::string{});
+        prefabInstance.HasLocalOverrides = j.value("hasLocalOverrides", false);
+        prefabInstance.Overrides = j.value("overrides", Json::array());
+        return prefabInstance;
+    }
+
     // HierarchyComponent
     inline Json SerializeHierarchy(const ECS::HierarchyComponent& h) {
         Json children = Json::array();
@@ -971,24 +994,36 @@ namespace MCP {
         return j;
     }
 
+    constexpr uint32_t SCENE_ASSET_SCHEMA_VERSION = 1;
+
     // Serialize entire scene
     inline Json SerializeScene(const ECS::Scene& scene) {
         const auto& registry = scene.GetRegistry();
-        
+        std::vector<entt::entity> orderedEntities;
+        orderedEntities.reserve(scene.GetEntityCount());
+
+        if (const auto* entitiesStorage = registry.storage<entt::entity>()) {
+            orderedEntities.reserve(entitiesStorage->size());
+            for (entt::entity entity : *entitiesStorage) {
+                orderedEntities.push_back(entity);
+            }
+        }
+
+        std::sort(orderedEntities.begin(), orderedEntities.end(),
+            [](entt::entity lhs, entt::entity rhs) {
+                return static_cast<uint32_t>(lhs) < static_cast<uint32_t>(rhs);
+            });
+
         Json entities = Json::array();
         entt::entity activeCamera = entt::null;
 
-        // Iterate all entities
-        registry.each([&](entt::entity entity) {
+        for (entt::entity entity : orderedEntities) {
             entities.push_back(SerializeEntity(entity, registry));
 
-            // Track active camera
-            if (auto* camera = registry.try_get<ECS::CameraComponent>(entity)) {
-                if (camera->IsActive) {
-                    activeCamera = entity;
-                }
+            if (const auto* camera = registry.try_get<ECS::CameraComponent>(entity); camera && camera->IsActive) {
+                activeCamera = entity;
             }
-        });
+        }
 
         Json sceneJson = {
             {"name", scene.GetName()},
@@ -1001,6 +1036,241 @@ namespace MCP {
         }
 
         return sceneJson;
+    }
+
+    inline bool DeserializeScene(const Json& sceneJson, ECS::Scene& scene, std::string* errorMessage = nullptr) {
+        if (!sceneJson.is_object()) {
+            if (errorMessage) {
+                *errorMessage = "Scene payload must be a JSON object.";
+            }
+            return false;
+        }
+
+        if (!sceneJson.contains("entities") || !sceneJson["entities"].is_array()) {
+            if (errorMessage) {
+                *errorMessage = "Scene payload is missing an entities array.";
+            }
+            return false;
+        }
+
+        scene.Clear();
+        scene.SetName(sceneJson.value("name", std::string{"Untitled Scene"}));
+
+        auto& registry = scene.GetRegistry();
+        const Json& entities = sceneJson["entities"];
+        std::unordered_map<uint32_t, entt::entity> entityIdMap;
+        entityIdMap.reserve(entities.size());
+
+        // Pass 1: create entity handles with stable id mapping.
+        for (const Json& entityJson : entities) {
+            if (!entityJson.contains("id")) {
+                continue;
+            }
+
+            const uint32_t sourceId = entityJson.value("id", 0u);
+            const std::string name = entityJson.value("name", std::string{"Entity"});
+            ECS::Entity created = scene.CreateEntity(name);
+            entityIdMap[sourceId] = created.GetHandle();
+        }
+
+        // Pass 2: deserialize components.
+        for (const Json& entityJson : entities) {
+            const uint32_t sourceId = entityJson.value("id", 0u);
+            const auto mapped = entityIdMap.find(sourceId);
+            if (mapped == entityIdMap.end()) {
+                continue;
+            }
+
+            const entt::entity entity = mapped->second;
+            const Json components = entityJson.value("components", Json::object());
+
+            if (components.contains("transform")) {
+                registry.emplace_or_replace<ECS::TransformComponent>(
+                    entity, DeserializeTransform(components["transform"]));
+            }
+            if (components.contains("light")) {
+                registry.emplace_or_replace<ECS::LightComponent>(
+                    entity, DeserializeLight(components["light"]));
+            }
+            if (components.contains("mesh")) {
+                registry.emplace_or_replace<ECS::MeshComponent>(
+                    entity, DeserializeMesh(components["mesh"]));
+            }
+            if (components.contains("camera")) {
+                registry.emplace_or_replace<ECS::CameraComponent>(
+                    entity, DeserializeCamera(components["camera"]));
+            }
+            if (components.contains("collider")) {
+                registry.emplace_or_replace<ECS::ColliderComponent>(
+                    entity, DeserializeCollider(components["collider"]));
+            }
+            if (components.contains("rigidBody")) {
+                registry.emplace_or_replace<ECS::RigidBodyComponent>(
+                    entity, DeserializeRigidBody(components["rigidBody"]));
+            }
+            if (components.contains("ui")) {
+                registry.emplace_or_replace<ECS::UIComponent>(
+                    entity, DeserializeUIComponent(components["ui"]));
+            }
+            if (components.contains("worldUI")) {
+                registry.emplace_or_replace<ECS::WorldUIComponent>(
+                    entity, DeserializeWorldUIComponent(components["worldUI"]));
+            }
+            if (components.contains("prefabInstance")) {
+                registry.emplace_or_replace<ECS::PrefabInstanceComponent>(
+                    entity, DeserializePrefabInstance(components["prefabInstance"]));
+            }
+        }
+
+        // Pass 3: rebuild hierarchy references.
+        for (const Json& entityJson : entities) {
+            const uint32_t sourceId = entityJson.value("id", 0u);
+            const auto mapped = entityIdMap.find(sourceId);
+            if (mapped == entityIdMap.end()) {
+                continue;
+            }
+
+            const entt::entity entity = mapped->second;
+            ECS::HierarchyComponent hierarchy;
+            bool hasHierarchyData = false;
+
+            if (entityJson.contains("parent") && entityJson["parent"].is_number_unsigned()) {
+                const uint32_t parentId = entityJson["parent"].get<uint32_t>();
+                const auto parentIt = entityIdMap.find(parentId);
+                if (parentIt != entityIdMap.end()) {
+                    hierarchy.Parent = parentIt->second;
+                    hasHierarchyData = true;
+                }
+            }
+
+            if (entityJson.contains("children") && entityJson["children"].is_array()) {
+                for (const Json& child : entityJson["children"]) {
+                    if (!child.is_number_unsigned()) {
+                        continue;
+                    }
+                    const auto childIt = entityIdMap.find(child.get<uint32_t>());
+                    if (childIt != entityIdMap.end()) {
+                        hierarchy.Children.push_back(childIt->second);
+                        hasHierarchyData = true;
+                    }
+                }
+            }
+
+            if (hasHierarchyData) {
+                if (hierarchy.Parent != entt::null && registry.valid(hierarchy.Parent)) {
+                    if (const auto* parentHierarchy = registry.try_get<ECS::HierarchyComponent>(hierarchy.Parent)) {
+                        hierarchy.Depth = parentHierarchy->Depth + 1;
+                    } else {
+                        hierarchy.Depth = 1;
+                    }
+                } else {
+                    hierarchy.Depth = 0;
+                }
+
+                registry.emplace_or_replace<ECS::HierarchyComponent>(entity, hierarchy);
+            }
+        }
+
+        // Restore active camera selection.
+        if (sceneJson.contains("activeCamera") && sceneJson["activeCamera"].is_number_unsigned()) {
+            const uint32_t activeCameraSourceId = sceneJson["activeCamera"].get<uint32_t>();
+            const auto activeIt = entityIdMap.find(activeCameraSourceId);
+
+            auto cameras = registry.view<ECS::CameraComponent>();
+            for (auto cameraEntity : cameras) {
+                auto& camera = cameras.get<ECS::CameraComponent>(cameraEntity);
+                camera.IsActive = (activeIt != entityIdMap.end() && cameraEntity == activeIt->second);
+                camera.IsDirty = true;
+            }
+        }
+
+        return true;
+    }
+
+    inline bool SerializeSceneToAsset(const ECS::Scene& scene,
+                                      const std::filesystem::path& assetPath,
+                                      std::string* errorMessage = nullptr) {
+        if (assetPath.empty()) {
+            if (errorMessage) {
+                *errorMessage = "Asset path is empty.";
+            }
+            return false;
+        }
+
+        std::error_code ec;
+        const auto parentPath = assetPath.parent_path();
+        if (!parentPath.empty()) {
+            std::filesystem::create_directories(parentPath, ec);
+            if (ec) {
+                if (errorMessage) {
+                    *errorMessage = "Failed to create scene asset directory: " + parentPath.string();
+                }
+                return false;
+            }
+        }
+
+        std::ofstream output(assetPath, std::ios::binary | std::ios::trunc);
+        if (!output.is_open()) {
+            if (errorMessage) {
+                *errorMessage = "Failed to open scene asset for writing: " + assetPath.string();
+            }
+            return false;
+        }
+
+        Json sceneAsset = {
+            {"schemaVersion", SCENE_ASSET_SCHEMA_VERSION},
+            {"assetType", "scene"},
+            {"scene", SerializeScene(scene)}
+        };
+
+        output << sceneAsset.dump(2);
+        return output.good();
+    }
+
+    inline bool DeserializeSceneFromAsset(const std::filesystem::path& assetPath,
+                                          ECS::Scene& scene,
+                                          std::string* errorMessage = nullptr) {
+        if (assetPath.empty()) {
+            if (errorMessage) {
+                *errorMessage = "Asset path is empty.";
+            }
+            return false;
+        }
+
+        std::ifstream input(assetPath, std::ios::binary);
+        if (!input.is_open()) {
+            if (errorMessage) {
+                *errorMessage = "Failed to open scene asset: " + assetPath.string();
+            }
+            return false;
+        }
+
+        Json payload;
+        try {
+            input >> payload;
+        } catch (const nlohmann::json::parse_error&) {
+            if (errorMessage) {
+                *errorMessage = "Scene asset JSON parse error.";
+            }
+            return false;
+        }
+
+        uint32_t schemaVersion = SCENE_ASSET_SCHEMA_VERSION;
+        const Json* scenePayload = &payload;
+
+        if (payload.contains("scene")) {
+            schemaVersion = payload.value("schemaVersion", SCENE_ASSET_SCHEMA_VERSION);
+            scenePayload = &payload["scene"];
+        }
+
+        if (schemaVersion > SCENE_ASSET_SCHEMA_VERSION) {
+            if (errorMessage) {
+                *errorMessage = "Unsupported scene asset schema version: " + std::to_string(schemaVersion);
+            }
+            return false;
+        }
+
+        return DeserializeScene(*scenePayload, scene, errorMessage);
     }
 
     // ============================================================================
@@ -1129,10 +1399,12 @@ namespace MCP {
 
         // List all entities
         ss << "--- Entities ---\n\n";
-        registry.each([&](entt::entity entity) {
-            ss << EntityToText(entity, registry, 0);
-            ss << "\n";
-        });
+        if (const auto* entitiesStorage = registry.storage<entt::entity>()) {
+            for (entt::entity entity : *entitiesStorage) {
+                ss << EntityToText(entity, registry, 0);
+                ss << "\n";
+            }
+        }
 
         return ss.str();
     }

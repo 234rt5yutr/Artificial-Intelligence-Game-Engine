@@ -93,6 +93,16 @@ namespace State {
         bool QuickLoad(ECS::Scene* scene, PlayerState& outPlayerState);
 
         // =====================================================================
+        // Scene Asset Round-Trip
+        // =====================================================================
+
+        /// @brief Serialize an ECS scene into a standalone scene asset file
+        bool SerializeSceneToAsset(const std::string& assetPath, ECS::Scene* scene);
+
+        /// @brief Deserialize a scene asset file into an ECS scene
+        bool DeserializeSceneFromAsset(const std::string& assetPath, ECS::Scene* scene);
+
+        // =====================================================================
         // Async Operations
         // =====================================================================
 
