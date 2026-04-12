@@ -9,6 +9,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 
 namespace Core {
 namespace ECS {
@@ -97,6 +98,10 @@ namespace ECS {
         Math::Vec3 CurrentVelocity{0.0f};       // Computed velocity
         bool IsDirty = true;                    // Needs to update audio system
         bool WasPlaying = false;                // Was playing before pause/disable
+
+        // Hot-reload generation tracking (Stage 23)
+        uint64_t ClipGeneration = 0;
+        uint64_t LastReboundClipGeneration = 0;
 
         // ========================================================================
         // Trigger Settings

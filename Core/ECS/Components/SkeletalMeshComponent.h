@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <cstdint>
 
 namespace Core {
 namespace ECS {
@@ -129,6 +130,12 @@ namespace ECS {
 
         // Mesh path for serialization
         std::string MeshPath;
+
+        // Hot-reload generation tracking (Stage 23)
+        uint64_t AssetGeneration = 0;
+        uint64_t LastBoundGeneration = 0;
+        uint64_t AnimationClipGeneration = 0;
+        uint64_t LastAnimationClipGeneration = 0;
 
         // ========================================================================
         // Constructors

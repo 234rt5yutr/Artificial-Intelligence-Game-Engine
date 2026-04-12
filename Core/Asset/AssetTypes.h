@@ -10,6 +10,9 @@ namespace Asset {
     // 4-byte magic identifier for cooked asset files
     constexpr uint32_t COOKED_ASSET_MAGIC = 0x434B4153; // "CKAS" in ASCII
     constexpr uint32_t COOKED_ASSET_VERSION = 1;
+    constexpr uint32_t ADDRESSABLE_CATALOG_SCHEMA_VERSION = 1;
+    constexpr uint32_t ASSET_BUNDLE_SCHEMA_VERSION = 1;
+    constexpr uint32_t ASSET_BUNDLE_PATCH_SCHEMA_VERSION = 1;
 
     // Asset type identifiers
     enum class AssetType : uint32_t {
@@ -28,7 +31,10 @@ namespace Asset {
         Script = 12,
         Scene = 13,
         WorldPartitionCell = 14,
-        HierarchicalLOD = 15
+        HierarchicalLOD = 15,
+        AddressablesCatalog = 16,
+        AssetBundle = 17,
+        AssetBundlePatch = 18
     };
 
     // Texture-specific enums
@@ -175,6 +181,9 @@ namespace Asset {
             case AssetType::Scene: return "Scene";
             case AssetType::WorldPartitionCell: return "WorldPartitionCell";
             case AssetType::HierarchicalLOD: return "HierarchicalLOD";
+            case AssetType::AddressablesCatalog: return "AddressablesCatalog";
+            case AssetType::AssetBundle: return "AssetBundle";
+            case AssetType::AssetBundlePatch: return "AssetBundlePatch";
             default: return "Unknown";
         }
     }

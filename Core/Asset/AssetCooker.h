@@ -169,6 +169,8 @@ namespace Asset {
         std::string CookedPath;
         uint64_t SourceHash;
         uint64_t CookedTimestamp;
+        std::string AddressKey;
+        std::string BundleId;
         std::vector<uint64_t> Dependencies;
     };
 

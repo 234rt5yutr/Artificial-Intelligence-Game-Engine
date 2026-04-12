@@ -197,6 +197,28 @@ namespace Audio {
             }
             source.LastPosition = position;
 
+            if (source.ClipGeneration != source.LastReboundClipGeneration) {
+                const bool wasPaused = source.State == ECS::AudioPlaybackState::Paused;
+                const bool wasPlaying =
+                    source.State == ECS::AudioPlaybackState::Playing ||
+                    source.State == ECS::AudioPlaybackState::FadingIn ||
+                    source.State == ECS::AudioPlaybackState::FadingOut;
+
+                if (source.CurrentHandle != InvalidSoundHandle) {
+                    audioSystem.StopSound(source.CurrentHandle);
+                    source.CurrentHandle = InvalidSoundHandle;
+                }
+
+                if (wasPlaying) {
+                    source.State = ECS::AudioPlaybackState::Playing;
+                } else if (wasPaused) {
+                    source.State = ECS::AudioPlaybackState::Paused;
+                }
+
+                source.LastReboundClipGeneration = source.ClipGeneration;
+                source.IsDirty = true;
+            }
+
             // Handle state transitions
             switch (source.State) {
                 case ECS::AudioPlaybackState::Stopped:

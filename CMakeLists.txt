@@ -96,6 +96,24 @@ add_library(EngineCore
     Core/Asset/AssetPipeline.cpp
     Core/Asset/AssetLoader.h
     Core/Asset/AssetLoader.cpp
+    Core/Asset/Addressables/AddressablesCatalogTypes.h
+    Core/Asset/Addressables/AddressablesCatalog.h
+    Core/Asset/Addressables/AddressablesCatalog.cpp
+    Core/Asset/Addressables/AddressableRuntimeTypes.h
+    Core/Asset/Addressables/AddressableRuntime.h
+    Core/Asset/Addressables/AddressableRuntime.cpp
+    Core/Asset/Bundles/AssetBundleTypes.h
+    Core/Asset/Bundles/AssetBundleBuilder.h
+    Core/Asset/Bundles/AssetBundleBuilder.cpp
+    Core/Asset/Bundles/AssetBundleMountService.h
+    Core/Asset/Bundles/AssetBundleMountService.cpp
+    Core/Asset/Bundles/AssetBundlePatcher.h
+    Core/Asset/Bundles/AssetBundlePatcher.cpp
+    Core/Asset/HotReload/AssetDependencyTracker.h
+    Core/Asset/HotReload/AssetDependencyTracker.cpp
+    Core/Asset/HotReload/AssetHotReloadTypes.h
+    Core/Asset/HotReload/AssetHotReloadService.h
+    Core/Asset/HotReload/AssetHotReloadService.cpp
     Core/MCP/JsonSerialization.h
     Core/MCP/HttpServer.h
     Core/MCP/HttpServer.cpp

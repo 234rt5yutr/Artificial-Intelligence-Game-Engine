@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Renderer/Mesh.h"
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -20,6 +21,10 @@ namespace ECS {
 
         // Optional mesh identifier for debugging/serialization
         std::string MeshPath;
+
+        // Hot-reload generation tracking (Stage 23)
+        uint64_t AssetGeneration = 0;
+        uint64_t LastBoundGeneration = 0;
 
         MeshComponent() = default;
         MeshComponent(std::shared_ptr<Renderer::Mesh> mesh)

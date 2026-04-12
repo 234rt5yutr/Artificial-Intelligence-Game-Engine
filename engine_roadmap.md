@@ -303,17 +303,17 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 23: Addressable Assets, Bundles & Hot Content Delivery (Weeks 60-62)
 
-* [ ] Step 23.1: Build addressable catalog generation and runtime query system.
-  * [ ] Sub-step 23.1.1: Implement `BuildAddressablesCatalog()` with deterministic GUID/address mapping and build manifest output. (v0.23.1.1)
-  * [ ] Sub-step 23.1.2: Implement `LoadAddressableAssetAsync()` with dependency resolution, caching, and cancellation. (v0.23.1.2)
-  * [ ] Sub-step 23.1.3: Implement `ReleaseAddressableAsset()` with ref-counted lifecycle and eviction policy. (v0.23.1.3)
-* [ ] Step 23.2: Build bundle packaging and mount pipeline for DLC/mod/patch workflows.
-  * [ ] Sub-step 23.2.1: Implement `BuildAssetBundle()` with platform-specific compression and chunk layout strategies. (v0.23.2.1)
-  * [ ] Sub-step 23.2.2: Implement `MountAssetBundle()` with integrity validation and mount priority controls. (v0.23.2.2)
-  * [ ] Sub-step 23.2.3: Implement `PatchAssetBundleDelta()` for binary-diff deployment without full rebundles. (v0.23.2.3)
-* [ ] Step 23.3: Add dependency intelligence and runtime hot-reload tooling.
-  * [ ] Sub-step 23.3.1: Implement `TrackAssetDependencyGraph()` with reverse-lookups and cycle detection. (v0.23.3.1)
-  * [ ] Sub-step 23.3.2: Implement `HotReloadAssetAtRuntime()` with safe rebinding of renderer/audio/animation users. (v0.23.3.2)
+* [x] Step 23.1: Build addressable catalog generation and runtime query system.
+  * [x] Sub-step 23.1.1: Implement `BuildAddressablesCatalog()` with deterministic GUID/address mapping and build manifest output. (v0.23.1.1)
+  * [x] Sub-step 23.1.2: Implement `LoadAddressableAssetAsync()` with dependency resolution, caching, and cancellation. (v0.23.1.2)
+  * [x] Sub-step 23.1.3: Implement `ReleaseAddressableAsset()` with ref-counted lifecycle and eviction policy. (v0.23.1.3)
+* [x] Step 23.2: Build bundle packaging and mount pipeline for DLC/mod/patch workflows.
+  * [x] Sub-step 23.2.1: Implement `BuildAssetBundle()` with platform-specific compression and chunk layout strategies. (v0.23.2.1)
+  * [x] Sub-step 23.2.2: Implement `MountAssetBundle()` with integrity validation and mount priority controls. (v0.23.2.2)
+  * [x] Sub-step 23.2.3: Implement `PatchAssetBundleDelta()` for binary-diff deployment without full rebundles. (v0.23.2.3)
+* [x] Step 23.3: Add dependency intelligence and runtime hot-reload tooling.
+  * [x] Sub-step 23.3.1: Implement `TrackAssetDependencyGraph()` with reverse-lookups and cycle detection. (v0.23.3.1)
+  * [x] Sub-step 23.3.2: Implement `HotReloadAssetAtRuntime()` with safe rebinding of renderer/audio/animation users. (v0.23.3.2)
 
 ## Phase 24: Render Graph, Virtualized Geometry & Advanced Upscaling (Weeks 63-67)
 

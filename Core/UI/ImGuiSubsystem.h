@@ -31,6 +31,7 @@ namespace UI {
         bool showMemory = false;
         bool showEntityInspector = false;
         bool showRenderStats = false;
+        bool showContentDelivery = true;
         bool showDemoWindow = false;
         float overlayAlpha = 0.85f;
     };
@@ -115,6 +116,9 @@ namespace UI {
 
         /// @brief Render the render statistics panel  
         void RenderRenderStats();
+
+        /// @brief Render catalog/bundle/hot-reload diagnostics panel
+        void RenderContentDeliveryPanel();
 
     private:
         RHI::VulkanContext* m_VulkanContext = nullptr;

@@ -22,6 +22,8 @@ namespace Security {
             std::filesystem::path AssetRoot;
             std::filesystem::path CookedAssetRoot;
             std::filesystem::path ShaderRoot;
+            std::filesystem::path BundleRoot;
+            std::filesystem::path PatchStagingRoot;
             bool AllowSymlinks = false;
         };
 
@@ -121,6 +123,40 @@ namespace Security {
                 }
             }
             
+            std::error_code ec;
+            return std::filesystem::weakly_canonical(path, ec);
+        }
+
+        static std::optional<std::filesystem::path> ValidateBundlePath(
+            const std::filesystem::path& path) {
+
+            if (ContainsTraversalComponents(path)) {
+                return std::nullopt;
+            }
+
+            if (s_Initialized && !s_Config.BundleRoot.empty()) {
+                if (!IsWithinRoot(path, s_Config.BundleRoot)) {
+                    return std::nullopt;
+                }
+            }
+
+            std::error_code ec;
+            return std::filesystem::weakly_canonical(path, ec);
+        }
+
+        static std::optional<std::filesystem::path> ValidatePatchStagingPath(
+            const std::filesystem::path& path) {
+
+            if (ContainsTraversalComponents(path)) {
+                return std::nullopt;
+            }
+
+            if (s_Initialized && !s_Config.PatchStagingRoot.empty()) {
+                if (!IsWithinRoot(path, s_Config.PatchStagingRoot)) {
+                    return std::nullopt;
+                }
+            }
+
             std::error_code ec;
             return std::filesystem::weakly_canonical(path, ec);
         }

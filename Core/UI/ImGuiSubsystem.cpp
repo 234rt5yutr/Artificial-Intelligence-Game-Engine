@@ -1,4 +1,7 @@
 #include "ImGuiSubsystem.h"
+#include "Core/Asset/Addressables/AddressableRuntime.h"
+#include "Core/Asset/Bundles/AssetBundleMountService.h"
+#include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/Log.h"
 #include "Core/Window.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
@@ -299,6 +302,9 @@ void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) 
     if (m_Config.showRenderStats) {
         RenderRenderStats();
     }
+    if (m_Config.showContentDelivery) {
+        RenderContentDeliveryPanel();
+    }
     if (m_Config.showDemoWindow) {
         ImGui::ShowDemoWindow(&m_Config.showDemoWindow);
     }
@@ -483,6 +489,55 @@ void ImGuiSubsystem::RenderRenderStats() {
     if (ImGui::Begin("Render Stats", nullptr, windowFlags)) {
         ImGui::Text("Draw Calls: %u", m_Stats.drawCalls);
         ImGui::Text("Triangles: %u", m_Stats.triangleCount);
+    }
+    ImGui::End();
+}
+
+void ImGuiSubsystem::RenderContentDeliveryPanel() {
+    if (ImGui::Begin("Content Delivery", &m_Config.showContentDelivery)) {
+        const auto runtimeDiagnostics =
+            Asset::Addressables::AddressableRuntimeService::Get().GetDiagnostics();
+        const auto mountedEntries =
+            Asset::Bundles::AssetBundleMountService::Get().SnapshotMountTable();
+        const auto hotReloadEvents =
+            Asset::HotReload::AssetHotReloadService::Get().GetRecentEvents();
+
+        ImGui::Text("Addressable Runtime");
+        ImGui::Separator();
+        ImGui::Text("Load Requests: %llu", static_cast<unsigned long long>(runtimeDiagnostics.TotalLoadRequests));
+        ImGui::Text("Cache Hits: %llu", static_cast<unsigned long long>(runtimeDiagnostics.CacheHits));
+        ImGui::Text("Shared Tickets: %llu", static_cast<unsigned long long>(runtimeDiagnostics.SharedInFlightTickets));
+        ImGui::Text("Failed Loads: %llu", static_cast<unsigned long long>(runtimeDiagnostics.FailedLoadRequests));
+
+        ImGui::Spacing();
+        ImGui::Text("Mounted Bundle Overrides: %zu", mountedEntries.size());
+        if (ImGui::CollapsingHeader("Mount Table", ImGuiTreeNodeFlags_DefaultOpen)) {
+            for (const auto& entry : mountedEntries) {
+                ImGui::BulletText("%s -> %s (bundle=%s, priority=%d)",
+                                  entry.AddressKey.c_str(),
+                                  entry.ResolvedCookedPath.c_str(),
+                                  entry.BundleId.c_str(),
+                                  entry.MountPriority);
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Hot Reload Events: %zu", hotReloadEvents.size());
+        if (ImGui::CollapsingHeader("Recent Events", ImGuiTreeNodeFlags_DefaultOpen)) {
+            for (const auto& eventRecord : hotReloadEvents) {
+                ImGui::BulletText("Event %llu @ frame %llu: %s%s",
+                                  static_cast<unsigned long long>(eventRecord.EventId),
+                                  static_cast<unsigned long long>(eventRecord.AppliedFrameIndex),
+                                  eventRecord.Success ? "Success" : "Failed",
+                                  eventRecord.RolledBack ? " (Rolled Back)" : "");
+                if (!eventRecord.Diagnostics.empty()) {
+                    ImGui::TextWrapped("    %s", eventRecord.Diagnostics.c_str());
+                }
+                if (!eventRecord.FailedAddressKeys.empty()) {
+                    ImGui::Text("    Failed keys: %zu", eventRecord.FailedAddressKeys.size());
+                }
+            }
+        }
     }
     ImGui::End();
 }

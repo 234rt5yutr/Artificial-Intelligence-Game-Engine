@@ -372,6 +372,15 @@ void AnimatorSystem::ProcessEntity(entt::entity entity,
     // Ensure animator is initialized
     animator.EnsureInitialized();
 
+    if (skeletal.AnimationClipGeneration != skeletal.LastAnimationClipGeneration) {
+        skeletal.LastAnimationClipGeneration = skeletal.AnimationClipGeneration;
+        animator.RuntimeState.CurrentTransition.Reset();
+        animator.RuntimeState.PreviousStateName.clear();
+        animator.RuntimeState.PreviousStateTime = 0.0f;
+        animator.RuntimeState.CurrentStateTime = 0.0f;
+        animator.RuntimeState.NormalizedTime = 0.0f;
+    }
+
     // 1. Update animation time
     UpdateAnimationTime(animator, skeletal, deltaTime);
 

@@ -73,6 +73,17 @@ void SkeletalRenderSystem::Update(Scene& scene, float deltaTime) {
             continue;
         }
 
+        if (skeletal.AssetGeneration != skeletal.LastBoundGeneration) {
+            const uint32_t existingInstanceId = GetSkinningInstanceId(entity);
+            if (existingInstanceId != 0) {
+                UnregisterEntity(entity);
+            }
+            skeletal.LastBoundGeneration = skeletal.AssetGeneration;
+        }
+        if (skeletal.AnimationClipGeneration != skeletal.LastAnimationClipGeneration) {
+            skeletal.LastAnimationClipGeneration = skeletal.AnimationClipGeneration;
+        }
+
         // Ensure entity is registered with skinning system
         uint32_t instanceId = GetSkinningInstanceId(entity);
         if (instanceId == 0) {
@@ -179,6 +190,17 @@ void SkeletalRenderSystem::UpdateParallel(Scene& scene, float deltaTime) {
             continue;
         }
 
+        if (skeletal.AssetGeneration != skeletal.LastBoundGeneration) {
+            const uint32_t existingInstanceId = GetSkinningInstanceId(entity);
+            if (existingInstanceId != 0) {
+                UnregisterEntity(entity);
+            }
+            skeletal.LastBoundGeneration = skeletal.AssetGeneration;
+        }
+        if (skeletal.AnimationClipGeneration != skeletal.LastAnimationClipGeneration) {
+            skeletal.LastAnimationClipGeneration = skeletal.AnimationClipGeneration;
+        }
+
         uint32_t instanceId = GetSkinningInstanceId(entity);
         if (instanceId == 0) {
             instanceId = RegisterEntity(scene, entity);
@@ -243,6 +265,17 @@ void SkeletalRenderSystem::CollectDrawCommands(Scene& scene) {
 
         if (!skeletal.IsValid() || !skeletal.Visible) {
             continue;
+        }
+
+        if (skeletal.AssetGeneration != skeletal.LastBoundGeneration) {
+            const uint32_t existingInstanceId = GetSkinningInstanceId(entity);
+            if (existingInstanceId != 0) {
+                UnregisterEntity(entity);
+            }
+            skeletal.LastBoundGeneration = skeletal.AssetGeneration;
+        }
+        if (skeletal.AnimationClipGeneration != skeletal.LastAnimationClipGeneration) {
+            skeletal.LastAnimationClipGeneration = skeletal.AnimationClipGeneration;
         }
 
         uint32_t instanceId = GetSkinningInstanceId(entity);

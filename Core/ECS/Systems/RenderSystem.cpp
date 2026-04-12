@@ -28,6 +28,10 @@ namespace ECS {
                 continue;
             }
 
+            if (mesh.AssetGeneration != mesh.LastBoundGeneration) {
+                mesh.LastBoundGeneration = mesh.AssetGeneration;
+            }
+
             // Apply custom visibility test if set (e.g., frustum culling)
             if (m_VisibilityTest && !m_VisibilityTest(transform.WorldMatrix, mesh.MeshData.get())) {
                 continue;
@@ -91,6 +95,10 @@ namespace ECS {
             // Skip invalid/invisible
             if (!mesh.IsValid() || !mesh.Visible) {
                 return;
+            }
+
+            if (mesh.AssetGeneration != mesh.LastBoundGeneration) {
+                mesh.LastBoundGeneration = mesh.AssetGeneration;
             }
 
             // Visibility test (thread-safe if the test function is)

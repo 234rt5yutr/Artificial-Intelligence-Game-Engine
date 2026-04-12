@@ -5,6 +5,7 @@
 #include "Core/Assert.h"
 #include "Core/Input.h"
 #include "Core/UI/UIManager.h"
+#include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include <thread>
 #include <chrono>
 
@@ -57,6 +58,7 @@ namespace Core {
             PROFILE_SCOPE("Application Loop");
 
             m_Window->OnUpdate();
+            Asset::HotReload::AssetHotReloadService::Get().PumpFrameSafePoint();
 
             auto now = std::chrono::high_resolution_clock::now();
             float deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
