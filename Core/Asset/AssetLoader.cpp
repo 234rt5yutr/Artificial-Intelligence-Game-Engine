@@ -10,9 +10,84 @@
 
 namespace Core {
 namespace Asset {
+namespace {
+
+    LoadedStructuredAsset LoadStructuredAssetInternal(const std::filesystem::path& cookedPath,
+                                                      AssetType expectedType) {
+        LoadedStructuredAsset result;
+
+        std::vector<uint8_t> fileData;
+
+        auto validatedPath = Security::PathValidator::ValidateCookedPath(cookedPath);
+        if (!validatedPath) {
+            LOG_ERROR("Path validation failed: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        std::ifstream file(*validatedPath, std::ios::binary | std::ios::ate);
+        if (!file) {
+            LOG_ERROR("Failed to open structured asset file: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        const std::streamsize size = file.tellg();
+        if (size < 0 || static_cast<size_t>(size) > Security::MAX_GENERIC_SIZE) {
+            LOG_ERROR("Structured asset size invalid: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        file.seekg(0, std::ios::beg);
+        fileData.resize(static_cast<size_t>(size));
+        if (!file.read(reinterpret_cast<char*>(fileData.data()), size)) {
+            LOG_ERROR("Failed to read structured asset bytes: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        if (fileData.size() < sizeof(CookedAssetHeader)) {
+            LOG_ERROR("Structured asset file too small: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        CookedAssetHeader header{};
+        std::memcpy(&header, fileData.data(), sizeof(header));
+
+        if (header.Magic != COOKED_ASSET_MAGIC || header.Type != expectedType) {
+            LOG_ERROR("Structured asset type mismatch: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        if (header.DataOffset + header.DataSize > fileData.size()) {
+            LOG_ERROR("Structured asset payload out of bounds: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        const char* dataBegin = reinterpret_cast<const char*>(fileData.data() + header.DataOffset);
+        const char* dataEnd = dataBegin + header.DataSize;
+
+        try {
+            result.Document = nlohmann::json::parse(dataBegin, dataEnd);
+        } catch (const nlohmann::json::parse_error&) {
+            LOG_ERROR("Structured asset contains invalid JSON: {}",
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
+        result.Type = expectedType;
+        result.IsValid = true;
+        return result;
+    }
+
+} // namespace
 
     bool AssetLoader::ReadFile(const std::filesystem::path& path, std::vector<uint8_t>& data, 
-                                size_t maxSize) {
+                                 size_t maxSize) {
         // Validate path against traversal attacks
         auto validatedPath = Security::PathValidator::ValidateCookedPath(path);
         if (!validatedPath) {
@@ -284,6 +359,18 @@ namespace Asset {
                   result.Header.Stage, spirvSize);
         
         return result;
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadPrefab(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::Prefab);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadVisualScriptGraph(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::VisualScriptGraph);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadTimeline(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::Timeline);
     }
 
     std::future<LoadedTexture> AssetLoader::LoadTextureAsync(

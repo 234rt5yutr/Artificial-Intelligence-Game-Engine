@@ -1,4 +1,5 @@
 #include "UIManager.h"
+#include "Core/Editor/EditorModule.h"
 #include "Core/Log.h"
 #include "Core/Window.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
@@ -56,6 +57,15 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     // Initialize FontManager
     FontManager::Get().Initialize(vulkanContext);
 
+    // Initialize editor module and bind panel rendering through ImGui callback.
+    m_EditorModule = std::make_unique<Editor::EditorModule>();
+    m_EditorModule->Initialize(nullptr);
+    m_ImGui->SetDebugDrawCallback([this]() {
+        if (m_EditorModule && m_EditorModule->IsEnabled()) {
+            m_EditorModule->RenderPanels();
+        }
+    });
+
     m_Initialized = true;
     ENGINE_CORE_INFO("UIManager initialized (viewport: {}x{})", 
                      static_cast<int>(m_ViewportSize.x), 
@@ -71,6 +81,15 @@ void UIManager::Shutdown() {
     m_ActiveMessages.clear();
 
     // Shutdown subsystems in reverse order
+    if (m_ImGui) {
+        m_ImGui->SetDebugDrawCallback({});
+    }
+
+    if (m_EditorModule) {
+        m_EditorModule->Shutdown();
+        m_EditorModule.reset();
+    }
+
     if (m_TextRenderer) {
         m_TextRenderer->Shutdown();
         m_TextRenderer.reset();
@@ -112,6 +131,10 @@ void UIManager::Update(float deltaTime) {
     }
 
     m_DeltaTime = deltaTime;
+
+    if (m_EditorModule && m_EditorModule->IsEnabled()) {
+        m_EditorModule->Update(deltaTime);
+    }
 
     // Update messages (remove expired)
     for (auto it = m_ActiveMessages.begin(); it != m_ActiveMessages.end();) {
@@ -358,6 +381,24 @@ void UIManager::SetDebugOverlayEnabled(bool enabled) {
     if (m_ImGui) {
         m_ImGui->GetConfig().showPerformance = enabled;
     }
+}
+
+void UIManager::SetEditorEnabled(bool enabled) {
+    if (!m_EditorModule) {
+        return;
+    }
+    m_EditorModule->SetEnabled(enabled);
+}
+
+void UIManager::SetEditorScene(ECS::Scene* scene) {
+    if (!m_EditorModule) {
+        return;
+    }
+    m_EditorModule->SetActiveScene(scene);
+}
+
+bool UIManager::IsEditorEnabled() const {
+    return m_EditorModule && m_EditorModule->IsEnabled();
 }
 
 } // namespace UI

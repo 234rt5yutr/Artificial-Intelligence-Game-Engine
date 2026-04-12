@@ -142,6 +142,25 @@ namespace Asset {
         std::string ExtractReflection(const std::vector<uint32_t>& spirv);
     };
 
+    // Structured JSON asset cooker (prefabs, graphs, timelines)
+    class StructuredDataCooker : public IAssetCooker {
+    public:
+        std::vector<AssetType> GetSupportedTypes() const override;
+        std::vector<std::string> GetSupportedExtensions() const override;
+
+        CookResult Cook(
+            const std::filesystem::path& sourcePath,
+            const std::filesystem::path& outputPath,
+            const CookOptions& options) override;
+
+        bool NeedsCooking(
+            const std::filesystem::path& sourcePath,
+            const std::filesystem::path& outputPath) const override;
+
+    private:
+        AssetType GetAssetTypeForExtension(const std::string& extension) const;
+    };
+
     // Asset manifest entry
     struct ManifestEntry {
         uint64_t AssetId;

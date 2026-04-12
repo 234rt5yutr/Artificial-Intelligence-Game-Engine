@@ -308,7 +308,16 @@ namespace MCP {
                             {"collider", ColliderSchema()},
                             {"rigidBody", RigidBodySchema()},
                             {"ui", UIComponentSchema()},
-                            {"worldUI", WorldUIComponentSchema()}
+                            {"worldUI", WorldUIComponentSchema()},
+                            {"prefabInstance", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"prefabGuid", {{"type", "string"}}},
+                                    {"instanceGuid", {{"type", "string"}}},
+                                    {"hasLocalOverrides", {{"type", "boolean"}}},
+                                    {"overrides", {{"type", "array"}}}
+                                }}
+                            }}
                         }}
                     }},
                     {"parent", {{"type", "integer"}, {"description", "Parent entity ID, null if root"}}},
@@ -866,6 +875,15 @@ namespace MCP {
         return wui;
     }
 
+    inline Json SerializePrefabInstance(const ECS::PrefabInstanceComponent& prefabInstance) {
+        return {
+            {"prefabGuid", prefabInstance.PrefabGuid},
+            {"instanceGuid", prefabInstance.InstanceGuid},
+            {"hasLocalOverrides", prefabInstance.HasLocalOverrides},
+            {"overrides", prefabInstance.Overrides}
+        };
+    }
+
     // HierarchyComponent
     inline Json SerializeHierarchy(const ECS::HierarchyComponent& h) {
         Json children = Json::array();
@@ -886,10 +904,7 @@ namespace MCP {
     // Entity and Scene Serialization
     // ============================================================================
 
-    // NameComponent for entity names (simple struct)
-    struct NameComponent {
-        std::string Name;
-    };
+    using NameComponent = ECS::NameComponent;
 
     // Serialize a single entity with all its components
     inline Json SerializeEntity(entt::entity entity, const entt::registry& registry) {
@@ -934,6 +949,10 @@ namespace MCP {
 
         if (auto* worldUI = registry.try_get<ECS::WorldUIComponent>(entity)) {
             components["worldUI"] = SerializeWorldUIComponent(*worldUI);
+        }
+
+        if (auto* prefabInstance = registry.try_get<ECS::PrefabInstanceComponent>(entity)) {
+            components["prefabInstance"] = SerializePrefabInstance(*prefabInstance);
         }
 
         if (auto* hierarchy = registry.try_get<ECS::HierarchyComponent>(entity)) {
@@ -1078,6 +1097,13 @@ namespace MCP {
             if (wui->EnableDistanceFade) {
                 ss << indentStr << "    Fade: " << wui->FadeStartDistance << "-" << wui->FadeEndDistance << "m\n";
             }
+        }
+
+        if (auto* prefabInstance = registry.try_get<ECS::PrefabInstanceComponent>(entity)) {
+            ss << indentStr << "  PrefabInstance:\n";
+            ss << indentStr << "    PrefabGuid: " << prefabInstance->PrefabGuid << "\n";
+            ss << indentStr << "    InstanceGuid: " << prefabInstance->InstanceGuid << "\n";
+            ss << indentStr << "    HasOverrides: " << (prefabInstance->HasLocalOverrides ? "yes" : "no") << "\n";
         }
 
         return ss.str();

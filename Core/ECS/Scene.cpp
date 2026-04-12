@@ -1,5 +1,6 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
+#include "Core/ECS/Components/NameComponent.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
 
@@ -37,6 +38,7 @@ namespace ECS {
         PROFILE_FUNCTION();
         
         entt::entity handle = m_Registry.create();
+        m_Registry.emplace<NameComponent>(handle, NameComponent{name});
         Entity entity(handle, this);
         
         ENGINE_CORE_TRACE("Entity '{}' created in scene '{}'", name, m_Name);

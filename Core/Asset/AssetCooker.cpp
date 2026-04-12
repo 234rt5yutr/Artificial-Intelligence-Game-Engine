@@ -1,9 +1,12 @@
 #include "AssetCooker.h"
 #include "Core/Log.h"
 #include "Core/Security/PathValidator.h"
+#include <algorithm>
 #include <fstream>
 #include <chrono>
 #include <cstring>
+#include <iterator>
+#include <nlohmann/json.hpp>
 
 #define LOG_INFO(...) ENGINE_CORE_INFO(__VA_ARGS__)
 #define LOG_WARN(...) ENGINE_CORE_WARN(__VA_ARGS__)
@@ -641,6 +644,161 @@ namespace Asset {
     std::string ShaderCooker::ExtractReflection(const std::vector<uint32_t>& /* spirv */) {
         // Placeholder: would use SPIRV-Cross for reflection
         return R"({"inputs":[],"outputs":[],"uniforms":[]})";
+    }
+
+    // StructuredDataCooker implementation
+    std::vector<AssetType> StructuredDataCooker::GetSupportedTypes() const {
+        return {
+            AssetType::Prefab,
+            AssetType::VisualScriptGraph,
+            AssetType::Timeline
+        };
+    }
+
+    std::vector<std::string> StructuredDataCooker::GetSupportedExtensions() const {
+        return {
+            ".prefab",
+            ".vgraph",
+            ".timeline"
+        };
+    }
+
+    AssetType StructuredDataCooker::GetAssetTypeForExtension(const std::string& extension) const {
+        if (extension == ".prefab") {
+            return AssetType::Prefab;
+        }
+        if (extension == ".vgraph") {
+            return AssetType::VisualScriptGraph;
+        }
+        if (extension == ".timeline") {
+            return AssetType::Timeline;
+        }
+        return AssetType::Unknown;
+    }
+
+    bool StructuredDataCooker::NeedsCooking(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& outputPath) const {
+
+        std::error_code ec;
+
+        if (!std::filesystem::exists(outputPath, ec) || ec) {
+            return true;
+        }
+
+        auto sourceTime = std::filesystem::last_write_time(sourcePath, ec);
+        if (ec) {
+            LOG_WARN("Failed to get source timestamp: {}",
+                     Security::PathValidator::SanitizeForLogging(sourcePath));
+            return true;
+        }
+
+        auto outputTime = std::filesystem::last_write_time(outputPath, ec);
+        if (ec) {
+            return true;
+        }
+
+        return sourceTime > outputTime;
+    }
+
+    CookResult StructuredDataCooker::Cook(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& outputPath,
+        const CookOptions& options) {
+
+        auto validatedSource = Security::PathValidator::ValidateAssetPath(sourcePath);
+        if (!validatedSource) {
+            LOG_ERROR("Invalid source path: {}",
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+
+        auto validatedOutput = Security::PathValidator::ValidateCookedPath(outputPath);
+        if (!validatedOutput) {
+            LOG_ERROR("Invalid output path: {}",
+                      Security::PathValidator::SanitizeForLogging(outputPath));
+            return CookResult::WriteFailed;
+        }
+
+        std::error_code ec;
+        if (!std::filesystem::exists(*validatedSource, ec)) {
+            LOG_ERROR("Structured source not found: {}",
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+
+        if (!options.ForceRebuild && !NeedsCooking(*validatedSource, *validatedOutput)) {
+            return CookResult::UpToDate;
+        }
+
+        std::string extension = validatedSource->extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+        const AssetType assetType = GetAssetTypeForExtension(extension);
+        if (assetType == AssetType::Unknown) {
+            return CookResult::InvalidFormat;
+        }
+
+        std::ifstream input(*validatedSource, std::ios::binary);
+        if (!input) {
+            return CookResult::SourceNotFound;
+        }
+
+        const std::string sourceContent((std::istreambuf_iterator<char>(input)),
+                                        std::istreambuf_iterator<char>());
+
+        if (sourceContent.empty()) {
+            return CookResult::InvalidFormat;
+        }
+
+        nlohmann::json parsed;
+        try {
+            parsed = nlohmann::json::parse(sourceContent);
+        } catch (const nlohmann::json::parse_error&) {
+            return CookResult::InvalidFormat;
+        }
+
+        const std::string canonicalContent = parsed.dump();
+        std::vector<uint8_t> payload(canonicalContent.begin(), canonicalContent.end());
+
+        CookedAssetHeader header{};
+        header.Magic = COOKED_ASSET_MAGIC;
+        header.Version = COOKED_ASSET_VERSION;
+        header.Type = assetType;
+        header.Flags = 0;
+        header.SourceHash = ComputeAssetId(validatedSource->string());
+
+        const auto now = std::chrono::system_clock::now();
+        header.CookedTimestamp = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
+
+        header.DataOffset = sizeof(CookedAssetHeader);
+        header.DataSize = static_cast<uint32_t>(payload.size());
+        header.MetadataOffset = 0;
+        header.MetadataSize = 0;
+
+        std::filesystem::create_directories(validatedOutput->parent_path(), ec);
+        if (ec) {
+            return CookResult::WriteFailed;
+        }
+
+        std::ofstream output(*validatedOutput, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            return CookResult::WriteFailed;
+        }
+
+        output.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        output.write(reinterpret_cast<const char*>(payload.data()),
+                     static_cast<std::streamsize>(payload.size()));
+        output.close();
+
+        if (!output) {
+            return CookResult::WriteFailed;
+        }
+
+        LOG_INFO("Cooked structured asset: {} -> {}",
+                 sourcePath.filename().string(),
+                 outputPath.filename().string());
+        return CookResult::Success;
     }
 
     // AssetManifest implementation

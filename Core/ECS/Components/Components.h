@@ -3,6 +3,7 @@
 // Include all ECS components for convenience
 
 #include "Core/ECS/Components/TransformComponent.h"
+#include "Core/ECS/Components/NameComponent.h"
 #include "Core/ECS/Components/MeshComponent.h"
 #include "Core/ECS/Components/SkeletalMeshComponent.h"
 #include "Core/ECS/Components/AnimatorComponent.h"
@@ -23,6 +24,7 @@
 #include "Core/ECS/Components/AnimatorComponent.h"
 #include "Core/ECS/Components/IKComponent.h"
 #include "Core/ECS/Components/ParticleEmitterComponent.h"
+#include "Core/ECS/Components/PrefabInstanceComponent.h"
 
 // Phase 13: World Building & Procedural Environments
 #include "Core/ECS/Components/TerrainComponent.h"

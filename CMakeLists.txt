@@ -139,6 +139,7 @@ add_library(EngineCore
     Core/ECS/ParallelECS.cpp
     Core/ECS/Components/Components.h
     Core/ECS/Components/TransformComponent.h
+    Core/ECS/Components/NameComponent.h
     Core/ECS/Components/MeshComponent.h
     Core/ECS/Components/LightComponent.h
     Core/ECS/Components/HierarchyComponent.h
@@ -212,6 +213,7 @@ add_library(EngineCore
     Core/Renderer/Particles/ParticleRenderPass.h
     Core/Renderer/Particles/ParticleRenderPass.cpp
     Core/ECS/Components/ParticleEmitterComponent.h
+    Core/ECS/Components/PrefabInstanceComponent.h
     # Phase 15: Post-Processing
     Core/ECS/Components/PostProcessComponent.h
     Core/ECS/Systems/PostProcessSystem.h
@@ -231,6 +233,29 @@ add_library(EngineCore
     Core/UI/FontAtlas.h
     Core/UI/FontAtlas.cpp
     Core/UI/Anchoring.h
+    # Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring
+    Core/Editor/Result.h
+    Core/Editor/EditorState.h
+    Core/Editor/EditorContext.h
+    Core/Editor/EditorAPI.h
+    Core/Editor/EditorAPI.cpp
+    Core/Editor/EditorSelection.h
+    Core/Editor/EditorSelection.cpp
+    Core/Editor/EditorModule.h
+    Core/Editor/EditorModule.cpp
+    Core/Editor/Panels/SceneHierarchyPanel.h
+    Core/Editor/Panels/SceneHierarchyPanel.cpp
+    Core/Editor/Panels/InspectorPanel.h
+    Core/Editor/Panels/InspectorPanel.cpp
+    Core/Editor/Commands/IEditorCommand.h
+    Core/Editor/Commands/CommandTransaction.h
+    Core/Editor/Commands/CommandStack.h
+    Core/Editor/Commands/CommandStack.cpp
+    Core/Editor/Commands/ComponentPropertyCommand.h
+    Core/Editor/Commands/ComponentPropertyCommand.cpp
+    Core/Editor/Prefab/PrefabAsset.h
+    Core/Editor/VisualScripting/GraphAsset.h
+    Core/Editor/Sequencer/TimelineAsset.h
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui RecastNavigation::Recast RecastNavigation::Detour RecastNavigation::DetourCrowd RecastNavigation::DetourTileCache)

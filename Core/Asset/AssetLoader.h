@@ -2,6 +2,7 @@
 
 #include "AssetTypes.h"
 #include "Core/Security/PathValidator.h"
+#include <nlohmann/json.hpp>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -32,6 +33,12 @@ namespace Asset {
         bool IsValid = false;
     };
 
+    struct LoadedStructuredAsset {
+        AssetType Type = AssetType::Unknown;
+        nlohmann::json Document = nlohmann::json::object();
+        bool IsValid = false;
+    };
+
     // Load status
     enum class LoadStatus {
         Success,
@@ -49,6 +56,9 @@ namespace Asset {
         static LoadedTexture LoadTexture(const std::filesystem::path& cookedPath);
         static LoadedMesh LoadMesh(const std::filesystem::path& cookedPath);
         static LoadedShader LoadShader(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadPrefab(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadVisualScriptGraph(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadTimeline(const std::filesystem::path& cookedPath);
         
         // Asynchronous loading
         static std::future<LoadedTexture> LoadTextureAsync(const std::filesystem::path& cookedPath);

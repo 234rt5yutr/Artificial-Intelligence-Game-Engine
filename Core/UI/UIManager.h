@@ -13,6 +13,8 @@
 namespace Core {
     class Window;
     namespace RHI { class VulkanContext; }
+    namespace ECS { class Scene; }
+    namespace Editor { class EditorModule; }
 namespace UI {
 
     // Forward declarations
@@ -103,6 +105,10 @@ namespace UI {
         TextRenderer& GetTextRenderer() { return *m_TextRenderer; }
         const TextRenderer& GetTextRenderer() const { return *m_TextRenderer; }
 
+        /// @brief Get editor module when editor mode is enabled
+        Editor::EditorModule* GetEditorModule() { return m_EditorModule.get(); }
+        const Editor::EditorModule* GetEditorModule() const { return m_EditorModule.get(); }
+
         // =====================================================================
         // Quick Text API
         // =====================================================================
@@ -172,6 +178,15 @@ namespace UI {
         /// @brief Enable/disable debug overlay
         void SetDebugOverlayEnabled(bool enabled);
 
+        /// @brief Enable/disable editor panel rendering
+        void SetEditorEnabled(bool enabled);
+
+        /// @brief Bind active scene to editor module
+        void SetEditorScene(ECS::Scene* scene);
+
+        /// @brief Query whether editor module is enabled
+        bool IsEditorEnabled() const;
+
     private:
         UIManager() = default;
         ~UIManager();
@@ -198,6 +213,7 @@ namespace UI {
         // Subsystems
         std::unique_ptr<ImGuiSubsystem> m_ImGui;
         std::unique_ptr<TextRenderer> m_TextRenderer;
+        std::unique_ptr<Editor::EditorModule> m_EditorModule;
         
         // TODO: Add these when implemented
         // std::unique_ptr<WidgetSystem> m_WidgetSystem;

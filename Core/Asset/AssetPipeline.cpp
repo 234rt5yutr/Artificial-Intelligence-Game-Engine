@@ -177,6 +177,7 @@ namespace Asset {
         RegisterCooker(std::make_unique<TextureCooker>());
         RegisterCooker(std::make_unique<MeshCooker>());
         RegisterCooker(std::make_unique<ShaderCooker>());
+        RegisterCooker(std::make_unique<StructuredDataCooker>());
     }
 
     AssetPipeline::~AssetPipeline() = default;

@@ -21,9 +21,11 @@ namespace Asset {
         Audio = 5,
         Animation = 6,
         Prefab = 7,
-        Level = 8,
-        Font = 9,
-        Script = 10
+        VisualScriptGraph = 8,
+        Timeline = 9,
+        Level = 10,
+        Font = 11,
+        Script = 12
     };
 
     // Texture-specific enums
@@ -162,6 +164,8 @@ namespace Asset {
             case AssetType::Audio: return "Audio";
             case AssetType::Animation: return "Animation";
             case AssetType::Prefab: return "Prefab";
+            case AssetType::VisualScriptGraph: return "VisualScriptGraph";
+            case AssetType::Timeline: return "Timeline";
             case AssetType::Level: return "Level";
             case AssetType::Font: return "Font";
             case AssetType::Script: return "Script";
