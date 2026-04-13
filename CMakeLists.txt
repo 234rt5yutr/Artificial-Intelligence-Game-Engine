@@ -163,6 +163,7 @@ add_library(EngineCore
     Core/MCP/ActionValidator.h
     Core/MCP/AutoLevelDesigner.h
     Core/MCP/MCPAllTools.h
+    Core/MCP/MCPUITools.h
     Core/MCP/MCPAudioTools.h
     Core/MCP/MCPNetworkTools.h
     Core/State/SceneLoader.h
@@ -339,6 +340,10 @@ add_library(EngineCore
     Core/Renderer/Particles/ParticleRenderPass.cpp
     Core/ECS/Components/ParticleEmitterComponent.h
     Core/ECS/Components/PrefabInstanceComponent.h
+    Core/ECS/Components/UIComponent.h
+    Core/ECS/Components/WorldUIComponent.h
+    Core/ECS/Systems/UISystem.h
+    Core/ECS/Systems/UISystem.cpp
     # Phase 15: Post-Processing
     Core/ECS/Components/PostProcessComponent.h
     Core/ECS/Systems/PostProcessSystem.h

@@ -3,6 +3,8 @@
 #include "Core/Log.h"
 #include "Core/Window.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
+#include "Core/UI/Authoring/UIAssetAuthoringService.h"
+#include "Core/UI/Widgets/WidgetSystem.h"
 
 namespace Core {
 namespace UI {
@@ -66,6 +68,12 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
         }
     });
 
+    Widgets::WidgetSystem::Get().Initialize();
+    Widgets::WidgetSystem::Get().SetScreenSize(m_ViewportSize);
+    (void)Authoring::UIAssetAuthoringService::Get();
+    m_Stage27ServicesInitialized = true;
+    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + UIAssetAuthoringService)");
+
     m_Initialized = true;
     ENGINE_CORE_INFO("UIManager initialized (viewport: {}x{})", 
                      static_cast<int>(m_ViewportSize.x), 
@@ -93,6 +101,11 @@ void UIManager::Shutdown() {
     if (m_TextRenderer) {
         m_TextRenderer->Shutdown();
         m_TextRenderer.reset();
+    }
+
+    if (m_Stage27ServicesInitialized) {
+        Widgets::WidgetSystem::Get().Shutdown();
+        m_Stage27ServicesInitialized = false;
     }
 
     FontManager::Get().Shutdown();
@@ -131,6 +144,10 @@ void UIManager::Update(float deltaTime) {
     }
 
     m_DeltaTime = deltaTime;
+
+    if (m_Stage27ServicesInitialized) {
+        Widgets::WidgetSystem::Get().Update(deltaTime);
+    }
 
     if (m_EditorModule && m_EditorModule->IsEnabled()) {
         m_EditorModule->Update(deltaTime);
@@ -339,6 +356,10 @@ void UIManager::OnResize(uint32_t width, uint32_t height) {
         m_TextRenderer->SetViewportSize(width, height);
     }
 
+    if (m_Stage27ServicesInitialized) {
+        Widgets::WidgetSystem::Get().SetScreenSize(m_ViewportSize);
+    }
+
     if (m_ImGui) {
         m_ImGui->OnSwapchainRecreated();
     }
@@ -354,7 +375,22 @@ bool UIManager::ProcessEvent(const SDL_Event& event) {
     }
 
     if (m_ImGui) {
-        return m_ImGui->ProcessEvent(event);
+        if (m_ImGui->ProcessEvent(event)) {
+            return true;
+        }
+    }
+
+    if (m_Stage27ServicesInitialized) {
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            Widgets::WidgetSystem::Get().OnMouseMove(
+                glm::vec2(event.motion.x, event.motion.y));
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            const bool pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+            Widgets::WidgetSystem::Get().OnMouseButton(static_cast<int>(event.button.button), pressed);
+        } else if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
+            const bool pressed = event.type == SDL_EVENT_KEY_DOWN;
+            Widgets::WidgetSystem::Get().OnKeyEvent(static_cast<int>(event.key.key), pressed);
+        }
     }
     return false;
 }
@@ -399,6 +435,10 @@ void UIManager::SetEditorScene(ECS::Scene* scene) {
 
 bool UIManager::IsEditorEnabled() const {
     return m_EditorModule && m_EditorModule->IsEnabled();
+}
+
+Widgets::WidgetSystem& UIManager::GetWidgetSystem() {
+    return Widgets::WidgetSystem::Get();
 }
 
 } // namespace UI

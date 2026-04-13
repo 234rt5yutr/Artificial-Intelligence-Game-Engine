@@ -1,8 +1,10 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
 #include "Core/ECS/Components/NameComponent.h"
+#include "Core/ECS/Systems/UISystem.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
+#include "Core/UI/UIManager.h"
 
 namespace Core {
 namespace ECS {
@@ -10,25 +12,48 @@ namespace ECS {
     Scene::Scene(const std::string& name)
         : m_Name(name)
     {
+        m_UISystem = std::make_unique<UISystem>();
+        m_UISystem->Initialize(this);
         ENGINE_CORE_INFO("Scene '{}' created", m_Name);
     }
 
     Scene::~Scene()
     {
+        if (m_UISystem) {
+            m_UISystem->Shutdown();
+        }
         ENGINE_CORE_INFO("Scene '{}' destroyed", m_Name);
     }
 
     Scene::Scene(Scene&& other) noexcept
         : m_Name(std::move(other.m_Name))
         , m_Registry(std::move(other.m_Registry))
+        , m_UISystem(std::move(other.m_UISystem))
+        , m_UIManager(other.m_UIManager)
+        , m_ViewportSize(other.m_ViewportSize)
     {
+        if (m_UISystem) {
+            m_UISystem->Initialize(this);
+        }
+        other.m_UIManager = nullptr;
     }
 
     Scene& Scene::operator=(Scene&& other) noexcept
     {
         if (this != &other) {
+            if (m_UISystem) {
+                m_UISystem->Shutdown();
+            }
             m_Name = std::move(other.m_Name);
             m_Registry = std::move(other.m_Registry);
+            m_UISystem = std::move(other.m_UISystem);
+            m_UIManager = other.m_UIManager;
+            m_ViewportSize = other.m_ViewportSize;
+
+            if (m_UISystem) {
+                m_UISystem->Initialize(this);
+            }
+            other.m_UIManager = nullptr;
         }
         return *this;
     }
@@ -76,9 +101,21 @@ namespace ECS {
     void Scene::OnUpdate(float deltaTime)
     {
         PROFILE_FUNCTION();
-        
-        // Systems will be implemented in future steps
-        (void)deltaTime;
+
+        if (m_UIManager != nullptr) {
+            m_ViewportSize = m_UIManager->GetViewportSize();
+        }
+
+        if (m_UISystem != nullptr) {
+            m_UISystem->Update(deltaTime, m_ViewportSize);
+            if (m_UIManager != nullptr && m_UIManager->IsInitialized()) {
+                m_UISystem->Render(m_UIManager->GetTextRenderer(), m_ViewportSize);
+            }
+        }
+    }
+
+    void Scene::BindUIManager(UI::UIManager* uiManager) {
+        m_UIManager = uiManager;
     }
 
 } // namespace ECS

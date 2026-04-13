@@ -1,14 +1,18 @@
 #pragma once
 
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
+#include <memory>
 #include <string>
 #include <functional>
 
 namespace Core {
+namespace UI { class UIManager; }
 namespace ECS {
 
     // Forward declaration for Entity class
     class Entity;
+    class UISystem;
 
     class Scene {
     public:
@@ -55,10 +59,16 @@ namespace ECS {
 
         // Update scene (called each frame)
         void OnUpdate(float deltaTime);
+        void BindUIManager(UI::UIManager* uiManager);
+        UISystem* GetUISystem() { return m_UISystem.get(); }
+        const UISystem* GetUISystem() const { return m_UISystem.get(); }
 
     private:
         std::string m_Name;
         entt::registry m_Registry;
+        std::unique_ptr<UISystem> m_UISystem;
+        UI::UIManager* m_UIManager = nullptr;
+        glm::vec2 m_ViewportSize{1920.0f, 1080.0f};
 
         friend class Entity;
     };

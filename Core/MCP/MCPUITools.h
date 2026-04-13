@@ -6,11 +6,16 @@
 
 #include "MCPTool.h"
 #include "MCPTypes.h"
+#include "Core/UI/Widgets/WidgetSystem.h"
 #include <entt/entt.hpp>
-#include <vector>
-#include <queue>
+#include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <mutex>
+#include <optional>
+#include <queue>
+#include <sstream>
+#include <vector>
 
 namespace Core {
 
@@ -26,7 +31,7 @@ namespace State {
 
 namespace UI {
     class UIManager;
-    class WidgetSystem;
+    namespace Widgets { class WidgetSystem; }
 }
 
 namespace MCP {
@@ -65,6 +70,12 @@ namespace MCP {
         int32_t priority = 0;           // Higher priority = shown first
     };
 
+    struct ScreenMessagePriority {
+        bool operator()(const ScreenMessage& a, const ScreenMessage& b) const {
+            return a.priority < b.priority;
+        }
+    };
+
     // ============================================================================
     // Message Queue Manager (Singleton for throttling)
     // ============================================================================
@@ -95,10 +106,7 @@ namespace MCP {
     private:
         MessageQueueManager() = default;
         
-        std::priority_queue<ScreenMessage, std::vector<ScreenMessage>, 
-            [](const ScreenMessage& a, const ScreenMessage& b) {
-                return a.priority < b.priority;
-            }> m_PendingMessages;
+        std::priority_queue<ScreenMessage, std::vector<ScreenMessage>, ScreenMessagePriority> m_PendingMessages;
         
         std::vector<ScreenMessage> m_ActiveMessages;
         size_t m_MaxConcurrent = 3;
@@ -107,6 +115,49 @@ namespace MCP {
         float m_CurrentTime = 0.0f;
         std::mutex m_Mutex;
     };
+
+    inline MessageQueueManager& MessageQueueManager::Get() {
+        static MessageQueueManager instance;
+        return instance;
+    }
+
+    inline void MessageQueueManager::QueueMessage(const ScreenMessage& message) {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_PendingMessages.push(message);
+    }
+
+    inline void MessageQueueManager::Update(float deltaTime) {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_CurrentTime += deltaTime;
+
+        for (auto it = m_ActiveMessages.begin(); it != m_ActiveMessages.end();) {
+            if ((m_CurrentTime - it->startTime) >= it->duration) {
+                it = m_ActiveMessages.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        if ((m_CurrentTime - m_LastMessageTime) < m_MinDelay) {
+            return;
+        }
+
+        while (!m_PendingMessages.empty() && m_ActiveMessages.size() < m_MaxConcurrent) {
+            ScreenMessage nextMessage = m_PendingMessages.top();
+            m_PendingMessages.pop();
+            nextMessage.startTime = m_CurrentTime;
+            m_ActiveMessages.push_back(std::move(nextMessage));
+            m_LastMessageTime = m_CurrentTime;
+        }
+    }
+
+    inline void MessageQueueManager::ClearAll() {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        while (!m_PendingMessages.empty()) {
+            m_PendingMessages.pop();
+        }
+        m_ActiveMessages.clear();
+    }
 
     // ============================================================================
     // DisplayScreenMessage Tool
@@ -218,6 +269,39 @@ namespace MCP {
     // UpdateHUD Tool
     // ============================================================================
 
+    inline std::optional<UI::Widgets::WidgetSystem::WidgetPropertyValue> ConvertJsonToWidgetPropertyValue(
+        const Json& value) {
+        using PropertyValue = UI::Widgets::WidgetSystem::WidgetPropertyValue;
+
+        if (value.is_boolean()) {
+            return PropertyValue(value.get<bool>());
+        }
+        if (value.is_number_integer()) {
+            return PropertyValue(static_cast<int32_t>(value.get<int64_t>()));
+        }
+        if (value.is_number()) {
+            return PropertyValue(value.get<float>());
+        }
+        if (value.is_string()) {
+            return PropertyValue(value.get<std::string>());
+        }
+        if (value.is_object()) {
+            if (value.contains("x") && value.contains("y")) {
+                return PropertyValue(glm::vec2(
+                    value.value("x", 0.0f),
+                    value.value("y", 0.0f)));
+            }
+            if (value.contains("r") && value.contains("g") && value.contains("b") && value.contains("a")) {
+                return PropertyValue(glm::vec4(
+                    value.value("r", 0.0f),
+                    value.value("g", 0.0f),
+                    value.value("b", 0.0f),
+                    value.value("a", 1.0f)));
+            }
+        }
+        return std::nullopt;
+    }
+
     /// @brief Create UpdateHUD MCP tool
     /// 
     /// Input Schema:
@@ -232,6 +316,7 @@ namespace MCP {
         schema.type = "object";
         schema.properties = {
             {"widget", {{"type", "string"}, {"description", "Widget identifier (e.g., 'health', 'ammo', 'objective', 'score')"}}},
+            {"property", {{"type", "string"}, {"description", "Widget property path (default: 'value')"}}},
             {"value", {{"description", "New value for the widget (type depends on widget)"}}},
             {"animate", {{"type", "boolean"}, {"description", "Animate the value change (default: true)"}}},
             {"visible", {{"type", "boolean"}, {"description", "Set widget visibility"}}}
@@ -243,32 +328,47 @@ namespace MCP {
             "Update a HUD widget's value, visibility, or trigger animations. Use to change health bars, objective trackers, scores, etc.",
             schema,
             [](const Json& args, ECS::Scene* scene) -> ToolResult {
+                (void)scene;
                 std::string widgetId = args.value("widget", "");
                 
                 if (widgetId.empty()) {
                     return ToolResult{false, {}, "Widget identifier is required"};
                 }
                 
-                // Get value (can be number, string, or object)
                 Json value = args.value("value", Json());
                 bool animate = args.value("animate", true);
-                
-                // Find widget in scene by ID
-                // This would integrate with UISystem/WidgetSystem
-                // For now, we store the update request for the UI system to process
-                
+                std::string propertyPath = args.value("property", "value");
+
+                std::optional<UI::Widgets::WidgetSystem::WidgetPropertyValue> propertyValue =
+                    ConvertJsonToWidgetPropertyValue(value);
+                if (!propertyValue.has_value()) {
+                    return ToolResult{false, {}, "Unsupported HUD value type for widget property update"};
+                }
+
+                bool updated = UI::Widgets::WidgetSystem::Get().SetWidgetProperty(
+                    widgetId,
+                    propertyPath,
+                    propertyValue.value());
+                if (!updated) {
+                    return ToolResult{false, {}, "Widget not found or property update rejected"};
+                }
+
+                if (args.contains("visible") && args["visible"].is_boolean()) {
+                    (void)UI::Widgets::WidgetSystem::Get().SetWidgetProperty(
+                        widgetId,
+                        "visible",
+                        UI::Widgets::WidgetSystem::WidgetPropertyValue(args["visible"].get<bool>()));
+                }
+
                 Json result;
                 result["widget"] = widgetId;
+                result["property"] = propertyPath;
                 result["value"] = value;
                 result["animate"] = animate;
-                
                 if (args.contains("visible")) {
                     result["visible"] = args["visible"];
                 }
-                
-                // TODO: Integrate with actual WidgetSystem when implemented
-                // For now, return success with the update parameters
-                result["status"] = "queued";
+                result["status"] = "updated";
                 
                 return ToolResult{true, result, ""};
             },
@@ -409,13 +509,21 @@ namespace MCP {
     // Tool Registration
     // ============================================================================
 
+    inline std::vector<MCPToolPtr> CreateUITools() {
+        std::vector<MCPToolPtr> tools;
+        tools.push_back(CreateDisplayScreenMessageTool());
+        tools.push_back(CreateUpdateHUDTool());
+        tools.push_back(CreateTriggerSaveStateTool());
+        tools.push_back(CreateShowLoadingScreenTool());
+        return tools;
+    }
+
     /// @brief Register all UI-related MCP tools with the server
     /// @param server MCP server instance
     inline void RegisterUITools(MCPServer& server) {
-        server.RegisterTool(CreateDisplayScreenMessageTool());
-        server.RegisterTool(CreateUpdateHUDTool());
-        server.RegisterTool(CreateTriggerSaveStateTool());
-        server.RegisterTool(CreateShowLoadingScreenTool());
+        for (MCPToolPtr& tool : CreateUITools()) {
+            server.RegisterTool(std::move(tool));
+        }
     }
 
 } // namespace MCP

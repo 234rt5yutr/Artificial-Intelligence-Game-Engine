@@ -8,6 +8,7 @@
 #include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
 #include "Core/UI/UIManager.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
+#include "Core/ECS/Scene.h"
 #include <thread>
 #include <chrono>
 
@@ -58,6 +59,13 @@ namespace Core {
             }
         }
 
+        m_RuntimeScene = std::make_unique<ECS::Scene>("Runtime Scene");
+        if (!m_HeadlessRuntime && UI::UIManager::Get().IsInitialized()) {
+            m_RuntimeScene->BindUIManager(&UI::UIManager::Get());
+            UI::UIManager::Get().SetEditorScene(m_RuntimeScene.get());
+        }
+        ENGINE_CORE_INFO("Stage 27 runtime scene and UISystem initialized");
+
         ApplyRuntimeOptions();
     }
 
@@ -76,6 +84,9 @@ namespace Core {
         if (m_HeadlessRuntime) {
             while (m_Running) {
                 Asset::HotReload::AssetHotReloadService::Get().PumpFrameSafePoint();
+                if (m_RuntimeScene) {
+                    m_RuntimeScene->OnUpdate(0.0f);
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             ENGINE_CORE_INFO("Application shutting down.");
@@ -96,6 +107,9 @@ namespace Core {
 
             auto& uiManager = UI::UIManager::Get();
             uiManager.BeginFrame();
+            if (m_RuntimeScene) {
+                m_RuntimeScene->OnUpdate(deltaTime);
+            }
             uiManager.Update(deltaTime);
 
             if (m_StartupTraceCapturePending) {

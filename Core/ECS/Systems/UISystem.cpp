@@ -65,6 +65,7 @@ void UISystem::UpdateWorldUI(const glm::mat4& viewMatrix, const glm::mat4& projM
 }
 
 void UISystem::UpdateUIComponent(UIComponent& ui, float deltaTime, const glm::vec2& viewportSize) {
+    (void)viewportSize;
     // Update animation
     if (ui.FadeIn || ui.FadeOut) {
         ui.AnimationTime += deltaTime;

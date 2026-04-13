@@ -9,6 +9,7 @@
 
 namespace Core {
     namespace RHI { class VulkanContext; }
+    namespace ECS { class Scene; }
 
 
     class Application {
@@ -47,11 +48,13 @@ namespace Core {
         static Application& Get() { return *s_Instance; }
         
         inline Core::Window& GetWindow() { return *m_Window; }
+        ECS::Scene* GetRuntimeScene() const { return m_RuntimeScene.get(); }
 
     protected:
         bool m_Running = true;
         std::unique_ptr<Core::Window> m_Window;
         std::unique_ptr<RHI::VulkanContext> m_VulkanContext;
+        std::unique_ptr<ECS::Scene> m_RuntimeScene;
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);

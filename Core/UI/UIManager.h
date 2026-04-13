@@ -18,8 +18,8 @@ namespace Core {
 namespace UI {
 
     // Forward declarations
-    class WidgetSystem;
     class WorldWidgetRenderer;
+    namespace Widgets { class WidgetSystem; }
 
     /// @brief Message entry for on-screen display
     struct DisplayMessage {
@@ -108,6 +108,9 @@ namespace UI {
         /// @brief Get editor module when editor mode is enabled
         Editor::EditorModule* GetEditorModule() { return m_EditorModule.get(); }
         const Editor::EditorModule* GetEditorModule() const { return m_EditorModule.get(); }
+
+        /// @brief Get widget runtime system (Stage 27)
+        Widgets::WidgetSystem& GetWidgetSystem();
 
         // =====================================================================
         // Quick Text API
@@ -214,10 +217,7 @@ namespace UI {
         std::unique_ptr<ImGuiSubsystem> m_ImGui;
         std::unique_ptr<TextRenderer> m_TextRenderer;
         std::unique_ptr<Editor::EditorModule> m_EditorModule;
-        
-        // TODO: Add these when implemented
-        // std::unique_ptr<WidgetSystem> m_WidgetSystem;
-        // std::unique_ptr<WorldWidgetRenderer> m_WorldWidgets;
+        bool m_Stage27ServicesInitialized = false;
 
         // Message queue
         std::vector<DisplayMessage> m_ActiveMessages;
