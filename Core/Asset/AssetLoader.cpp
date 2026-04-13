@@ -401,6 +401,22 @@ namespace {
         return LoadStructuredAssetInternal(cookedPath, AssetType::MotionDatabase);
     }
 
+    LoadedStructuredAsset AssetLoader::LoadWidgetBlueprintAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::WidgetBlueprint);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadWidgetLayoutAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::WidgetLayout);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadWidgetStyleAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::WidgetStyle);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadLocalizationTableAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::LocalizationTable);
+    }
+
     std::future<LoadedTexture> AssetLoader::LoadTextureAsync(
         const std::filesystem::path& cookedPath) {
         return std::async(std::launch::async, [cookedPath]() {
@@ -419,6 +435,34 @@ namespace {
         const std::filesystem::path& cookedPath) {
         return std::async(std::launch::async, [cookedPath]() {
             return LoadShader(cookedPath);
+        });
+    }
+
+    std::future<LoadedStructuredAsset> AssetLoader::LoadWidgetBlueprintAssetAsync(
+        const std::filesystem::path& cookedPath) {
+        return std::async(std::launch::async, [cookedPath]() {
+            return LoadWidgetBlueprintAsset(cookedPath);
+        });
+    }
+
+    std::future<LoadedStructuredAsset> AssetLoader::LoadWidgetLayoutAssetAsync(
+        const std::filesystem::path& cookedPath) {
+        return std::async(std::launch::async, [cookedPath]() {
+            return LoadWidgetLayoutAsset(cookedPath);
+        });
+    }
+
+    std::future<LoadedStructuredAsset> AssetLoader::LoadWidgetStyleAssetAsync(
+        const std::filesystem::path& cookedPath) {
+        return std::async(std::launch::async, [cookedPath]() {
+            return LoadWidgetStyleAsset(cookedPath);
+        });
+    }
+
+    std::future<LoadedStructuredAsset> AssetLoader::LoadLocalizationTableAssetAsync(
+        const std::filesystem::path& cookedPath) {
+        return std::async(std::launch::async, [cookedPath]() {
+            return LoadLocalizationTableAsset(cookedPath);
         });
     }
 

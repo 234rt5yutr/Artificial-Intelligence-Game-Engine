@@ -66,11 +66,19 @@ namespace Asset {
         static LoadedStructuredAsset LoadRetargetProfileAsset(const std::filesystem::path& cookedPath);
         static LoadedStructuredAsset LoadControlRigAsset(const std::filesystem::path& cookedPath);
         static LoadedStructuredAsset LoadMotionDatabaseAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadWidgetBlueprintAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadWidgetLayoutAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadWidgetStyleAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadLocalizationTableAsset(const std::filesystem::path& cookedPath);
         
         // Asynchronous loading
         static std::future<LoadedTexture> LoadTextureAsync(const std::filesystem::path& cookedPath);
         static std::future<LoadedMesh> LoadMeshAsync(const std::filesystem::path& cookedPath);
         static std::future<LoadedShader> LoadShaderAsync(const std::filesystem::path& cookedPath);
+        static std::future<LoadedStructuredAsset> LoadWidgetBlueprintAssetAsync(const std::filesystem::path& cookedPath);
+        static std::future<LoadedStructuredAsset> LoadWidgetLayoutAssetAsync(const std::filesystem::path& cookedPath);
+        static std::future<LoadedStructuredAsset> LoadWidgetStyleAssetAsync(const std::filesystem::path& cookedPath);
+        static std::future<LoadedStructuredAsset> LoadLocalizationTableAssetAsync(const std::filesystem::path& cookedPath);
         
         // Validate cooked asset header
         static LoadStatus ValidateHeader(const std::filesystem::path& cookedPath, AssetType expectedType);

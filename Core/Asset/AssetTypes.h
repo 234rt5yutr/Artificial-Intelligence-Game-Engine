@@ -40,7 +40,11 @@ namespace Asset {
         ControlRig = 21,
         MotionDatabase = 22,
         ReplayArchive = 23,
-        MigrationArtifact = 24
+        MigrationArtifact = 24,
+        WidgetBlueprint = 25,
+        WidgetLayout = 26,
+        WidgetStyle = 27,
+        LocalizationTable = 28
     };
 
     // Texture-specific enums
@@ -196,6 +200,10 @@ namespace Asset {
             case AssetType::MotionDatabase: return "MotionDatabase";
             case AssetType::ReplayArchive: return "ReplayArchive";
             case AssetType::MigrationArtifact: return "MigrationArtifact";
+            case AssetType::WidgetBlueprint: return "WidgetBlueprint";
+            case AssetType::WidgetLayout: return "WidgetLayout";
+            case AssetType::WidgetStyle: return "WidgetStyle";
+            case AssetType::LocalizationTable: return "LocalizationTable";
             default: return "Unknown";
         }
     }

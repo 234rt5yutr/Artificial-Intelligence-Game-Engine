@@ -2,8 +2,10 @@
 #include "Core/Log.h"
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <stack>
 #include <unordered_set>
+#include <nlohmann/json.hpp>
 
 #define LOG_INFO(...) ENGINE_CORE_INFO(__VA_ARGS__)
 #define LOG_WARN(...) ENGINE_CORE_WARN(__VA_ARGS__)
@@ -12,6 +14,87 @@
 
 namespace Core {
 namespace Asset {
+namespace {
+
+    AssetType DetectCookedAssetType(
+        const std::filesystem::path& cookedPath,
+        AssetType fallbackType) {
+        std::ifstream input(cookedPath, std::ios::binary);
+        if (!input.is_open()) {
+            return fallbackType;
+        }
+
+        CookedAssetHeader header{};
+        if (!input.read(reinterpret_cast<char*>(&header), sizeof(header))) {
+            return fallbackType;
+        }
+
+        if (header.Magic != COOKED_ASSET_MAGIC) {
+            return fallbackType;
+        }
+
+        return header.Type;
+    }
+
+    std::vector<std::filesystem::path> ExtractWidgetLayoutBlueprintDependencies(
+        const std::filesystem::path& sourcePath) {
+        std::vector<std::filesystem::path> dependencies;
+
+        std::string extension = sourcePath.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+        if (extension != ".widgetlayout") {
+            return dependencies;
+        }
+
+        std::ifstream input(sourcePath, std::ios::binary);
+        if (!input.is_open()) {
+            return dependencies;
+        }
+
+        nlohmann::json payload;
+        try {
+            input >> payload;
+        } catch (const nlohmann::json::parse_error&) {
+            return dependencies;
+        }
+
+        if (!payload.is_object() || !payload.contains("nodes") || !payload["nodes"].is_array()) {
+            return dependencies;
+        }
+
+        std::unordered_set<std::string> uniquePaths;
+        for (const nlohmann::json& node : payload["nodes"]) {
+            if (!node.is_object()) {
+                continue;
+            }
+
+            std::string blueprintReference = node.value("blueprintPath", "");
+            if (blueprintReference.empty()) {
+                blueprintReference = node.value("blueprintSource", "");
+            }
+            if (blueprintReference.empty()) {
+                blueprintReference = node.value("blueprintId", "");
+            }
+
+            if (blueprintReference.find(".widgetbp") == std::string::npos) {
+                continue;
+            }
+
+            std::filesystem::path dependencyPath = blueprintReference;
+            if (dependencyPath.is_relative()) {
+                dependencyPath = sourcePath.parent_path() / dependencyPath;
+            }
+            dependencyPath = dependencyPath.lexically_normal();
+
+            if (uniquePaths.insert(dependencyPath.string()).second) {
+                dependencies.push_back(std::move(dependencyPath));
+            }
+        }
+
+        return dependencies;
+    }
+
+} // namespace
 
     // AssetDependencyGraph implementation
     void AssetDependencyGraph::AddDependency(uint64_t assetId, uint64_t dependsOn) {
@@ -178,6 +261,7 @@ namespace Asset {
         RegisterCooker(std::make_unique<MeshCooker>());
         RegisterCooker(std::make_unique<ShaderCooker>());
         RegisterCooker(std::make_unique<StructuredDataCooker>());
+        RegisterCooker(std::make_unique<UIAuthoringCooker>());
     }
 
     AssetPipeline::~AssetPipeline() = default;
@@ -353,12 +437,21 @@ namespace Asset {
                 
                 // Update manifest
                 {
+                    const uint64_t assetId = ComputeAssetId(sourcePath.string());
+                    m_DependencyGraph.ClearDependencies(assetId);
+                    const std::vector<std::filesystem::path> dependencyPaths =
+                        ExtractWidgetLayoutBlueprintDependencies(sourcePath);
+                    for (const std::filesystem::path& dependencyPath : dependencyPaths) {
+                        m_DependencyGraph.AddDependency(assetId, ComputeAssetId(dependencyPath.string()));
+                    }
+
                     ManifestEntry entry;
-                    entry.AssetId = ComputeAssetId(sourcePath.string());
-                    entry.Type = cooker->GetSupportedTypes()[0];
+                    entry.AssetId = assetId;
+                    entry.Type = DetectCookedAssetType(outputPath, cooker->GetSupportedTypes()[0]);
                     entry.SourcePath = sourcePath.string();
                     entry.CookedPath = outputPath.string();
                     entry.SourceHash = ComputeAssetId(sourcePath.string());
+                    entry.Dependencies = m_DependencyGraph.GetDependencies(assetId);
                     
                     auto now = std::chrono::system_clock::now();
                     entry.CookedTimestamp = static_cast<uint64_t>(

@@ -881,6 +881,189 @@ namespace {
         return CookResult::Success;
     }
 
+    // UIAuthoringCooker implementation
+    std::vector<AssetType> UIAuthoringCooker::GetSupportedTypes() const {
+        return {
+            AssetType::WidgetBlueprint,
+            AssetType::WidgetLayout,
+            AssetType::WidgetStyle,
+            AssetType::LocalizationTable
+        };
+    }
+
+    std::vector<std::string> UIAuthoringCooker::GetSupportedExtensions() const {
+        return {
+            ".widgetbp",
+            ".widgetlayout",
+            ".widgetstyle",
+            ".uiloc"
+        };
+    }
+
+    AssetType UIAuthoringCooker::GetAssetTypeForExtension(const std::string& extension) const {
+        if (extension == ".widgetbp") {
+            return AssetType::WidgetBlueprint;
+        }
+        if (extension == ".widgetlayout") {
+            return AssetType::WidgetLayout;
+        }
+        if (extension == ".widgetstyle") {
+            return AssetType::WidgetStyle;
+        }
+        if (extension == ".uiloc") {
+            return AssetType::LocalizationTable;
+        }
+        return AssetType::Unknown;
+    }
+
+    bool UIAuthoringCooker::NeedsCooking(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& outputPath) const {
+
+        std::error_code ec;
+
+        if (!std::filesystem::exists(outputPath, ec) || ec) {
+            return true;
+        }
+
+        auto sourceTime = std::filesystem::last_write_time(sourcePath, ec);
+        if (ec) {
+            LOG_WARN("Failed to get source timestamp: {}",
+                     Security::PathValidator::SanitizeForLogging(sourcePath));
+            return true;
+        }
+
+        auto outputTime = std::filesystem::last_write_time(outputPath, ec);
+        if (ec) {
+            return true;
+        }
+
+        return sourceTime > outputTime;
+    }
+
+    CookResult UIAuthoringCooker::Cook(
+        const std::filesystem::path& sourcePath,
+        const std::filesystem::path& outputPath,
+        const CookOptions& options) {
+
+        auto validatedSource = Security::PathValidator::ValidateAssetPath(sourcePath);
+        if (!validatedSource) {
+            LOG_ERROR("Invalid source path: {}",
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+
+        auto validatedOutput = Security::PathValidator::ValidateCookedPath(outputPath);
+        if (!validatedOutput) {
+            LOG_ERROR("Invalid output path: {}",
+                      Security::PathValidator::SanitizeForLogging(outputPath));
+            return CookResult::WriteFailed;
+        }
+
+        std::error_code ec;
+        if (!std::filesystem::exists(*validatedSource, ec)) {
+            LOG_ERROR("UI authoring source not found: {}",
+                      Security::PathValidator::SanitizeForLogging(sourcePath));
+            return CookResult::SourceNotFound;
+        }
+
+        if (!options.ForceRebuild && !NeedsCooking(*validatedSource, *validatedOutput)) {
+            return CookResult::UpToDate;
+        }
+
+        std::string extension = validatedSource->extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+        const AssetType assetType = GetAssetTypeForExtension(extension);
+        if (assetType == AssetType::Unknown) {
+            return CookResult::InvalidFormat;
+        }
+
+        std::ifstream input(*validatedSource, std::ios::binary);
+        if (!input) {
+            return CookResult::SourceNotFound;
+        }
+
+        const std::string sourceContent((std::istreambuf_iterator<char>(input)),
+                                        std::istreambuf_iterator<char>());
+
+        if (sourceContent.empty()) {
+            return CookResult::InvalidFormat;
+        }
+
+        nlohmann::json parsed;
+        try {
+            parsed = nlohmann::json::parse(sourceContent);
+        } catch (const nlohmann::json::parse_error&) {
+            return CookResult::InvalidFormat;
+        }
+
+        if (!parsed.is_object()) {
+            return CookResult::InvalidFormat;
+        }
+
+        // Minimal schema guards for Stage 27 authored UI assets.
+        if (assetType == AssetType::WidgetBlueprint) {
+            if (!parsed.contains("blueprintId") || !parsed.contains("schemaVersion") || !parsed.contains("widgetType")) {
+                return CookResult::InvalidFormat;
+            }
+        } else if (assetType == AssetType::WidgetLayout) {
+            if (!parsed.contains("layoutId") || !parsed.contains("schemaVersion") || !parsed.contains("nodes")) {
+                return CookResult::InvalidFormat;
+            }
+        } else if (assetType == AssetType::WidgetStyle) {
+            if (!parsed.contains("schemaVersion")) {
+                return CookResult::InvalidFormat;
+            }
+        } else if (assetType == AssetType::LocalizationTable) {
+            if (!parsed.contains("schemaVersion") || !parsed.contains("entries")) {
+                return CookResult::InvalidFormat;
+            }
+        }
+
+        const std::string canonicalContent = parsed.dump();
+        std::vector<uint8_t> payload(canonicalContent.begin(), canonicalContent.end());
+
+        CookedAssetHeader header{};
+        header.Magic = COOKED_ASSET_MAGIC;
+        header.Version = COOKED_ASSET_VERSION;
+        header.Type = assetType;
+        header.Flags = 0;
+        header.SourceHash = ComputeAssetId(validatedSource->string());
+
+        const auto now = std::chrono::system_clock::now();
+        header.CookedTimestamp = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
+
+        header.DataOffset = sizeof(CookedAssetHeader);
+        header.DataSize = static_cast<uint32_t>(payload.size());
+        header.MetadataOffset = 0;
+        header.MetadataSize = 0;
+
+        std::filesystem::create_directories(validatedOutput->parent_path(), ec);
+        if (ec) {
+            return CookResult::WriteFailed;
+        }
+
+        std::ofstream output(*validatedOutput, std::ios::binary | std::ios::trunc);
+        if (!output) {
+            return CookResult::WriteFailed;
+        }
+
+        output.write(reinterpret_cast<const char*>(&header), sizeof(header));
+        output.write(reinterpret_cast<const char*>(payload.data()),
+                     static_cast<std::streamsize>(payload.size()));
+        output.close();
+
+        if (!output) {
+            return CookResult::WriteFailed;
+        }
+
+        LOG_INFO("Cooked Stage 27 UI asset: {} -> {}",
+                 sourcePath.filename().string(),
+                 outputPath.filename().string());
+        return CookResult::Success;
+    }
+
     // AssetManifest implementation
     bool AssetManifest::Load(const std::filesystem::path& path) {
         std::ifstream file(path);

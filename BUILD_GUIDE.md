@@ -96,3 +96,31 @@ cmake -S . -B build `
 cmake --build build --config Release
 ```
 
+## 9. Stage 27 UI asset cook/load quickstart
+
+Stage 27 UI assets are now first-class cook/load inputs:
+
+- Widget blueprint: `.widgetbp`
+- Widget layout: `.widgetlayout`
+- Widget style: `.widgetstyle`
+- Localization table: `.uiloc`
+
+Example cook pipeline usage (C++):
+
+```cpp
+Core::Asset::AssetPipeline pipeline;
+Core::Asset::CookOptions options;
+options.OutputDirectory = "build/cooked";
+pipeline.SetOptions(options);
+pipeline.ScanSourceDirectory("Assets/UI");
+pipeline.CookAll();
+```
+
+Example runtime load usage (C++):
+
+```cpp
+auto blueprint = Core::Asset::AssetLoader::LoadWidgetBlueprintAsset("build/cooked/hud.widgetbp.cooked");
+auto layout = Core::Asset::AssetLoader::LoadWidgetLayoutAsset("build/cooked/hud.widgetlayout.cooked");
+auto locale = Core::Asset::AssetLoader::LoadLocalizationTableAsset("build/cooked/ui_en.uiloc.cooked");
+```
+
