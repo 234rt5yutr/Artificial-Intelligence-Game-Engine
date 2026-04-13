@@ -358,6 +358,11 @@ add_library(EngineCore
     Core/UI/FontAtlas.h
     Core/UI/FontAtlas.cpp
     Core/UI/Anchoring.h
+    # Phase 27: Runtime UI Authoring Foundations
+    Core/UI/Authoring/WidgetBlueprintAsset.h
+    Core/UI/Authoring/WidgetBlueprintAsset.cpp
+    Core/UI/Authoring/UIAssetAuthoringService.h
+    Core/UI/Authoring/UIAssetAuthoringService.cpp
     # Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring
     Core/Editor/Result.h
     Core/Editor/EditorState.h
