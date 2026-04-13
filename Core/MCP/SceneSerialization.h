@@ -29,6 +29,7 @@
 #include <vector>
 #include <optional>
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
@@ -255,6 +256,24 @@ namespace MCP {
                     }},
                     {"widgetId", {{"type", "string"}}},
                     {"text", {{"type", "string"}}},
+                    {"blueprintId", {{"type", "string"}}},
+                    {"layoutId", {{"type", "string"}}},
+                    {"bindings", {
+                        {"type", "array"},
+                        {"items", {
+                            {"type", "object"},
+                            {"properties", {
+                                {"propertyPath", {{"type", "string"}}},
+                                {"dataPath", {{"type", "string"}}},
+                                {"mode", {{"type", "string"}, {"enum", Json::array({"one_way", "two_way"})}}},
+                                {"converterId", {{"type", "string"}}},
+                                {"validatorId", {{"type", "string"}}}
+                            }}
+                        }}
+                    }},
+                    {"defaultTransitionId", {{"type", "string"}}},
+                    {"modalDialogId", {{"type", "string"}}},
+                    {"modalRequireFocusLock", {{"type", "boolean"}}},
                     {"color", ColorRGBASchema()},
                     {"backgroundColor", ColorRGBASchema()},
                     {"fontSize", {{"type", "number"}, {"minimum", 1.0}}},
@@ -290,6 +309,10 @@ namespace MCP {
                     {"type", {{"type", "string"}}},
                     {"widgetId", {{"type", "string"}}},
                     {"text", {{"type", "string"}}},
+                    {"blueprintId", {{"type", "string"}}},
+                    {"layoutId", {{"type", "string"}}},
+                    {"defaultModalDialogId", {{"type", "string"}}},
+                    {"routeInteractionToModal", {{"type", "boolean"}}},
                     {"color", ColorRGBASchema()},
                     {"backgroundColor", ColorRGBASchema()},
                     {"fontSize", {{"type", "number"}, {"minimum", 1.0}}},
@@ -764,8 +787,73 @@ namespace MCP {
         return {{"r", c.r}, {"g", c.g}, {"b", c.b}, {"a", c.a}};
     }
 
-    inline Json SerializeUIComponent(const ECS::UIComponent& ui) {
+    inline bool IsValidMetadataIdentifier(const std::string& value) {
+        if (value.empty()) {
+            return false;
+        }
+        for (const char c : value) {
+            if (!std::isalnum(static_cast<unsigned char>(c)) &&
+                c != '_' && c != '-' && c != '.' && c != ':') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    inline bool IsValidBindingPath(const std::string& value) {
+        if (value.empty() || value.front() == '.' || value.back() == '.') {
+            return false;
+        }
+        bool previousDot = false;
+        for (const char c : value) {
+            if (c == '.') {
+                if (previousDot) {
+                    return false;
+                }
+                previousDot = true;
+                continue;
+            }
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
+                return false;
+            }
+            previousDot = false;
+        }
+        return true;
+    }
+
+    inline Json SerializeBindingDescriptor(const ECS::UIBindingDescriptor& descriptor) {
         return {
+            {"propertyPath", descriptor.PropertyPath},
+            {"dataPath", descriptor.DataPath},
+            {"mode", descriptor.Mode},
+            {"converterId", descriptor.ConverterId},
+            {"validatorId", descriptor.ValidatorId}
+        };
+    }
+
+    inline std::optional<ECS::UIBindingDescriptor> DeserializeBindingDescriptor(const Json& payload) {
+        if (!payload.is_object()) {
+            return std::nullopt;
+        }
+
+        ECS::UIBindingDescriptor descriptor;
+        descriptor.PropertyPath = payload.value("propertyPath", "");
+        descriptor.DataPath = payload.value("dataPath", "");
+        descriptor.Mode = payload.value("mode", "one_way");
+        descriptor.ConverterId = payload.value("converterId", "");
+        descriptor.ValidatorId = payload.value("validatorId", "");
+
+        if (!IsValidBindingPath(descriptor.PropertyPath) || !IsValidBindingPath(descriptor.DataPath)) {
+            return std::nullopt;
+        }
+        if (descriptor.Mode != "one_way" && descriptor.Mode != "two_way") {
+            descriptor.Mode = "one_way";
+        }
+        return descriptor;
+    }
+
+    inline Json SerializeUIComponent(const ECS::UIComponent& ui) {
+        Json serialized = {
             {"anchor", AnchorToString(ui.Anchor)},
             {"offset", SerializeVec2(ui.Offset)},
             {"size", SerializeVec2(ui.Size)},
@@ -773,6 +861,11 @@ namespace MCP {
             {"type", ECS::WidgetTypeToString(ui.Type)},
             {"widgetId", ui.WidgetId},
             {"text", ui.Text},
+            {"blueprintId", ui.BlueprintId},
+            {"layoutId", ui.LayoutId},
+            {"defaultTransitionId", ui.DefaultTransitionId},
+            {"modalDialogId", ui.ModalDialogId},
+            {"modalRequireFocusLock", ui.ModalRequireFocusLock},
             {"color", SerializeColorRGBA(ui.Color)},
             {"backgroundColor", SerializeColorRGBA(ui.BackgroundColor)},
             {"fontSize", ui.FontSize},
@@ -785,6 +878,12 @@ namespace MCP {
             {"fadeOut", ui.FadeOut},
             {"fadeDuration", ui.FadeDuration}
         };
+        Json bindings = Json::array();
+        for (const ECS::UIBindingDescriptor& descriptor : ui.BindingDescriptors) {
+            bindings.push_back(SerializeBindingDescriptor(descriptor));
+        }
+        serialized["bindings"] = bindings;
+        return serialized;
     }
 
     inline ECS::UIComponent DeserializeUIComponent(const Json& j) {
@@ -796,6 +895,15 @@ namespace MCP {
         ui.Type = ECS::StringToWidgetType(j.value("type", "none"));
         ui.WidgetId = j.value("widgetId", "");
         ui.Text = j.value("text", "");
+        const std::string blueprintId = j.value("blueprintId", "");
+        ui.BlueprintId = IsValidMetadataIdentifier(blueprintId) ? blueprintId : "";
+        const std::string layoutId = j.value("layoutId", "");
+        ui.LayoutId = IsValidMetadataIdentifier(layoutId) ? layoutId : "";
+        const std::string defaultTransitionId = j.value("defaultTransitionId", "");
+        ui.DefaultTransitionId = IsValidMetadataIdentifier(defaultTransitionId) ? defaultTransitionId : "";
+        const std::string modalDialogId = j.value("modalDialogId", "");
+        ui.ModalDialogId = IsValidMetadataIdentifier(modalDialogId) ? modalDialogId : "";
+        ui.ModalRequireFocusLock = j.value("modalRequireFocusLock", false);
         ui.Color = DeserializeVec4(j.value("color", Json::object()));
         ui.BackgroundColor = DeserializeVec4(j.value("backgroundColor", Json::object()), 
                                               glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
@@ -808,6 +916,17 @@ namespace MCP {
         ui.FadeIn = j.value("fadeIn", false);
         ui.FadeOut = j.value("fadeOut", false);
         ui.FadeDuration = j.value("fadeDuration", 0.3f);
+        ui.BindingDescriptors.clear();
+        const Json bindings = j.value("bindings", Json::array());
+        if (bindings.is_array()) {
+            for (const Json& bindingPayload : bindings) {
+                std::optional<ECS::UIBindingDescriptor> descriptor =
+                    DeserializeBindingDescriptor(bindingPayload);
+                if (descriptor.has_value()) {
+                    ui.BindingDescriptors.push_back(*descriptor);
+                }
+            }
+        }
         ui.IsDirty = true;
         return ui;
     }
@@ -846,6 +965,10 @@ namespace MCP {
             {"type", ECS::WidgetTypeToString(wui.Type)},
             {"widgetId", wui.WidgetId},
             {"text", wui.Text},
+            {"blueprintId", wui.BlueprintId},
+            {"layoutId", wui.LayoutId},
+            {"defaultModalDialogId", wui.DefaultModalDialogId},
+            {"routeInteractionToModal", wui.RouteInteractionToModal},
             {"color", SerializeColorRGBA(wui.Color)},
             {"backgroundColor", SerializeColorRGBA(wui.BackgroundColor)},
             {"fontSize", wui.FontSize},
@@ -875,6 +998,13 @@ namespace MCP {
         wui.Type = ECS::StringToWidgetType(j.value("type", "label"));
         wui.WidgetId = j.value("widgetId", "");
         wui.Text = j.value("text", "");
+        const std::string worldBlueprintId = j.value("blueprintId", "");
+        wui.BlueprintId = IsValidMetadataIdentifier(worldBlueprintId) ? worldBlueprintId : "";
+        const std::string worldLayoutId = j.value("layoutId", "");
+        wui.LayoutId = IsValidMetadataIdentifier(worldLayoutId) ? worldLayoutId : "";
+        const std::string worldModalId = j.value("defaultModalDialogId", "");
+        wui.DefaultModalDialogId = IsValidMetadataIdentifier(worldModalId) ? worldModalId : "";
+        wui.RouteInteractionToModal = j.value("routeInteractionToModal", false);
         wui.Color = DeserializeVec4(j.value("color", Json::object()));
         wui.BackgroundColor = DeserializeVec4(j.value("backgroundColor", Json::object()),
                                                glm::vec4(0.0f, 0.0f, 0.0f, 0.7f));
@@ -1189,7 +1319,7 @@ namespace MCP {
         return j;
     }
 
-    constexpr uint32_t SCENE_ASSET_SCHEMA_VERSION = 1;
+    constexpr uint32_t SCENE_ASSET_SCHEMA_VERSION = 2;
 
     // Serialize entire scene
     inline Json SerializeScene(const ECS::Scene& scene) {
@@ -1394,6 +1524,59 @@ namespace MCP {
         return true;
     }
 
+    inline bool MigrateScenePayloadToCurrentSchema(
+        Json* scenePayload,
+        uint32_t fromSchemaVersion,
+        std::string* errorMessage = nullptr) {
+        if (scenePayload == nullptr || !scenePayload->is_object()) {
+            if (errorMessage != nullptr) {
+                *errorMessage = "Scene payload migration received invalid JSON object.";
+            }
+            return false;
+        }
+
+        if (fromSchemaVersion >= SCENE_ASSET_SCHEMA_VERSION) {
+            return true;
+        }
+
+        if (fromSchemaVersion < 2) {
+            Json& entities = (*scenePayload)["entities"];
+            if (!entities.is_array()) {
+                if (errorMessage != nullptr) {
+                    *errorMessage = "Scene migration expected entities array.";
+                }
+                return false;
+            }
+
+            for (Json& entityPayload : entities) {
+                Json& components = entityPayload["components"];
+                if (!components.is_object()) {
+                    continue;
+                }
+
+                if (components.contains("ui") && components["ui"].is_object()) {
+                    Json& ui = components["ui"];
+                    ui["blueprintId"] = ui.value("blueprintId", "");
+                    ui["layoutId"] = ui.value("layoutId", "");
+                    ui["bindings"] = ui.value("bindings", Json::array());
+                    ui["defaultTransitionId"] = ui.value("defaultTransitionId", "");
+                    ui["modalDialogId"] = ui.value("modalDialogId", "");
+                    ui["modalRequireFocusLock"] = ui.value("modalRequireFocusLock", false);
+                }
+
+                if (components.contains("worldUI") && components["worldUI"].is_object()) {
+                    Json& worldUI = components["worldUI"];
+                    worldUI["blueprintId"] = worldUI.value("blueprintId", "");
+                    worldUI["layoutId"] = worldUI.value("layoutId", "");
+                    worldUI["defaultModalDialogId"] = worldUI.value("defaultModalDialogId", "");
+                    worldUI["routeInteractionToModal"] = worldUI.value("routeInteractionToModal", false);
+                }
+            }
+        }
+
+        return true;
+    }
+
     inline bool SerializeSceneToAsset(const ECS::Scene& scene,
                                       const std::filesystem::path& assetPath,
                                       std::string* errorMessage = nullptr) {
@@ -1477,7 +1660,12 @@ namespace MCP {
             return false;
         }
 
-        return DeserializeScene(*scenePayload, scene, errorMessage);
+        Json migratedPayload = *scenePayload;
+        if (!MigrateScenePayloadToCurrentSchema(&migratedPayload, schemaVersion, errorMessage)) {
+            return false;
+        }
+
+        return DeserializeScene(migratedPayload, scene, errorMessage);
     }
 
     // ============================================================================

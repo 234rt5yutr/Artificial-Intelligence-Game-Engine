@@ -3,9 +3,18 @@
 #include "Core/UI/Anchoring.h"
 #include <string>
 #include <cstdint>
+#include <vector>
 
 namespace Core {
 namespace ECS {
+
+    struct UIBindingDescriptor {
+        std::string PropertyPath;
+        std::string DataPath;
+        std::string Mode = "one_way";
+        std::string ConverterId;
+        std::string ValidatorId;
+    };
 
     /// @brief Widget types that can be displayed
     enum class WidgetType : uint8_t {
@@ -37,6 +46,12 @@ namespace ECS {
         WidgetType Type = WidgetType::None;
         std::string WidgetId;                    ///< Unique identifier for widget lookup
         std::string Text;                        ///< Text content (for Label, MessageBox)
+        std::string BlueprintId;                 ///< Stage 27 blueprint reference
+        std::string LayoutId;                    ///< Stage 27 layout reference
+        std::vector<UIBindingDescriptor> BindingDescriptors;
+        std::string DefaultTransitionId;         ///< Optional transition template identifier
+        std::string ModalDialogId;               ///< Optional modal ID routed by this widget
+        bool ModalRequireFocusLock = false;
 
         // Visual properties
         glm::vec4 Color = {1.0f, 1.0f, 1.0f, 1.0f};  ///< Tint color with alpha

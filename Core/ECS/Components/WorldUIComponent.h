@@ -39,6 +39,10 @@ namespace ECS {
         WidgetType Type = WidgetType::Label;
         std::string WidgetId;
         std::string Text;
+        std::string BlueprintId;                ///< Optional Stage 27 blueprint reference
+        std::string LayoutId;                   ///< Optional Stage 27 layout reference
+        std::string DefaultModalDialogId;       ///< Optional modal launched by interaction
+        bool RouteInteractionToModal = false;
 
         // Visual properties
         glm::vec4 Color = {1.0f, 1.0f, 1.0f, 1.0f};
