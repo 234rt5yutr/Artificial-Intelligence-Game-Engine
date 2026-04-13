@@ -26,11 +26,17 @@ namespace ECS {
         uint32_t AnimatedEntityCount = 0;       // Number of entities processed
         uint32_t ActiveTransitionCount = 0;      // Number of active state transitions
         uint32_t StateMachineEvaluations = 0;    // Total evaluations this frame
+        uint32_t GraphStateMachineEvaluations = 0;
+        uint32_t LegacyFallbackCount = 0;
+        uint32_t OrchestrationConflictCount = 0;
 
         void Reset() {
             AnimatedEntityCount = 0;
             ActiveTransitionCount = 0;
             StateMachineEvaluations = 0;
+            GraphStateMachineEvaluations = 0;
+            LegacyFallbackCount = 0;
+            OrchestrationConflictCount = 0;
         }
     };
 
@@ -100,6 +106,10 @@ namespace ECS {
         /// Get full statistics structure
         const AnimatorStatistics& GetStatistics() const { 
             return m_Statistics; 
+        }
+
+        uint32_t GetGraphStateMachineEvaluations() const {
+            return m_Statistics.GraphStateMachineEvaluations;
         }
 
     private:
@@ -232,6 +242,9 @@ namespace ECS {
         std::atomic<uint32_t> m_AtomicEntityCount{0};
         std::atomic<uint32_t> m_AtomicTransitionCount{0};
         std::atomic<uint32_t> m_AtomicEvaluationCount{0};
+        std::atomic<uint32_t> m_AtomicGraphEvaluationCount{0};
+        std::atomic<uint32_t> m_AtomicLegacyFallbackCount{0};
+        std::atomic<uint32_t> m_AtomicOrchestrationConflictCount{0};
 
         /// Thread-local scratch buffers for parallel pose computation
         ThreadLocalScratch<std::vector<StateMachineEvalResult>> m_ThreadLocalResults;

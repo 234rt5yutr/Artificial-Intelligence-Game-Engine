@@ -699,7 +699,11 @@ namespace {
             AssetType::Timeline,
             AssetType::Scene,
             AssetType::WorldPartitionCell,
-            AssetType::HierarchicalLOD
+            AssetType::HierarchicalLOD,
+            AssetType::AnimationGraph,
+            AssetType::RetargetProfile,
+            AssetType::ControlRig,
+            AssetType::MotionDatabase
         };
     }
 
@@ -710,7 +714,11 @@ namespace {
             ".timeline",
             ".scene",
             ".cell",
-            ".hlod"
+            ".hlod",
+            ".animgraph",
+            ".retarget",
+            ".controlrig",
+            ".motiondb"
         };
     }
 
@@ -732,6 +740,18 @@ namespace {
         }
         if (extension == ".hlod") {
             return AssetType::HierarchicalLOD;
+        }
+        if (extension == ".animgraph") {
+            return AssetType::AnimationGraph;
+        }
+        if (extension == ".retarget") {
+            return AssetType::RetargetProfile;
+        }
+        if (extension == ".controlrig") {
+            return AssetType::ControlRig;
+        }
+        if (extension == ".motiondb") {
+            return AssetType::MotionDatabase;
         }
         return AssetType::Unknown;
     }

@@ -93,6 +93,11 @@ namespace ECS {
         uint32_t GetEntitiesProcessed() const { return m_Statistics.EntitiesProcessed; }
         uint32_t GetChainsEvaluated() const { return m_Statistics.ChainsEvaluated; }
 
+        // Stage 25: deterministic solve stage boundaries for control-rig bake interop
+        void ConfigureControlRigSolveStages(bool capturePreBake, bool capturePostBake);
+        const std::vector<entt::entity>& GetPreBakeCaptureList() const { return m_PreBakeCaptureList; }
+        const std::vector<entt::entity>& GetPostBakeCaptureList() const { return m_PostBakeCaptureList; }
+
     private:
         //---------------------------------------------------------------------
         // Entity Processing
@@ -212,6 +217,11 @@ namespace ECS {
         std::atomic<uint32_t> m_AtomicEntities{0};
         std::atomic<uint32_t> m_AtomicChains{0};
         std::atomic<uint32_t> m_AtomicRaycasts{0};
+
+        bool m_CapturePreBakeStage = false;
+        bool m_CapturePostBakeStage = false;
+        std::vector<entt::entity> m_PreBakeCaptureList;
+        std::vector<entt::entity> m_PostBakeCaptureList;
 
         bool m_Initialized = false;
     };

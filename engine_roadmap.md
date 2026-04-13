@@ -345,15 +345,19 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 25: Animation Runtime 2.0, Rig Retargeting & Motion Matching (Weeks 68-71)
 
-* [ ] Step 25.1: Upgrade animation state orchestration and blend logic.
-  * [ ] Sub-step 25.1.1: Implement `CreateAnimationStateMachineGraph()` for data-authored, layered runtime state machines. (v0.25.1.1)
-  * [ ] Sub-step 25.1.2: Implement `CreateAnimationBlendTree()` with directional locomotion and additive overlays. (v0.25.1.2)
-  * [ ] Sub-step 25.1.3: Implement `SetAnimatorParameterValue()` with typed parameter channels and event sync. (v0.25.1.3)
-* [ ] Step 25.2: Add retargeting and procedural rig bake pipeline.
-  * [ ] Sub-step 25.2.1: Implement `RetargetAnimationBetweenSkeletons()` with bone-map templates and retarget profiles. (v0.25.2.1)
-  * [ ] Sub-step 25.2.2: Implement `BakeControlRigToAnimation()` for runtime/editor interchange and cinematic capture. (v0.25.2.2)
-* [ ] Step 25.3: Add data-driven high-fidelity locomotion.
-  * [ ] Sub-step 25.3.1: Implement `EvaluateMotionMatchingDatabase()` for pose-search locomotion selection. (v0.25.3.1)
+* [x] Step 25.1: Upgrade animation state orchestration and blend logic.
+  * [x] Sub-step 25.1.1: Implement `CreateAnimationStateMachineGraph()` for data-authored, layered runtime state machines. (v0.25.1.1)
+  * [x] Sub-step 25.1.2: Implement `CreateAnimationBlendTree()` with directional locomotion and additive overlays. (v0.25.1.2)
+  * [x] Sub-step 25.1.3: Implement `SetAnimatorParameterValue()` with typed parameter channels and event sync. (v0.25.1.3)
+  * [x] Sub-step 25.1.4: Runtime orchestration compatibility bridge across legacy/hybrid/graph modes. (v0.25.1.4)
+* [x] Step 25.2: Add retargeting and procedural rig bake pipeline.
+  * [x] Sub-step 25.2.1: Implement `RetargetAnimationBetweenSkeletons()` with bone-map templates and retarget profiles. (v0.25.2.1)
+  * [x] Sub-step 25.2.2: Implement `BakeControlRigToAnimation()` for runtime/editor interchange and cinematic capture. (v0.25.2.2)
+  * [x] Sub-step 25.2.3: Retarget + control-rig bake interop batch workflow with lineage metadata and rollback-safe publication. (v0.25.2.3)
+* [x] Step 25.3: Add data-driven high-fidelity locomotion.
+  * [x] Sub-step 25.3.1: Implement `EvaluateMotionMatchingDatabase()` for pose-search locomotion selection. (v0.25.3.1)
+  * [x] Sub-step 25.3.2: Motion database build, integrity checks, and deterministic search-index pipeline. (v0.25.3.2)
+  * [x] Sub-step 25.3.3: Runtime telemetry, query budget governance, and stable fallback routing. (v0.25.3.3)
 
 ## Phase 26: Multiplayer Product Layer, Replay System & Rollback Framework (Weeks 72-76)
 

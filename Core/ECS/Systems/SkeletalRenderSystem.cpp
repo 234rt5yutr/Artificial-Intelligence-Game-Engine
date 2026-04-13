@@ -91,7 +91,7 @@ void SkeletalRenderSystem::Update(Scene& scene, float deltaTime) {
         }
 
         // Update animation if auto-update enabled
-        if (skeletal.AutoUpdate) {
+        if (skeletal.AutoUpdate && !skeletal.GraphRuntimeAuthoritative) {
             EvaluateAnimation(skeletal, deltaTime);
             m_AnimatedEntityCount++;
         }
@@ -171,7 +171,7 @@ void SkeletalRenderSystem::UpdateParallel(Scene& scene, float deltaTime) {
             }
 
             // Evaluate animation (this modifies skeletal.CurrentPose)
-            if (skeletal.AutoUpdate) {
+            if (skeletal.AutoUpdate && !skeletal.GraphRuntimeAuthoritative) {
                 EvaluateAnimation(skeletal, deltaTime);
                 m_AnimatedEntityCount.fetch_add(1, std::memory_order_relaxed);
             }
@@ -243,7 +243,7 @@ void SkeletalRenderSystem::UpdateAnimations(Scene& scene, float deltaTime) {
     for (auto entity : view) {
         auto& skeletal = view.get<SkeletalMeshComponent>(entity);
 
-        if (!skeletal.IsValid() || !skeletal.AutoUpdate) {
+        if (!skeletal.IsValid() || !skeletal.AutoUpdate || skeletal.GraphRuntimeAuthoritative) {
             continue;
         }
 

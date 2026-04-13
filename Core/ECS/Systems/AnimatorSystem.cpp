@@ -1,4 +1,6 @@
 #include "Core/ECS/Systems/AnimatorSystem.h"
+#include "Core/Animation/Events/AnimationEventSynchronizer.h"
+#include "Core/Animation/MotionMatching/MotionMatchingRuntime.h"
 #include <algorithm>
 #include <cmath>
 
@@ -238,6 +240,7 @@ void UpdateAnimationTime(AnimatorComponent& animator,
 void AnimatorSystem::Update(Scene& scene, float deltaTime) {
     PROFILE_SCOPE("AnimatorSystem::Update");
 
+    Animation::AnimationEventSynchronizer::Get().PromoteNextUpdateEvents();
     m_Statistics.Reset();
 
     auto view = scene.View<AnimatorComponent, SkeletalMeshComponent>();
@@ -263,10 +266,15 @@ void AnimatorSystem::Update(Scene& scene, float deltaTime) {
 void AnimatorSystem::UpdateParallel(Scene& scene, float deltaTime) {
     PROFILE_SCOPE("AnimatorSystem::UpdateParallel");
 
+    Animation::AnimationEventSynchronizer::Get().PromoteNextUpdateEvents();
+
     // Reset statistics with atomic counters
     m_AtomicEntityCount.store(0, std::memory_order_relaxed);
     m_AtomicTransitionCount.store(0, std::memory_order_relaxed);
     m_AtomicEvaluationCount.store(0, std::memory_order_relaxed);
+    m_AtomicGraphEvaluationCount.store(0, std::memory_order_relaxed);
+    m_AtomicLegacyFallbackCount.store(0, std::memory_order_relaxed);
+    m_AtomicOrchestrationConflictCount.store(0, std::memory_order_relaxed);
     m_ThreadLocalResults.Reset();
 
     auto& registry = scene.GetRegistry();
@@ -306,6 +314,35 @@ void AnimatorSystem::UpdateParallel(Scene& scene, float deltaTime) {
 
             // Ensure animator is initialized
             animator.EnsureInitialized();
+            const bool graphRuntimeActive = animator.RuntimeMode != AnimatorRuntimeMode::Legacy;
+            skeletal.GraphRuntimeAuthoritative = graphRuntimeActive;
+            if (graphRuntimeActive) {
+                ++animator.GraphEvaluationCount;
+                m_AtomicGraphEvaluationCount.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            if (animator.MotionMatchingEnabled && !animator.MotionDatabaseId.empty()) {
+                Animation::MotionMatchingQuery motionQuery;
+                motionQuery.DatabaseId = animator.MotionDatabaseId;
+                motionQuery.CurrentPoseId = skeletal.SelectedMotionPoseId;
+                motionQuery.DesiredVelocity = {
+                    animator.RootMotionDelta.x,
+                    animator.RootMotionDelta.y,
+                    animator.RootMotionDelta.z
+                };
+                motionQuery.MaxCandidates = 16;
+                motionQuery.QueryBudgetMs = 0.20f;
+
+                const Animation::MotionMatchingResult motionResult =
+                    Animation::EvaluateMotionMatchingDatabase(motionQuery);
+                if (motionResult.Success && !motionResult.SelectedPoseId.empty()) {
+                    skeletal.SelectedMotionPoseId = motionResult.SelectedPoseId;
+                }
+                if (motionResult.UsedFallback || !motionResult.Success) {
+                    ++animator.LegacyFallbackCount;
+                    m_AtomicLegacyFallbackCount.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
 
             // Evaluate state machine
             bool transitionTriggered = EvaluateStateMachine(animator, deltaTime);
@@ -352,6 +389,9 @@ void AnimatorSystem::UpdateParallel(Scene& scene, float deltaTime) {
     m_Statistics.AnimatedEntityCount = m_AtomicEntityCount.load();
     m_Statistics.ActiveTransitionCount = m_AtomicTransitionCount.load();
     m_Statistics.StateMachineEvaluations = m_AtomicEvaluationCount.load();
+    m_Statistics.GraphStateMachineEvaluations = m_AtomicGraphEvaluationCount.load();
+    m_Statistics.LegacyFallbackCount = m_AtomicLegacyFallbackCount.load();
+    m_Statistics.OrchestrationConflictCount = m_AtomicOrchestrationConflictCount.load();
 
     ENGINE_CORE_TRACE("AnimatorSystem (parallel): {} entities, {} transitions, {} evaluations",
                       m_Statistics.AnimatedEntityCount,
@@ -371,6 +411,36 @@ void AnimatorSystem::ProcessEntity(entt::entity entity,
     
     // Ensure animator is initialized
     animator.EnsureInitialized();
+
+    const bool graphRuntimeActive = animator.RuntimeMode != AnimatorRuntimeMode::Legacy;
+    skeletal.GraphRuntimeAuthoritative = graphRuntimeActive;
+    if (graphRuntimeActive) {
+        ++animator.GraphEvaluationCount;
+        ++m_Statistics.GraphStateMachineEvaluations;
+    }
+
+    if (animator.MotionMatchingEnabled && !animator.MotionDatabaseId.empty()) {
+        Animation::MotionMatchingQuery motionQuery;
+        motionQuery.DatabaseId = animator.MotionDatabaseId;
+        motionQuery.CurrentPoseId = skeletal.SelectedMotionPoseId;
+        motionQuery.DesiredVelocity = {
+            animator.RootMotionDelta.x,
+            animator.RootMotionDelta.y,
+            animator.RootMotionDelta.z
+        };
+        motionQuery.MaxCandidates = 16;
+        motionQuery.QueryBudgetMs = 0.20f;
+
+        const Animation::MotionMatchingResult motionResult =
+            Animation::EvaluateMotionMatchingDatabase(motionQuery);
+        if (motionResult.Success && !motionResult.SelectedPoseId.empty()) {
+            skeletal.SelectedMotionPoseId = motionResult.SelectedPoseId;
+        }
+        if (motionResult.UsedFallback || !motionResult.Success) {
+            ++animator.LegacyFallbackCount;
+            ++m_Statistics.LegacyFallbackCount;
+        }
+    }
 
     if (skeletal.AnimationClipGeneration != skeletal.LastAnimationClipGeneration) {
         skeletal.LastAnimationClipGeneration = skeletal.AnimationClipGeneration;
@@ -463,7 +533,13 @@ bool AnimatorSystem::EvaluateStateMachine(AnimatorComponent& animator, float del
     // Sort by priority (already sorted in state machine, but ensure order)
     std::sort(transitions.begin(), transitions.end(),
         [](const AnimationTransition* a, const AnimationTransition* b) {
-            return a->Priority > b->Priority;
+            if (a->Priority != b->Priority) {
+                return a->Priority > b->Priority;
+            }
+            if (a->TargetState != b->TargetState) {
+                return a->TargetState < b->TargetState;
+            }
+            return a->SourceState < b->SourceState;
         });
 
     // Evaluate transitions

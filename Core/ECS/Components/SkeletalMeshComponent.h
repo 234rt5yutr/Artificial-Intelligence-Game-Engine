@@ -123,6 +123,7 @@ namespace ECS {
         // Animation settings
         bool AutoUpdate = true;          // Update animation in system
         bool RootMotionEnabled = false;  // Apply root bone motion to transform
+        bool GraphRuntimeAuthoritative = false; // AnimatorSystem owns local pose generation
 
         // Debug flags
         bool ShowSkeleton = false;       // Render skeleton for debugging
@@ -136,6 +137,13 @@ namespace ECS {
         uint64_t LastBoundGeneration = 0;
         uint64_t AnimationClipGeneration = 0;
         uint64_t LastAnimationClipGeneration = 0;
+
+        // Stage 25 runtime tracking
+        uint64_t MotionFeatureCacheHandle = 0;
+        std::string SelectedMotionPoseId;
+        uint64_t TrajectoryHistoryHandle = 0;
+        std::string ActiveRetargetProfileId;
+        std::string LastRetargetedClipName;
 
         // ========================================================================
         // Constructors

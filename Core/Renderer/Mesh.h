@@ -63,6 +63,7 @@ namespace Renderer {
         int32_t ParentIndex = -1;      // -1 for root bones
         Math::Mat4 InverseBindMatrix;  // Transforms from mesh space to bone space
         Math::Mat4 LocalTransform;     // Local transform relative to parent
+        std::string RoleTag;           // Optional semantic role (hip, foot_l, hand_r, etc.)
         
         // Children indices (for traversal)
         std::vector<int32_t> ChildrenIndices;
@@ -75,6 +76,7 @@ namespace Renderer {
         
         // Maps bone name to index for fast lookup
         std::unordered_map<std::string, int32_t> BoneNameToIndex;
+        std::unordered_map<std::string, int32_t> RoleToBoneIndex;
         
         // Root bone indices (bones with no parent)
         std::vector<int32_t> RootBoneIndices;
@@ -83,6 +85,11 @@ namespace Renderer {
         int32_t FindBoneIndex(const std::string& name) const {
             auto it = BoneNameToIndex.find(name);
             return (it != BoneNameToIndex.end()) ? it->second : -1;
+        }
+
+        int32_t FindBoneByRole(const std::string& roleTag) const {
+            auto it = RoleToBoneIndex.find(roleTag);
+            return (it != RoleToBoneIndex.end()) ? it->second : -1;
         }
 
         // Get total number of bones
@@ -276,6 +283,11 @@ namespace Renderer {
             default: return "Unknown";
         }
     }
+
+    std::vector<float> ExtractMotionFeatureVector(
+        const AnimationClip& clip,
+        float sampleTime,
+        uint32_t featureDimension = 8);
 
 } // namespace Renderer
 } // namespace Core

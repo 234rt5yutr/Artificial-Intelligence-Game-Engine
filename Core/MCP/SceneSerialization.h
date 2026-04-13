@@ -16,6 +16,9 @@
 #include "Core/ECS/Components/ColliderComponent.h"
 #include "Core/ECS/Components/RigidBodyComponent.h"
 #include "Core/ECS/Components/HierarchyComponent.h"
+#include "Core/ECS/Components/SkeletalMeshComponent.h"
+#include "Core/ECS/Components/AnimatorComponent.h"
+#include "Core/ECS/Components/IKComponent.h"
 #include "Core/ECS/Components/UIComponent.h"
 #include "Core/ECS/Components/WorldUIComponent.h"
 #include "Core/ECS/Components/PrefabInstanceComponent.h"
@@ -889,6 +892,186 @@ namespace MCP {
         return wui;
     }
 
+    inline Json SerializeSkeletalMesh(const ECS::SkeletalMeshComponent& skeletal) {
+        return {
+            {"meshPath", skeletal.MeshPath},
+            {"materialIndex", skeletal.MaterialIndex},
+            {"visible", skeletal.Visible},
+            {"castShadows", skeletal.CastShadows},
+            {"receiveShadows", skeletal.ReceiveShadows},
+            {"autoUpdate", skeletal.AutoUpdate},
+            {"rootMotionEnabled", skeletal.RootMotionEnabled},
+            {"graphRuntimeAuthoritative", skeletal.GraphRuntimeAuthoritative},
+            {"motionFeatureCacheHandle", skeletal.MotionFeatureCacheHandle},
+            {"selectedMotionPoseId", skeletal.SelectedMotionPoseId},
+            {"trajectoryHistoryHandle", skeletal.TrajectoryHistoryHandle},
+            {"activeRetargetProfileId", skeletal.ActiveRetargetProfileId},
+            {"lastRetargetedClipName", skeletal.LastRetargetedClipName}
+        };
+    }
+
+    inline ECS::SkeletalMeshComponent DeserializeSkeletalMesh(const Json& j) {
+        ECS::SkeletalMeshComponent skeletal;
+        skeletal.MeshPath = j.value("meshPath", std::string{});
+        skeletal.MaterialIndex = j.value("materialIndex", 0u);
+        skeletal.Visible = j.value("visible", true);
+        skeletal.CastShadows = j.value("castShadows", true);
+        skeletal.ReceiveShadows = j.value("receiveShadows", true);
+        skeletal.AutoUpdate = j.value("autoUpdate", true);
+        skeletal.RootMotionEnabled = j.value("rootMotionEnabled", false);
+        skeletal.GraphRuntimeAuthoritative = j.value("graphRuntimeAuthoritative", false);
+        skeletal.MotionFeatureCacheHandle = j.value("motionFeatureCacheHandle", 0ull);
+        skeletal.SelectedMotionPoseId = j.value("selectedMotionPoseId", std::string{});
+        skeletal.TrajectoryHistoryHandle = j.value("trajectoryHistoryHandle", 0ull);
+        skeletal.ActiveRetargetProfileId = j.value("activeRetargetProfileId", std::string{});
+        skeletal.LastRetargetedClipName = j.value("lastRetargetedClipName", std::string{});
+        return skeletal;
+    }
+
+    inline Json SerializeAnimator(const ECS::AnimatorComponent& animator) {
+        Json parameters = Json::object();
+        for (const auto& [name, value] : animator.Parameters) {
+            Json parameterJson = Json::object();
+            parameterJson["type"] = ECS::ParameterTypeToString(value.Type);
+            switch (value.Type) {
+                case ECS::AnimatorParameterType::Float:
+                    parameterJson["value"] = value.GetFloat();
+                    break;
+                case ECS::AnimatorParameterType::Bool:
+                    parameterJson["value"] = value.GetBool();
+                    break;
+                case ECS::AnimatorParameterType::Int:
+                    parameterJson["value"] = value.GetInt();
+                    break;
+                case ECS::AnimatorParameterType::Trigger:
+                    parameterJson["value"] = value.IsTriggerSet();
+                    break;
+            }
+            parameters[name] = std::move(parameterJson);
+        }
+
+        Json layers = Json::array();
+        for (const ECS::AnimationLayer& layer : animator.Layers) {
+            layers.push_back({
+                {"name", layer.Name},
+                {"index", layer.LayerIndex},
+                {"weight", layer.Weight},
+                {"isAdditive", layer.IsAdditive},
+                {"stateMachine", layer.StateMachineName},
+                {"currentState", layer.CurrentStateName},
+                {"currentTime", layer.CurrentTime},
+                {"affectedBones", layer.AffectedBones}
+            });
+        }
+
+        return {
+            {"stateMachine", animator.StateMachine.Name},
+            {"currentState", animator.RuntimeState.CurrentStateName},
+            {"currentStateTime", animator.RuntimeState.CurrentStateTime},
+            {"normalizedTime", animator.RuntimeState.NormalizedTime},
+            {"isPlaying", animator.RuntimeState.IsPlaying},
+            {"enabled", animator.Enabled},
+            {"updateRate", animator.UpdateRate},
+            {"runtimeMode", static_cast<uint32_t>(animator.RuntimeMode)},
+            {"activeGraphId", animator.ActiveGraphId},
+            {"activeBlendTreeId", animator.ActiveBlendTreeId},
+            {"motionDatabaseId", animator.MotionDatabaseId},
+            {"motionMatchingEnabled", animator.MotionMatchingEnabled},
+            {"graphEvaluationCount", animator.GraphEvaluationCount},
+            {"legacyFallbackCount", animator.LegacyFallbackCount},
+            {"orchestrationConflictCount", animator.OrchestrationConflictCount},
+            {"parameters", std::move(parameters)},
+            {"layers", std::move(layers)}
+        };
+    }
+
+    inline ECS::AnimatorComponent DeserializeAnimator(const Json& j) {
+        ECS::AnimatorComponent animator;
+        animator.Enabled = j.value("enabled", true);
+        animator.UpdateRate = j.value("updateRate", 0.0f);
+        animator.RuntimeState.CurrentStateName = j.value("currentState", std::string{});
+        animator.RuntimeState.CurrentStateTime = j.value("currentStateTime", 0.0f);
+        animator.RuntimeState.NormalizedTime = j.value("normalizedTime", 0.0f);
+        animator.RuntimeState.IsPlaying = j.value("isPlaying", true);
+        animator.RuntimeMode = static_cast<ECS::AnimatorRuntimeMode>(
+            j.value("runtimeMode", static_cast<uint32_t>(ECS::AnimatorRuntimeMode::Legacy)));
+        animator.ActiveGraphId = j.value("activeGraphId", std::string{});
+        animator.ActiveBlendTreeId = j.value("activeBlendTreeId", std::string{});
+        animator.MotionDatabaseId = j.value("motionDatabaseId", std::string{});
+        animator.MotionMatchingEnabled = j.value("motionMatchingEnabled", false);
+        animator.GraphEvaluationCount = j.value("graphEvaluationCount", 0ull);
+        animator.LegacyFallbackCount = j.value("legacyFallbackCount", 0ull);
+        animator.OrchestrationConflictCount = j.value("orchestrationConflictCount", 0ull);
+
+        const Json parameters = j.value("parameters", Json::object());
+        for (auto it = parameters.begin(); it != parameters.end(); ++it) {
+            const std::string paramName = it.key();
+            const Json& parameterJson = it.value();
+            const std::string type = parameterJson.value("type", "Float");
+            if (type == "Float") {
+                animator.Parameters[paramName] =
+                    ECS::AnimatorParameterValue::CreateFloat(parameterJson.value("value", 0.0f));
+            } else if (type == "Bool") {
+                animator.Parameters[paramName] =
+                    ECS::AnimatorParameterValue::CreateBool(parameterJson.value("value", false));
+            } else if (type == "Int") {
+                animator.Parameters[paramName] =
+                    ECS::AnimatorParameterValue::CreateInt(parameterJson.value("value", 0));
+            } else if (type == "Trigger") {
+                ECS::AnimatorParameterValue trigger = ECS::AnimatorParameterValue::CreateTrigger();
+                if (parameterJson.value("value", false)) {
+                    trigger.Value = true;
+                    trigger.TriggerConsumed = false;
+                }
+                animator.Parameters[paramName] = std::move(trigger);
+            }
+        }
+
+        const Json layers = j.value("layers", Json::array());
+        for (const Json& layerJson : layers) {
+            ECS::AnimationLayer layer;
+            layer.Name = layerJson.value("name", std::string{});
+            layer.LayerIndex = layerJson.value("index", 0);
+            layer.Weight = layerJson.value("weight", 1.0f);
+            layer.IsAdditive = layerJson.value("isAdditive", false);
+            layer.StateMachineName = layerJson.value("stateMachine", std::string{});
+            layer.CurrentStateName = layerJson.value("currentState", std::string{});
+            layer.CurrentTime = layerJson.value("currentTime", 0.0f);
+            layer.AffectedBones = layerJson.value("affectedBones", std::vector<std::string>{});
+            animator.Layers.push_back(std::move(layer));
+        }
+
+        return animator;
+    }
+
+    inline Json SerializeIK(const ECS::IKComponent& ik) {
+        return {
+            {"enabled", ik.Enabled},
+            {"globalWeight", ik.GlobalWeight},
+            {"footIKEnabled", ik.FootSettings.Enabled},
+            {"enableControlRigBake", ik.EnableControlRigBake},
+            {"capturePreBakePose", ik.CapturePreBakePose},
+            {"capturePostBakePose", ik.CapturePostBakePose},
+            {"controlRigAssetId", ik.ControlRigAssetId},
+            {"controlRigChannelBindings", ik.ControlRigChannelBindings},
+            {"lastBakedClipName", ik.LastBakedClipName}
+        };
+    }
+
+    inline ECS::IKComponent DeserializeIK(const Json& j) {
+        ECS::IKComponent ik;
+        ik.Enabled = j.value("enabled", true);
+        ik.GlobalWeight = j.value("globalWeight", 1.0f);
+        ik.FootSettings.Enabled = j.value("footIKEnabled", true);
+        ik.EnableControlRigBake = j.value("enableControlRigBake", false);
+        ik.CapturePreBakePose = j.value("capturePreBakePose", false);
+        ik.CapturePostBakePose = j.value("capturePostBakePose", false);
+        ik.ControlRigAssetId = j.value("controlRigAssetId", std::string{});
+        ik.ControlRigChannelBindings = j.value("controlRigChannelBindings", std::vector<std::string>{});
+        ik.LastBakedClipName = j.value("lastBakedClipName", std::string{});
+        return ik;
+    }
+
     inline Json SerializePrefabInstance(const ECS::PrefabInstanceComponent& prefabInstance) {
         return {
             {"prefabGuid", prefabInstance.PrefabGuid},
@@ -952,6 +1135,18 @@ namespace MCP {
 
         if (auto* mesh = registry.try_get<ECS::MeshComponent>(entity)) {
             components["mesh"] = SerializeMesh(*mesh);
+        }
+
+        if (auto* skeletal = registry.try_get<ECS::SkeletalMeshComponent>(entity)) {
+            components["skeletalMesh"] = SerializeSkeletalMesh(*skeletal);
+        }
+
+        if (auto* animator = registry.try_get<ECS::AnimatorComponent>(entity)) {
+            components["animator"] = SerializeAnimator(*animator);
+        }
+
+        if (auto* ik = registry.try_get<ECS::IKComponent>(entity)) {
+            components["ik"] = SerializeIK(*ik);
         }
 
         if (auto* camera = registry.try_get<ECS::CameraComponent>(entity)) {
@@ -1095,6 +1290,18 @@ namespace MCP {
             if (components.contains("mesh")) {
                 registry.emplace_or_replace<ECS::MeshComponent>(
                     entity, DeserializeMesh(components["mesh"]));
+            }
+            if (components.contains("skeletalMesh")) {
+                registry.emplace_or_replace<ECS::SkeletalMeshComponent>(
+                    entity, DeserializeSkeletalMesh(components["skeletalMesh"]));
+            }
+            if (components.contains("animator")) {
+                registry.emplace_or_replace<ECS::AnimatorComponent>(
+                    entity, DeserializeAnimator(components["animator"]));
+            }
+            if (components.contains("ik")) {
+                registry.emplace_or_replace<ECS::IKComponent>(
+                    entity, DeserializeIK(components["ik"]));
             }
             if (components.contains("camera")) {
                 registry.emplace_or_replace<ECS::CameraComponent>(

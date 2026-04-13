@@ -79,3 +79,6 @@ imgui.ini
 # Font atlas generated files
 *.atlas.json
 *.atlas.png
+
+# Research output reports
+modern_engine_missing_functions.md

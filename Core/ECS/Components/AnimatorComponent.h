@@ -5,7 +5,7 @@
 // Data-driven Animation State Machine for controlling skeletal animations
 // 
 // Features:
-// - Parameter system (Float, Bool, Trigger)
+// - Parameter system (Float, Bool, Int, Trigger)
 // - Animation states with speed/loop/events
 // - Conditional transitions with blending
 // - Factory methods for common presets (Locomotion)
@@ -45,6 +45,7 @@ namespace ECS {
     enum class AnimatorParameterType : uint8_t {
         Float = 0,      ///< Floating-point value (e.g., Speed, Direction)
         Bool,           ///< Boolean flag (e.g., IsGrounded, IsJumping)
+        Int,            ///< Integer value (e.g., enum-like stance/weapon state)
         Trigger         ///< One-shot trigger, auto-resets after consumption
     };
 
@@ -53,7 +54,7 @@ namespace ECS {
      * Uses std::variant for type-safe storage of different parameter types
      */
     struct AnimatorParameterValue {
-        std::variant<float, bool> Value;
+        std::variant<float, bool, int32_t> Value;
         AnimatorParameterType Type = AnimatorParameterType::Float;
         bool TriggerConsumed = false;  ///< For trigger type: marks if consumed this frame
 
@@ -72,6 +73,13 @@ namespace ECS {
             return param;
         }
 
+        static AnimatorParameterValue CreateInt(int32_t value) {
+            AnimatorParameterValue param;
+            param.Value = value;
+            param.Type = AnimatorParameterType::Int;
+            return param;
+        }
+
         static AnimatorParameterValue CreateTrigger() {
             AnimatorParameterValue param;
             param.Value = false;
@@ -87,6 +95,10 @@ namespace ECS {
 
         bool GetBool() const {
             return Type == AnimatorParameterType::Bool ? std::get<bool>(Value) : false;
+        }
+
+        int32_t GetInt() const {
+            return Type == AnimatorParameterType::Int ? std::get<int32_t>(Value) : 0;
         }
 
         bool IsTriggerSet() const {
@@ -117,6 +129,7 @@ namespace ECS {
         AnimatorParameterType Type = AnimatorParameterType::Float;
         float DefaultFloat = 0.0f;
         bool DefaultBool = false;
+        int32_t DefaultInt = 0;
 
         AnimatorParameterDefinition() = default;
         AnimatorParameterDefinition(const std::string& name, AnimatorParameterType type)
@@ -213,6 +226,18 @@ namespace ECS {
                         case ComparisonOp::Equal:    return value == BoolValue;
                         case ComparisonOp::NotEqual: return value != BoolValue;
                         default: return value == BoolValue;  // Default to equality check
+                    }
+                    break;
+                }
+                case AnimatorParameterType::Int: {
+                    const float value = static_cast<float>(param.GetInt());
+                    switch (Operator) {
+                        case ComparisonOp::Greater:      return value > Threshold;
+                        case ComparisonOp::Less:         return value < Threshold;
+                        case ComparisonOp::Equal:        return std::abs(value - Threshold) < 0.0001f;
+                        case ComparisonOp::NotEqual:     return std::abs(value - Threshold) >= 0.0001f;
+                        case ComparisonOp::GreaterEqual: return value >= Threshold;
+                        case ComparisonOp::LessEqual:    return value <= Threshold;
                     }
                     break;
                 }
@@ -1426,6 +1451,15 @@ namespace ECS {
             return *this;
         }
 
+        AnimationStateMachine& AddIntParameter(const std::string& name, int32_t defaultValue = 0) {
+            AnimatorParameterDefinition param;
+            param.Name = name;
+            param.Type = AnimatorParameterType::Int;
+            param.DefaultInt = defaultValue;
+            ParameterDefinitions.push_back(param);
+            return *this;
+        }
+
         /**
          * @brief Add a trigger parameter definition
          */
@@ -1520,6 +1554,12 @@ namespace ECS {
     // AnimatorComponent
     // ========================================================================
 
+    enum class AnimatorRuntimeMode : uint8_t {
+        Legacy = 0,
+        Hybrid,
+        Graph
+    };
+
     /**
      * @brief ECS component for animation state machine control
      * 
@@ -1562,6 +1602,16 @@ namespace ECS {
 
         // Runtime playback state
         AnimatorRuntimeState RuntimeState;
+
+        // Stage 25 runtime controls
+        AnimatorRuntimeMode RuntimeMode = AnimatorRuntimeMode::Legacy;
+        std::string ActiveGraphId;
+        std::string ActiveBlendTreeId;
+        std::string MotionDatabaseId;
+        bool MotionMatchingEnabled = false;
+        uint64_t GraphEvaluationCount = 0;
+        uint64_t LegacyFallbackCount = 0;
+        uint64_t OrchestrationConflictCount = 0;
         
         // Animation layers for layered blending
         std::vector<AnimationLayer> Layers;
@@ -1649,6 +1699,23 @@ namespace ECS {
             return false;
         }
 
+        bool SetInt(const std::string& name, int32_t value) {
+            auto it = Parameters.find(name);
+            if (it != Parameters.end() && it->second.Type == AnimatorParameterType::Int) {
+                it->second.Value = value;
+                return true;
+            }
+            return false;
+        }
+
+        int32_t GetInt(const std::string& name) const {
+            auto it = Parameters.find(name);
+            if (it != Parameters.end() && it->second.Type == AnimatorParameterType::Int) {
+                return it->second.GetInt();
+            }
+            return 0;
+        }
+
         /**
          * @brief Set a trigger parameter (will be consumed on next valid transition)
          * @param name Parameter name
@@ -1718,6 +1785,11 @@ namespace ECS {
         void AddBoolParameter(const std::string& name, bool defaultValue = false) {
             StateMachine.AddBoolParameter(name, defaultValue);
             Parameters[name] = AnimatorParameterValue::CreateBool(defaultValue);
+        }
+
+        void AddIntParameter(const std::string& name, int32_t defaultValue = 0) {
+            StateMachine.AddIntParameter(name, defaultValue);
+            Parameters[name] = AnimatorParameterValue::CreateInt(defaultValue);
         }
 
         /**
@@ -2120,6 +2192,9 @@ namespace ECS {
                     case AnimatorParameterType::Bool:
                         Parameters[def.Name] = AnimatorParameterValue::CreateBool(def.DefaultBool);
                         break;
+                    case AnimatorParameterType::Int:
+                        Parameters[def.Name] = AnimatorParameterValue::CreateInt(def.DefaultInt);
+                        break;
                     case AnimatorParameterType::Trigger:
                         Parameters[def.Name] = AnimatorParameterValue::CreateTrigger();
                         break;
@@ -2154,6 +2229,7 @@ namespace ECS {
         switch (type) {
             case AnimatorParameterType::Float:   return "Float";
             case AnimatorParameterType::Bool:    return "Bool";
+            case AnimatorParameterType::Int:     return "Int";
             case AnimatorParameterType::Trigger: return "Trigger";
             default:                             return "Unknown";
         }

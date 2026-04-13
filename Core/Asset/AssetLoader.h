@@ -62,6 +62,10 @@ namespace Asset {
         static LoadedStructuredAsset LoadSceneAsset(const std::filesystem::path& cookedPath);
         static LoadedStructuredAsset LoadWorldPartitionCellAsset(const std::filesystem::path& cookedPath);
         static LoadedStructuredAsset LoadHierarchicalLODAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadAnimationGraphAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadRetargetProfileAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadControlRigAsset(const std::filesystem::path& cookedPath);
+        static LoadedStructuredAsset LoadMotionDatabaseAsset(const std::filesystem::path& cookedPath);
         
         // Asynchronous loading
         static std::future<LoadedTexture> LoadTextureAsync(const std::filesystem::path& cookedPath);

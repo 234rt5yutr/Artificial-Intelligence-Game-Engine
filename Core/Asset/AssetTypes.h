@@ -34,7 +34,11 @@ namespace Asset {
         HierarchicalLOD = 15,
         AddressablesCatalog = 16,
         AssetBundle = 17,
-        AssetBundlePatch = 18
+        AssetBundlePatch = 18,
+        AnimationGraph = 19,
+        RetargetProfile = 20,
+        ControlRig = 21,
+        MotionDatabase = 22
     };
 
     // Texture-specific enums
@@ -184,6 +188,10 @@ namespace Asset {
             case AssetType::AddressablesCatalog: return "AddressablesCatalog";
             case AssetType::AssetBundle: return "AssetBundle";
             case AssetType::AssetBundlePatch: return "AssetBundlePatch";
+            case AssetType::AnimationGraph: return "AnimationGraph";
+            case AssetType::RetargetProfile: return "RetargetProfile";
+            case AssetType::ControlRig: return "ControlRig";
+            case AssetType::MotionDatabase: return "MotionDatabase";
             default: return "Unknown";
         }
     }

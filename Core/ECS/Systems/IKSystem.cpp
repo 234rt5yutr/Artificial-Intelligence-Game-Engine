@@ -44,6 +44,11 @@ void IKSystem::Shutdown() {
     ENGINE_CORE_INFO("IKSystem shutdown");
 }
 
+void IKSystem::ConfigureControlRigSolveStages(const bool capturePreBake, const bool capturePostBake) {
+    m_CapturePreBakeStage = capturePreBake;
+    m_CapturePostBakeStage = capturePostBake;
+}
+
 //=============================================================================
 // Update Methods
 //=============================================================================
@@ -52,6 +57,8 @@ void IKSystem::Update(Scene& scene, float deltaTime) {
     PROFILE_SCOPE("IKSystem::Update");
 
     m_Statistics.Reset();
+    m_PreBakeCaptureList.clear();
+    m_PostBakeCaptureList.clear();
 
     auto view = scene.View<IKComponent, SkeletalMeshComponent, TransformComponent>();
 
@@ -117,6 +124,10 @@ void IKSystem::ProcessEntity(entt::entity entity,
 
     m_Statistics.EntitiesProcessed++;
 
+    if (m_CapturePreBakeStage && ik.EnableControlRigBake && ik.CapturePreBakePose) {
+        m_PreBakeCaptureList.push_back(entity);
+    }
+
     // Process foot IK first (adjusts hip)
     if (ik.FootSettings.Enabled) {
         ProcessFootIK(ik, skeletal, transform, deltaTime);
@@ -139,6 +150,10 @@ void IKSystem::ProcessEntity(entt::entity entity,
 
         ProcessChain(chain, state, skeletal, transform, deltaTime);
         m_Statistics.ChainsEvaluated++;
+    }
+
+    if (m_CapturePostBakeStage && ik.EnableControlRigBake && ik.CapturePostBakePose) {
+        m_PostBakeCaptureList.push_back(entity);
     }
 }
 

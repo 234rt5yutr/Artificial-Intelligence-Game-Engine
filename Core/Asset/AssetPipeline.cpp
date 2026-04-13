@@ -422,6 +422,17 @@ namespace Asset {
         return m_Manifest.Save(path);
     }
 
+    void AssetPipeline::RegisterAssetDependencyByPath(const std::string& assetPath,
+                                                      const std::string& dependsOnPath) {
+        const uint64_t assetId = ComputeAssetId(assetPath);
+        const uint64_t dependsOnId = ComputeAssetId(dependsOnPath);
+        m_DependencyGraph.AddDependency(assetId, dependsOnId);
+    }
+
+    std::vector<uint64_t> AssetPipeline::GetAssetDependentsByPath(const std::string& assetPath) const {
+        return m_DependencyGraph.GetDependents(ComputeAssetId(assetPath));
+    }
+
     // AssetDatabase implementation
     AssetDatabase& AssetDatabase::Get() {
         static AssetDatabase instance;

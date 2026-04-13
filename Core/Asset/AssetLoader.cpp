@@ -385,6 +385,22 @@ namespace {
         return LoadStructuredAssetInternal(cookedPath, AssetType::HierarchicalLOD);
     }
 
+    LoadedStructuredAsset AssetLoader::LoadAnimationGraphAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::AnimationGraph);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadRetargetProfileAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::RetargetProfile);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadControlRigAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::ControlRig);
+    }
+
+    LoadedStructuredAsset AssetLoader::LoadMotionDatabaseAsset(const std::filesystem::path& cookedPath) {
+        return LoadStructuredAssetInternal(cookedPath, AssetType::MotionDatabase);
+    }
+
     std::future<LoadedTexture> AssetLoader::LoadTextureAsync(
         const std::filesystem::path& cookedPath) {
         return std::async(std::launch::async, [cookedPath]() {

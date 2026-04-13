@@ -289,6 +289,14 @@ namespace ECS {
         std::string HipBoneName = "Hips";    ///< Name of hip/pelvis bone
         int32_t HipBoneIndex = -1;           ///< Cached hip bone index
 
+        // Stage 25 control-rig integration flags
+        bool EnableControlRigBake = false;
+        bool CapturePreBakePose = false;
+        bool CapturePostBakePose = false;
+        std::string ControlRigAssetId;
+        std::vector<std::string> ControlRigChannelBindings;
+        std::string LastBakedClipName;
+
         // Initialization flag
         bool IsInitialized = false;
 

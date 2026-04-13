@@ -5,10 +5,50 @@
 #include <cgltf.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
 namespace Core {
 namespace Renderer {
+
+namespace {
+
+std::string ToLowerAscii(std::string value) {
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return value;
+}
+
+std::string InferBoneRoleTag(const std::string& boneName) {
+    const std::string lowered = ToLowerAscii(boneName);
+    if (lowered.find("hip") != std::string::npos || lowered.find("pelvis") != std::string::npos) {
+        return "hip";
+    }
+    if (lowered.find("spine") != std::string::npos) {
+        return "spine";
+    }
+    if (lowered.find("head") != std::string::npos) {
+        return "head";
+    }
+    if (lowered.find("left") != std::string::npos && lowered.find("foot") != std::string::npos) {
+        return "foot_l";
+    }
+    if (lowered.find("right") != std::string::npos && lowered.find("foot") != std::string::npos) {
+        return "foot_r";
+    }
+    if (lowered.find("left") != std::string::npos && lowered.find("hand") != std::string::npos) {
+        return "hand_l";
+    }
+    if (lowered.find("right") != std::string::npos && lowered.find("hand") != std::string::npos) {
+        return "hand_r";
+    }
+    return {};
+}
+
+} // namespace
 
 Mesh::Mesh() = default;
 Mesh::~Mesh() = default;
@@ -345,6 +385,7 @@ bool Mesh::LoadSkeletonFromGLTF(void* gltfData) {
 
         // Set inverse bind matrix
         bone.InverseBindMatrix = inverseBindMatrices[i];
+        bone.RoleTag = InferBoneRoleTag(bone.Name);
 
         // Calculate local transform from node
         if (jointNode->has_matrix) {
@@ -388,6 +429,9 @@ bool Mesh::LoadSkeletonFromGLTF(void* gltfData) {
 
         // Add to name lookup
         m_Skeleton.BoneNameToIndex[bone.Name] = static_cast<int32_t>(i);
+        if (!bone.RoleTag.empty() && m_Skeleton.RoleToBoneIndex.find(bone.RoleTag) == m_Skeleton.RoleToBoneIndex.end()) {
+            m_Skeleton.RoleToBoneIndex[bone.RoleTag] = static_cast<int32_t>(i);
+        }
     }
 
     // Build hierarchy (children indices and root bones)
@@ -549,6 +593,15 @@ bool Mesh::LoadAnimationsFromGLTF(void* gltfData) {
         }
 
         if (!clip.Channels.empty()) {
+            std::sort(
+                clip.Channels.begin(),
+                clip.Channels.end(),
+                [](const AnimationChannel& lhs, const AnimationChannel& rhs) {
+                    if (lhs.BoneIndex != rhs.BoneIndex) {
+                        return lhs.BoneIndex < rhs.BoneIndex;
+                    }
+                    return static_cast<uint8_t>(lhs.TargetPath) < static_cast<uint8_t>(rhs.TargetPath);
+                });
             ENGINE_CORE_INFO("  Loaded animation '{}': {} channels, {:.2f}s duration", 
                            clip.Name, clip.Channels.size(), clip.Duration);
             m_Animations.push_back(std::move(clip));
@@ -565,8 +618,13 @@ bool Mesh::LoadAnimationsFromGLTF(void* gltfData) {
 void Mesh::BuildBoneHierarchy() {
     // Clear existing hierarchy data
     m_Skeleton.RootBoneIndices.clear();
-    for (auto& bone : m_Skeleton.Bones) {
+    m_Skeleton.RoleToBoneIndex.clear();
+    for (size_t boneIndex = 0; boneIndex < m_Skeleton.Bones.size(); ++boneIndex) {
+        Bone& bone = m_Skeleton.Bones[boneIndex];
         bone.ChildrenIndices.clear();
+        if (!bone.RoleTag.empty() && m_Skeleton.RoleToBoneIndex.find(bone.RoleTag) == m_Skeleton.RoleToBoneIndex.end()) {
+            m_Skeleton.RoleToBoneIndex[bone.RoleTag] = static_cast<int32_t>(boneIndex);
+        }
     }
 
     // Build children lists and find roots
@@ -581,6 +639,65 @@ void Mesh::BuildBoneHierarchy() {
     }
 
     ENGINE_CORE_TRACE("Skeleton hierarchy built: {} root bones", m_Skeleton.RootBoneIndices.size());
+}
+
+std::vector<float> ExtractMotionFeatureVector(
+    const AnimationClip& clip,
+    const float sampleTime,
+    const uint32_t featureDimension) {
+    std::vector<float> features;
+    if (featureDimension == 0) {
+        return features;
+    }
+
+    features.resize(featureDimension, 0.0f);
+    const float duration = std::max(clip.Duration, 0.0001f);
+    const float normalizedTime = std::clamp(sampleTime / duration, 0.0f, 1.0f);
+
+    features[0] = normalizedTime;
+    if (featureDimension > 1) {
+        features[1] = static_cast<float>(clip.Channels.size());
+    }
+    if (featureDimension > 2) {
+        features[2] = clip.Loop ? 1.0f : 0.0f;
+    }
+    if (featureDimension > 3) {
+        features[3] = clip.TicksPerSecond;
+    }
+
+    uint32_t translationChannels = 0;
+    uint32_t rotationChannels = 0;
+    uint32_t scaleChannels = 0;
+    for (const AnimationChannel& channel : clip.Channels) {
+        switch (channel.TargetPath) {
+            case AnimationTargetPath::Translation:
+                ++translationChannels;
+                break;
+            case AnimationTargetPath::Rotation:
+                ++rotationChannels;
+                break;
+            case AnimationTargetPath::Scale:
+                ++scaleChannels;
+                break;
+            case AnimationTargetPath::Weights:
+                break;
+        }
+    }
+
+    if (featureDimension > 4) {
+        features[4] = static_cast<float>(translationChannels);
+    }
+    if (featureDimension > 5) {
+        features[5] = static_cast<float>(rotationChannels);
+    }
+    if (featureDimension > 6) {
+        features[6] = static_cast<float>(scaleChannels);
+    }
+    if (featureDimension > 7) {
+        features[7] = static_cast<float>(clip.Name.size());
+    }
+
+    return features;
 }
 
 } // namespace Renderer

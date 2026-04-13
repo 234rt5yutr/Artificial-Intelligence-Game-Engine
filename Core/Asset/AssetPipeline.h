@@ -95,6 +95,11 @@ namespace Asset {
         bool LoadManifest(const std::filesystem::path& path);
         bool SaveManifest(const std::filesystem::path& path) const;
 
+        // Stage 25 dependency helpers
+        void RegisterAssetDependencyByPath(const std::string& assetPath,
+                                           const std::string& dependsOnPath);
+        std::vector<uint64_t> GetAssetDependentsByPath(const std::string& assetPath) const;
+
     private:
         // Find appropriate cooker for file
         IAssetCooker* FindCooker(const std::filesystem::path& sourcePath);

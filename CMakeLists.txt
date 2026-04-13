@@ -93,6 +93,39 @@ add_library(EngineCore
     Core/RHI/Vulkan/VulkanPipelineState.cpp
     Core/Renderer/Mesh.h
     Core/Renderer/Mesh.cpp
+    Core/Animation/AnimationRuntimeTypes.h
+    Core/Animation/Graph/AnimationStateMachineGraph.h
+    Core/Animation/Graph/AnimationStateMachineGraph.cpp
+    Core/Animation/Graph/AnimationGraphValidator.h
+    Core/Animation/Graph/AnimationGraphValidator.cpp
+    Core/Animation/Blend/AnimationBlendTreeBuilder.h
+    Core/Animation/Blend/AnimationBlendTreeBuilder.cpp
+    Core/Animation/Blend/BlendTreeEvaluationCache.h
+    Core/Animation/Blend/BlendTreeEvaluationCache.cpp
+    Core/Animation/Parameters/AnimatorParameterChannel.h
+    Core/Animation/Parameters/AnimatorParameterChannel.cpp
+    Core/Animation/Events/AnimationEventSynchronizer.h
+    Core/Animation/Events/AnimationEventSynchronizer.cpp
+    Core/Animation/Retarget/RetargetTypes.h
+    Core/Animation/Retarget/RetargetProfile.h
+    Core/Animation/Retarget/RetargetProfile.cpp
+    Core/Animation/Retarget/AnimationRetargeter.h
+    Core/Animation/Retarget/AnimationRetargeter.cpp
+    Core/Animation/ControlRig/ControlRigTypes.h
+    Core/Animation/ControlRig/ControlRigRuntime.h
+    Core/Animation/ControlRig/ControlRigRuntime.cpp
+    Core/Animation/ControlRig/ControlRigBaker.h
+    Core/Animation/ControlRig/ControlRigBaker.cpp
+    Core/Animation/MotionMatching/MotionMatchingDatabase.h
+    Core/Animation/MotionMatching/MotionMatchingDatabase.cpp
+    Core/Animation/MotionMatching/PoseFeatureExtractor.h
+    Core/Animation/MotionMatching/PoseFeatureExtractor.cpp
+    Core/Animation/MotionMatching/MotionSearchIndex.h
+    Core/Animation/MotionMatching/MotionSearchIndex.cpp
+    Core/Animation/MotionMatching/TrajectoryPredictor.h
+    Core/Animation/MotionMatching/TrajectoryPredictor.cpp
+    Core/Animation/MotionMatching/MotionMatchingRuntime.h
+    Core/Animation/MotionMatching/MotionMatchingRuntime.cpp
     Core/Asset/AssetTypes.h
     Core/Asset/AssetCooker.h
     Core/Asset/AssetCooker.cpp
