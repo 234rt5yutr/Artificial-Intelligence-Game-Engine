@@ -3,12 +3,18 @@
 #include "Core/Asset/Bundles/AssetBundleMountService.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/Log.h"
+#include "Core/Renderer/Diagnostics/GPUFrameTraceService.h"
+#include "Core/Renderer/Upscaling/FrameGenerationController.h"
+#include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
+#include "Core/Renderer/VirtualGeometry/VirtualGeometryStreamingService.h"
 #include "Core/Window.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
+#include <algorithm>
+#include <deque>
 
 namespace Core {
 namespace UI {
@@ -538,8 +544,106 @@ void ImGuiSubsystem::RenderContentDeliveryPanel() {
                 }
             }
         }
+
+        RenderVirtualGeometryResidencySection();
+        if (m_Config.showUpscalingDiagnostics) {
+            RenderUpscalingDiagnosticsSection();
+        }
     }
     ImGui::End();
+}
+
+void ImGuiSubsystem::RenderVirtualGeometryResidencySection() {
+    ImGui::Spacing();
+    ImGui::Text("Virtual Geometry Residency");
+    ImGui::Separator();
+
+    const Renderer::VirtualGeometryStreamingDiagnostics virtualGeometryDiagnostics =
+        Renderer::GetVirtualGeometryStreamingDiagnostics();
+
+    ImGui::Text("Resident Pages: %u", virtualGeometryDiagnostics.ResidentPageCount);
+    ImGui::Text("Pending Requests: %u", virtualGeometryDiagnostics.PendingRequestCount);
+    ImGui::Text("Last Requested / Loaded: %u / %u",
+                virtualGeometryDiagnostics.LastRequestedCount,
+                virtualGeometryDiagnostics.LastLoadedCount);
+    ImGui::Text("Last Evicted / Failed: %u / %u",
+                virtualGeometryDiagnostics.LastEvictedCount,
+                virtualGeometryDiagnostics.LastFailedCount);
+
+    const float queuePressureDisplay = std::clamp(virtualGeometryDiagnostics.QueuePressure, 0.0f, 1.0f);
+    const float budgetSaturationDisplay = std::clamp(virtualGeometryDiagnostics.BudgetSaturation, 0.0f, 1.0f);
+
+    ImGui::Text("Queue Pressure");
+    ImGui::ProgressBar(queuePressureDisplay, ImVec2(-1.0f, 0.0f));
+    ImGui::Text("Budget Saturation");
+    ImGui::ProgressBar(budgetSaturationDisplay, ImVec2(-1.0f, 0.0f));
+
+    if (virtualGeometryDiagnostics.BudgetSaturated) {
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Budget saturation detected");
+    } else {
+        ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.3f, 1.0f), "Within stream budget");
+    }
+}
+
+void ImGuiSubsystem::RenderUpscalingDiagnosticsSection() {
+    const Renderer::TemporalUpscalerRuntimeState upscalerState =
+        Renderer::GetTemporalUpscalerManager().GetState();
+    const std::deque<Renderer::UpscalerPolicyTransitionEvent> transitionEvents =
+        Renderer::GetTemporalUpscalerManager().GetRecentTransitionEvents();
+    const Renderer::FrameGenerationResult frameGenerationState =
+        Renderer::GetFrameGenerationController().GetLastResult();
+    const std::deque<Renderer::GPUFrameTraceArtifact> traceArtifacts =
+        Renderer::GetGPUFrameTraceService().GetRecentArtifacts();
+
+    ImGui::Spacing();
+    ImGui::Text("Upscaling + Frame Generation");
+    ImGui::Separator();
+    ImGui::Text("Upscaler Backend: %s", Renderer::ToString(upscalerState.ActiveBackend));
+    ImGui::Text("Quality Preset: %s", Renderer::ToString(upscalerState.QualityPreset));
+    ImGui::Text("History Reset Pending: %s", upscalerState.HistoryResetPending ? "yes" : "no");
+    ImGui::Text("History Reset Serial: %llu", static_cast<unsigned long long>(upscalerState.HistoryResetSerial));
+
+    ImGui::Spacing();
+    ImGui::Text("Frame Generation");
+    ImGui::Separator();
+    ImGui::Text("Active: %s", frameGenerationState.Active ? "yes" : "no");
+    ImGui::Text("Added Latency: %.2f ms", frameGenerationState.AddedLatencyMs);
+    ImGui::Text("Effective Latency: %.2f ms", frameGenerationState.EffectiveLatencyMs);
+    if (frameGenerationState.FallbackUsed) {
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Fallback: %s",
+                           frameGenerationState.FallbackReason.c_str());
+    }
+
+    if (ImGui::CollapsingHeader("Policy Events", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const size_t eventStart =
+            transitionEvents.size() > 8 ? transitionEvents.size() - 8 : 0;
+        for (size_t index = eventStart; index < transitionEvents.size(); ++index) {
+            const Renderer::UpscalerPolicyTransitionEvent& eventRecord = transitionEvents[index];
+            ImGui::BulletText("#%llu frame %llu: %s -> %s",
+                              static_cast<unsigned long long>(eventRecord.EventId),
+                              static_cast<unsigned long long>(eventRecord.FrameIndex),
+                              Renderer::ToString(eventRecord.PreviousBackend),
+                              Renderer::ToString(eventRecord.NewBackend));
+            if (!eventRecord.FallbackReason.empty()) {
+                ImGui::TextWrapped("    fallback: %s", eventRecord.FallbackReason.c_str());
+            }
+            if (eventRecord.HistoryResetRequired) {
+                ImGui::TextWrapped("    history reset required");
+            }
+        }
+    }
+
+    if (ImGui::CollapsingHeader("GPU Frame Trace", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("Recent Captures: %zu", traceArtifacts.size());
+        if (!traceArtifacts.empty()) {
+            const Renderer::GPUFrameTraceArtifact& latest = traceArtifacts.back();
+            ImGui::Text("Latest: %s", latest.TraceCaptureId.c_str());
+            ImGui::Text("Passes: %zu, Resources: %zu", latest.Passes.size(), latest.Resources.size());
+            ImGui::Text("Markers: %u", latest.MarkerCount);
+            ImGui::TextWrapped("JSON: %s", latest.JsonArtifactPath.string().c_str());
+            ImGui::TextWrapped("TEXT: %s", latest.TextArtifactPath.string().c_str());
+        }
+    }
 }
 
 } // namespace UI

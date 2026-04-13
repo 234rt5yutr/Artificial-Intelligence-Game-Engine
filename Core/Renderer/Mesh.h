@@ -169,6 +169,16 @@ namespace Renderer {
         uint32_t materialIndex;
     };
 
+    struct VirtualGeometryAssociation {
+        bool Enabled = false;
+        bool Clusterized = false;
+        bool FallbackActive = false;
+        bool PagesResident = true;
+        uint64_t MetadataKey = 0;
+        uint32_t ClusterCount = 0;
+        uint32_t PageCount = 0;
+    };
+
     // ============================================================================
     // Mesh Class
     // ============================================================================
@@ -215,10 +225,26 @@ namespace Renderer {
         std::shared_ptr<RHI::RHIBuffer> indexBuffer;
         std::shared_ptr<RHI::RHIBuffer> boneBuffer;  // For bone matrices
 
+        // Virtual geometry metadata/hooks (Phase 24)
+        void SetVirtualGeometryAssociation(
+            uint64_t metadataKey,
+            uint32_t clusterCount,
+            uint32_t pageCount,
+            bool clusterized,
+            bool fallbackActive);
+        void SetVirtualGeometryPagesResident(bool pagesResident);
+        void SetVirtualGeometryFallbackActive(bool fallbackActive);
+        bool HasVirtualGeometry() const { return m_VirtualGeometry.Enabled; }
+        bool IsVirtualGeometryClusterized() const { return m_VirtualGeometry.Clusterized; }
+        bool AreVirtualGeometryPagesResident() const { return m_VirtualGeometry.PagesResident; }
+        bool UsesVirtualGeometryFallback() const { return m_VirtualGeometry.FallbackActive; }
+        const VirtualGeometryAssociation& GetVirtualGeometryAssociation() const { return m_VirtualGeometry; }
+
     private:
         bool m_IsSkeletal = false;
         Skeleton m_Skeleton;
         std::vector<AnimationClip> m_Animations;
+        VirtualGeometryAssociation m_VirtualGeometry;
 
         // Internal GLTF loading helpers
         bool LoadSkeletonFromGLTF(void* gltfData);

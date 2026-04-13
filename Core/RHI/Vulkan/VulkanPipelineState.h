@@ -12,7 +12,11 @@ namespace RHI {
     public:
         // Normally, a pipeline requires a pipeline layout and render pass.
         // We pass them directly here or through the descriptor if abstracted.
-        VulkanPipelineState(VulkanContext* context, const GraphicsPipelineDescriptor& desc, VkRenderPass renderPass, VkPipelineLayout pipelineLayout);
+        VulkanPipelineState(VulkanContext* context,
+                            const GraphicsPipelineDescriptor& desc,
+                            VkRenderPass renderPass,
+                            VkPipelineLayout pipelineLayout,
+                            VkPipelineCache pipelineCache = VK_NULL_HANDLE);
         ~VulkanPipelineState() override;
 
         VkPipeline GetPipeline() const { return m_Pipeline; }

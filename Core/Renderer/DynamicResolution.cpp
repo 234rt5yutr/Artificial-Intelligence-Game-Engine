@@ -154,6 +154,64 @@ namespace Renderer {
         }
     }
 
+    Result<void> DynamicResolutionSystem::SelectTemporalUpscalerFSR2(const TemporalUpscalerFSR2Config& config)
+    {
+        Result<void> result = GetTemporalUpscalerManager().SetTemporalUpscalerFSR2(config);
+        if (!result.Ok) {
+            m_LastUpscalerPolicyError = result.Error;
+            return result;
+        }
+
+        m_LastUpscalerPolicyError.clear();
+        m_SelectedTemporalUpscalerBackend = config.Enabled ? TemporalUpscalerBackend::FSR2 : TemporalUpscalerBackend::TAA;
+        m_Config.UpscaleMethod = config.Enabled ? DRSUpscaleMethod::FSR : DRSUpscaleMethod::TAA;
+        return Result<void>::Success();
+    }
+
+    Result<void> DynamicResolutionSystem::SelectTemporalUpscalerDLSS(const TemporalUpscalerDLSSConfig& config)
+    {
+        Result<void> result = GetTemporalUpscalerManager().SetTemporalUpscalerDLSS(config);
+        if (!result.Ok) {
+            m_LastUpscalerPolicyError = result.Error;
+            return result;
+        }
+
+        m_LastUpscalerPolicyError.clear();
+        m_SelectedTemporalUpscalerBackend = config.Enabled ? TemporalUpscalerBackend::DLSS : TemporalUpscalerBackend::TAA;
+        m_Config.UpscaleMethod = config.Enabled ? DRSUpscaleMethod::DLSS : DRSUpscaleMethod::TAA;
+        return Result<void>::Success();
+    }
+
+    Result<void> DynamicResolutionSystem::SelectTemporalUpscalerXeSS(const TemporalUpscalerXeSSConfig& config)
+    {
+        Result<void> result = GetTemporalUpscalerManager().SetTemporalUpscalerXeSS(config);
+        if (!result.Ok) {
+            m_LastUpscalerPolicyError = result.Error;
+            return result;
+        }
+
+        m_LastUpscalerPolicyError.clear();
+        m_SelectedTemporalUpscalerBackend = config.Enabled ? TemporalUpscalerBackend::XeSS : TemporalUpscalerBackend::TAA;
+        m_Config.UpscaleMethod = config.Enabled ? DRSUpscaleMethod::XeSS : DRSUpscaleMethod::TAA;
+        return Result<void>::Success();
+    }
+
+    Result<FrameGenerationResult> DynamicResolutionSystem::ConfigureFrameGeneration(const FrameGenerationConfig& config)
+    {
+        Result<FrameGenerationResult> result = GetFrameGenerationController().EnableFrameGeneration(config);
+        if (!result.Ok) {
+            m_LastFrameGenerationPolicyError = result.Error;
+            if (!result.Value.FallbackReason.empty()) {
+                m_LastFrameGenerationResult = result.Value;
+            }
+            return result;
+        }
+
+        m_LastFrameGenerationPolicyError.clear();
+        m_LastFrameGenerationResult = result.Value;
+        return result;
+    }
+
     //=========================================================================
     // Per-Frame Operations
     //=========================================================================
@@ -163,6 +221,8 @@ namespace Renderer {
         PROFILE_FUNCTION();
 
         m_FrameNumber++;
+        GetTemporalUpscalerManager().SetCurrentFrameIndex(m_FrameNumber);
+        GetFrameGenerationController().SetCurrentFrameIndex(m_FrameNumber);
         m_CurrentFrameData = FrameTimingData();
         m_CurrentFrameData.FrameNumber = m_FrameNumber;
         m_CurrentFrameData.Timestamp = std::chrono::steady_clock::now();

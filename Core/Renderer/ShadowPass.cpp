@@ -1,5 +1,6 @@
 #include "ShadowPass.h"
 #include "Core/Log.h"
+#include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Core {
@@ -58,6 +59,10 @@ namespace Renderer {
     }
 
     void ShadowPass::UpdateLightMatrix(const DirectionalLight& light, const glm::vec3& cameraPos, const glm::vec3& cameraDir) {
+        if (m_VirtualShadowFallback.useVirtualShadowCache && !m_VirtualShadowFallback.forceRasterShadowMap) {
+            return;
+        }
+
         // Orthographic projection bounds for the directional light
         float orthoSize = 25.0f;
         float nearPlane = -15.0f;
@@ -88,6 +93,17 @@ namespace Renderer {
                 m_LightSpaceBuffer->Unmap();
             }
         }
+    }
+
+    void ShadowPass::SetVirtualShadowFallbackDecision(const VirtualShadowFallbackDecision& decision) {
+        m_VirtualShadowFallback = decision;
+    }
+
+    bool ShadowPass::ShouldRenderRasterShadowMap() const {
+        if (m_VirtualShadowFallback.forceRasterShadowMap) {
+            return true;
+        }
+        return !m_VirtualShadowFallback.useVirtualShadowCache;
     }
 
 } // namespace Renderer

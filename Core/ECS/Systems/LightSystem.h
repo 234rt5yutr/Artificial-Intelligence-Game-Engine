@@ -39,6 +39,19 @@ namespace ECS {
         float _pad2;
     };
 
+    enum class LightQualityTier : uint8_t {
+        Low = 0,
+        Medium = 1,
+        High = 2
+    };
+
+    struct LightRoutingHint {
+        uint64_t CacheKey = 0;
+        LightQualityTier ShadowTier = LightQualityTier::Medium;
+        bool CastShadows = false;
+        bool PreferRTShadow = false;
+    };
+
     class LightSystem {
     public:
         LightSystem() = default;
@@ -54,6 +67,7 @@ namespace ECS {
 
         // Get Forward+ compatible point light data
         const std::vector<Renderer::PointLight>& GetForwardPlusLights() const { return m_ForwardPlusLights; }
+        const std::vector<LightRoutingHint>& GetLightRoutingHints() const { return m_LightRoutingHints; }
 
         // Statistics
         uint32_t GetDirectionalLightCount() const { return static_cast<uint32_t>(m_DirectionalLights.size()); }
@@ -66,6 +80,7 @@ namespace ECS {
         std::vector<PointLightData> m_PointLights;
         std::vector<SpotLightData> m_SpotLights;
         std::vector<Renderer::PointLight> m_ForwardPlusLights;
+        std::vector<LightRoutingHint> m_LightRoutingHints;
     };
 
 } // namespace ECS

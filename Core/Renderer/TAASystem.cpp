@@ -474,6 +474,26 @@ namespace Renderer {
         LOG_DEBUG("TAA history invalidated");
     }
 
+    void TAASystem::SetExternalTemporalUpscalerBackend(const TemporalUpscalerBackend backend, const bool forceHistoryReset)
+    {
+        if (m_ExternalUpscalerBackend == backend && !forceHistoryReset) {
+            return;
+        }
+
+        const TemporalUpscalerBackend previousBackend = m_ExternalUpscalerBackend;
+        m_ExternalUpscalerBackend = backend;
+
+        if (previousBackend != backend || forceHistoryReset) {
+            InvalidateHistory();
+            ++m_HistoryResetSerial;
+            m_LastHistoryResetReason = "UPSCALE_BACKEND_SWITCH_" + std::string(ToString(previousBackend)) +
+                                       "_TO_" + std::string(ToString(backend));
+            LOG_INFO("TAA history reset coordinated for backend transition: {} -> {}",
+                     ToString(previousBackend),
+                     ToString(backend));
+        }
+    }
+
     //=========================================================================
     // Render Passes
     //=========================================================================

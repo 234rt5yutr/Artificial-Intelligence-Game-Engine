@@ -1,7 +1,10 @@
 #pragma once
 
+#include "Core/RHI/PipelineCacheManager.h"
+
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <filesystem>
 #include <vector>
 #include <optional>
 #include <set>
@@ -51,6 +54,7 @@ namespace RHI {
         VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
         const std::vector<VkImageView>& GetSwapchainImageViews() const { return m_SwapchainImageViews; }
         VkRenderPass GetRenderPass() const { return m_RenderPass; }
+        VkPipelineCache GetPipelineCache() const { return m_PipelineCache; }
         
         VkCommandPool GetCommandPool() const { return m_CommandPool; }
         VkCommandPool GetTransferCommandPool() const { return m_TransferCommandPool; }
@@ -63,6 +67,19 @@ namespace RHI {
         VkShaderModule CreateShaderModule(const std::vector<uint32_t>& code);
         void DestroyShaderModule(VkShaderModule shaderModule);
 
+        void SetPipelineCacheMetadata(const PipelineCacheMetadata& metadata) { m_PipelineCacheMetadata = metadata; }
+        const PipelineCacheMetadata& GetPipelineCacheMetadata() const { return m_PipelineCacheMetadata; }
+        bool LoadPipelineCacheFromDisk(const std::filesystem::path& cacheBlobPath, const PipelineCacheMetadata& runtimeMetadata, std::string* reason);
+        bool SavePipelineCacheToDisk(const std::filesystem::path& cacheBlobPath, const PipelineCacheMetadata& metadata, std::string* reason) const;
+
+        void RecordPipelineWarmupResult(bool cacheHit);
+        uint64_t GetPipelineWarmupHitCount() const { return m_PipelineWarmupHits; }
+        uint64_t GetPipelineWarmupMissCount() const { return m_PipelineWarmupMisses; }
+
+        void SetFrameMarkerEnabled(bool enabled) { m_FrameMarkerEnabled = enabled; }
+        bool IsFrameMarkerEnabled() const { return m_FrameMarkerEnabled; }
+        void PushFrameMarker(const std::string& markerLabel) const;
+
         void RecreateSwapchain(uint32_t width, uint32_t height);
         void DrawFrame();
 
@@ -70,6 +87,7 @@ namespace RHI {
         void CreateRenderPass();
         void CreateGraphicsPipeline();
         void CreateFramebuffers();
+        void CreatePipelineCache();
 
         void CreateInstance();
         void SetupDebugMessenger();
@@ -113,6 +131,11 @@ namespace RHI {
         VkRenderPass m_RenderPass = VK_NULL_HANDLE;
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_GraphicsPipeline = VK_NULL_HANDLE;
+        VkPipelineCache m_PipelineCache = VK_NULL_HANDLE;
+        PipelineCacheMetadata m_PipelineCacheMetadata{};
+        bool m_FrameMarkerEnabled = false;
+        uint64_t m_PipelineWarmupHits = 0;
+        uint64_t m_PipelineWarmupMisses = 0;
 
         VkCommandPool m_CommandPool = VK_NULL_HANDLE;
         VkCommandPool m_TransferCommandPool = VK_NULL_HANDLE;

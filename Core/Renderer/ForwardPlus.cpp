@@ -1,7 +1,9 @@
 #include "ForwardPlus.h"
 #include "Core/RHI/RHIDevice.h"
+#include "Core/Renderer/RenderGraph/RenderGraphBuilder.h"
 #include "Core/Log.h"
 #include <cmath>
+#include <utility>
 
 namespace Core {
 namespace Renderer {
@@ -50,6 +52,28 @@ namespace Renderer {
         m_ClusterBuffer.reset();
         m_LightGridBuffer.reset();
         m_LightIndexListBuffer.reset();
+    }
+
+    Result<RenderGraphPassHandle> ForwardPlusLightData::RegisterRenderGraphPassHook() const {
+        RenderGraphPassRegistration registration{};
+        registration.PassId = "ForwardPlusLighting";
+        registration.PassName = "ForwardPlusLighting";
+        registration.DebugLabel = "Forward+ Light Culling";
+        registration.Queue = RenderGraphQueue::Compute;
+        registration.HasSideEffects = true;
+        registration.Callback = []() {};
+
+        RenderGraphResourceAccessDeclaration readDepth{};
+        readDepth.Resource = "SceneDepth";
+        readDepth.State = RenderGraphResourceState::DepthRead;
+        registration.Reads.push_back(std::move(readDepth));
+
+        RenderGraphResourceAccessDeclaration writeClusters{};
+        writeClusters.Resource = "ForwardPlusLightGrid";
+        writeClusters.State = RenderGraphResourceState::ShaderWrite;
+        registration.Writes.push_back(std::move(writeClusters));
+
+        return RegisterRenderGraphPass(registration);
     }
 
 } // namespace Renderer

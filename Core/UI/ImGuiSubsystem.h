@@ -32,6 +32,7 @@ namespace UI {
         bool showEntityInspector = false;
         bool showRenderStats = false;
         bool showContentDelivery = true;
+        bool showUpscalingDiagnostics = true;
         bool showDemoWindow = false;
         float overlayAlpha = 0.85f;
     };
@@ -119,6 +120,12 @@ namespace UI {
 
         /// @brief Render catalog/bundle/hot-reload diagnostics panel
         void RenderContentDeliveryPanel();
+
+        /// @brief Render virtual geometry residency diagnostics section
+        void RenderVirtualGeometryResidencySection();
+
+        /// @brief Render upscaler/frame generation/trace diagnostics section
+        void RenderUpscalingDiagnosticsSection();
 
     private:
         RHI::VulkanContext* m_VulkanContext = nullptr;

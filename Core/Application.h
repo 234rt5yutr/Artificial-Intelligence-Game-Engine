@@ -2,7 +2,9 @@
 
 #include "Core/Window.h"
 #include "Core/Event.h"
+#include <filesystem>
 #include <memory>
+#include <string>
 
 namespace Core {
     namespace RHI { class VulkanContext; }
@@ -10,6 +12,13 @@ namespace Core {
 
     class Application {
     public:
+        struct RuntimeOptions {
+            bool EnableStartupWarmupMode = false;
+            std::string PreferredUpscalerBackend;
+            bool CaptureStartupGPUTrace = false;
+            std::filesystem::path StartupTraceOutputPath;
+        };
+
         Application();
         virtual ~Application();
 
@@ -21,6 +30,8 @@ namespace Core {
         void Close();
         
         void OnEvent(Event& e);
+        static void SetRuntimeOptions(const RuntimeOptions& options);
+        static const RuntimeOptions& GetRuntimeOptions();
 
         static Application& Get() { return *s_Instance; }
         
@@ -35,9 +46,13 @@ namespace Core {
         bool OnWindowClose(WindowCloseEvent& e);
         bool OnWindowResize(WindowResizeEvent& e);
         bool OnKeyPress(KeyPressedEvent& e);
+        void ApplyRuntimeOptions();
+        void CaptureRuntimeTraceNow(const std::filesystem::path& outputPath, const std::string& frameTag);
 
     private:
         static Application* s_Instance;
+        static RuntimeOptions s_RuntimeOptions;
+        bool m_StartupTraceCapturePending = false;
     };
 
     // To be defined in the CLIENT to provide the specific application instance

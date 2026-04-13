@@ -3,6 +3,7 @@
 #include "Core/Math/Math.h"
 #include "Core/RHI/RHIBuffer.h"
 #include "Core/RHI/RHIDevice.h"
+#include "Core/Renderer/RenderGraph/RenderGraphTypes.h"
 #include <memory>
 #include <vector>
 
@@ -44,6 +45,7 @@ namespace Renderer {
 
         void Initialize(std::shared_ptr<RHI::RHIDevice> device, uint32_t screenWidth, uint32_t screenHeight);
         void Shutdown();
+        Result<RenderGraphPassHandle> RegisterRenderGraphPassHook() const;
 
         // Getters for buffers (to be implemented via RHI Device when fully wired)
         std::shared_ptr<RHI::RHIBuffer> GetLightBuffer() const { return m_LightBuffer; }

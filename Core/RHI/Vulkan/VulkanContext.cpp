@@ -4,12 +4,15 @@
 #include "Core/Assert.h"
 #include "Core/Window.h"
 #include "Core/UI/UIManager.h"
+#include "Core/RHI/PipelineCacheManager.h"
 #include "Core/RHI/ShaderCompiler.h"
 
 // SDL extensions support
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include <chrono>
+#include <fstream>
 #include <iostream>
 
 namespace Core {
@@ -63,6 +66,7 @@ namespace RHI {
         CreateSurface();
         PickPhysicalDevice();
         CreateLogicalDevice();
+        CreatePipelineCache();
         CreateAllocator();
         CreateCommandPool();
         CreateCommandBuffer();
@@ -140,6 +144,10 @@ namespace RHI {
             if (m_RenderPass != VK_NULL_HANDLE) {
                 vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
                 m_RenderPass = VK_NULL_HANDLE;
+            }
+            if (m_PipelineCache != VK_NULL_HANDLE) {
+                vkDestroyPipelineCache(m_Device, m_PipelineCache, nullptr);
+                m_PipelineCache = VK_NULL_HANDLE;
             }
 
             if (m_RenderFinishedSemaphore) {
@@ -671,6 +679,137 @@ namespace RHI {
             vkDestroyShaderModule(m_Device, shaderModule, nullptr);
         }
     }
+
+    bool VulkanContext::LoadPipelineCacheFromDisk(const std::filesystem::path& cacheBlobPath,
+                                                  const PipelineCacheMetadata& runtimeMetadata,
+                                                  std::string* reason) {
+        if (m_Device == VK_NULL_HANDLE) {
+            if (reason != nullptr) {
+                *reason = "device is not initialized";
+            }
+            return false;
+        }
+
+        std::filesystem::path metadataPath = cacheBlobPath;
+        metadataPath.replace_extension(".meta");
+        const auto metadataResult = PipelineCacheManager::LoadMetadata(metadataPath);
+        if (!metadataResult.Ok) {
+            if (reason != nullptr) {
+                *reason = metadataResult.Error;
+            }
+            CreatePipelineCache();
+            return false;
+        }
+
+        std::string invalidationReason;
+        if (PipelineCacheManager::ShouldInvalidate(metadataResult.Value, runtimeMetadata, &invalidationReason)) {
+            if (reason != nullptr) {
+                *reason = invalidationReason;
+            }
+            CreatePipelineCache();
+            return false;
+        }
+
+        const auto blobResult = PipelineCacheManager::LoadCacheBlob(cacheBlobPath);
+        if (!blobResult.Ok || blobResult.Value.empty()) {
+            if (reason != nullptr) {
+                *reason = blobResult.Ok ? "pipeline cache blob is empty" : blobResult.Error;
+            }
+            CreatePipelineCache();
+            return false;
+        }
+
+        if (m_PipelineCache != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(m_Device, m_PipelineCache, nullptr);
+            m_PipelineCache = VK_NULL_HANDLE;
+        }
+
+        VkPipelineCacheCreateInfo cacheCreateInfo{};
+        cacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        cacheCreateInfo.initialDataSize = blobResult.Value.size();
+        cacheCreateInfo.pInitialData = blobResult.Value.data();
+
+        if (vkCreatePipelineCache(m_Device, &cacheCreateInfo, nullptr, &m_PipelineCache) != VK_SUCCESS) {
+            if (reason != nullptr) {
+                *reason = "vkCreatePipelineCache failed for persisted blob";
+            }
+            CreatePipelineCache();
+            return false;
+        }
+
+        m_PipelineCacheMetadata = metadataResult.Value;
+        return true;
+    }
+
+    bool VulkanContext::SavePipelineCacheToDisk(const std::filesystem::path& cacheBlobPath,
+                                                const PipelineCacheMetadata& metadata,
+                                                std::string* reason) const {
+        if (m_Device == VK_NULL_HANDLE || m_PipelineCache == VK_NULL_HANDLE) {
+            if (reason != nullptr) {
+                *reason = "pipeline cache unavailable";
+            }
+            return false;
+        }
+
+        size_t cacheBlobSize = 0;
+        if (vkGetPipelineCacheData(m_Device, m_PipelineCache, &cacheBlobSize, nullptr) != VK_SUCCESS || cacheBlobSize == 0u) {
+            if (reason != nullptr) {
+                *reason = "vkGetPipelineCacheData failed to report size";
+            }
+            return false;
+        }
+
+        std::vector<uint8_t> cacheBlob(cacheBlobSize);
+        if (vkGetPipelineCacheData(m_Device, m_PipelineCache, &cacheBlobSize, cacheBlob.data()) != VK_SUCCESS) {
+            if (reason != nullptr) {
+                *reason = "vkGetPipelineCacheData failed to read data";
+            }
+            return false;
+        }
+
+        auto saveBlobResult = PipelineCacheManager::SaveCacheBlob(cacheBlobPath, cacheBlob);
+        if (!saveBlobResult.Ok) {
+            if (reason != nullptr) {
+                *reason = saveBlobResult.Error;
+            }
+            return false;
+        }
+
+        PipelineCacheMetadata persistedMetadata = metadata;
+        persistedMetadata.SchemaVersion = PipelineCacheManager::kSchemaVersion;
+        persistedMetadata.CacheBlobSizeBytes = static_cast<uint64_t>(cacheBlobSize);
+        persistedMetadata.LastUpdatedEpochSeconds = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+
+        std::filesystem::path metadataPath = cacheBlobPath;
+        metadataPath.replace_extension(".meta");
+        auto saveMetadataResult = PipelineCacheManager::SaveMetadata(metadataPath, persistedMetadata);
+        if (!saveMetadataResult.Ok) {
+            if (reason != nullptr) {
+                *reason = saveMetadataResult.Error;
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    void VulkanContext::RecordPipelineWarmupResult(bool cacheHit) {
+        if (cacheHit) {
+            ++m_PipelineWarmupHits;
+            return;
+        }
+        ++m_PipelineWarmupMisses;
+    }
+
+    void VulkanContext::PushFrameMarker(const std::string& markerLabel) const {
+        if (!m_FrameMarkerEnabled) {
+            return;
+        }
+        ENGINE_CORE_TRACE("FrameMarker: {0}", markerLabel);
+    }
+
     void VulkanContext::CreateRenderPass() {
         VkAttachmentDescription colorAttachment{};
         colorAttachment.format = m_SwapchainImageFormat;
@@ -710,6 +849,27 @@ namespace RHI {
 
         if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr, &m_RenderPass) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "failed to create render pass!");
+        }
+    }
+
+    void VulkanContext::CreatePipelineCache() {
+        if (m_Device == VK_NULL_HANDLE) {
+            return;
+        }
+
+        if (m_PipelineCache != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(m_Device, m_PipelineCache, nullptr);
+            m_PipelineCache = VK_NULL_HANDLE;
+        }
+
+        VkPipelineCacheCreateInfo cacheCreateInfo{};
+        cacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        cacheCreateInfo.initialDataSize = 0;
+        cacheCreateInfo.pInitialData = nullptr;
+
+        if (vkCreatePipelineCache(m_Device, &cacheCreateInfo, nullptr, &m_PipelineCache) != VK_SUCCESS) {
+            ENGINE_CORE_WARN("Failed to create Vulkan pipeline cache. Falling back to null cache handle.");
+            m_PipelineCache = VK_NULL_HANDLE;
         }
     }
 
@@ -833,9 +993,10 @@ namespace RHI {
         pipelineInfo.renderPass = m_RenderPass;
         pipelineInfo.subpass = 0;
 
-        if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline) != VK_SUCCESS) {
+        if (vkCreateGraphicsPipelines(m_Device, m_PipelineCache, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "failed to create graphics pipeline!");
         }
+        RecordPipelineWarmupResult(m_PipelineCache != VK_NULL_HANDLE);
 
         DestroyShaderModule(fragShaderModule);
         DestroyShaderModule(vertShaderModule);

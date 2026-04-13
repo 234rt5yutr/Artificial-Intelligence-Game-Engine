@@ -13,6 +13,29 @@ namespace Renderer {
 Mesh::Mesh() = default;
 Mesh::~Mesh() = default;
 
+void Mesh::SetVirtualGeometryAssociation(
+    const uint64_t metadataKey,
+    const uint32_t clusterCount,
+    const uint32_t pageCount,
+    const bool clusterized,
+    const bool fallbackActive) {
+    m_VirtualGeometry.Enabled = true;
+    m_VirtualGeometry.MetadataKey = metadataKey;
+    m_VirtualGeometry.ClusterCount = clusterCount;
+    m_VirtualGeometry.PageCount = pageCount;
+    m_VirtualGeometry.Clusterized = clusterized;
+    m_VirtualGeometry.FallbackActive = fallbackActive;
+    m_VirtualGeometry.PagesResident = !clusterized;
+}
+
+void Mesh::SetVirtualGeometryPagesResident(const bool pagesResident) {
+    m_VirtualGeometry.PagesResident = pagesResident;
+}
+
+void Mesh::SetVirtualGeometryFallbackActive(const bool fallbackActive) {
+    m_VirtualGeometry.FallbackActive = fallbackActive;
+}
+
 // ============================================================================
 // Static Mesh Loading
 // ============================================================================

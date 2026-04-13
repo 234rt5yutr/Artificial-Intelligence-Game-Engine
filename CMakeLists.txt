@@ -76,6 +76,10 @@ add_library(EngineCore
     Core/RHI/RHIPipelineState.h
     Core/RHI/ShaderCompiler.h
     Core/RHI/ShaderCompiler.cpp
+    Core/RHI/ShaderPermutationLibrary.h
+    Core/RHI/ShaderPermutationLibrary.cpp
+    Core/RHI/PipelineCacheManager.h
+    Core/RHI/PipelineCacheManager.cpp
     Core/RHI/RHIResourceUploader.h
     Core/RHI/Vulkan/VulkanBuffer.h
     Core/RHI/Vulkan/VulkanBuffer.cpp
@@ -149,16 +153,44 @@ add_library(EngineCore
     Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
     Core/Renderer/ZPrepass.cpp
+    Core/Renderer/RenderGraph/RenderGraphTypes.h
+    Core/Renderer/RenderGraph/RenderGraphBuilder.h
+    Core/Renderer/RenderGraph/RenderGraphBuilder.cpp
+    Core/Renderer/RenderGraph/RenderGraphExecutor.h
+    Core/Renderer/RenderGraph/RenderGraphExecutor.cpp
+    Core/Renderer/RenderGraph/TransientResourceAllocator.h
+    Core/Renderer/RenderGraph/TransientResourceAllocator.cpp
     Core/Renderer/ShadowPass.h
     Core/Renderer/ShadowPass.cpp
+    Core/Renderer/RTShadowPass.h
+    Core/Renderer/RTShadowPass.cpp
+    Core/Renderer/RTReflectionPass.h
+    Core/Renderer/RTReflectionPass.cpp
+    Core/Renderer/GlobalIllumination.h
+    Core/Renderer/GlobalIllumination.cpp
+    Core/Renderer/RayTracingManager.h
+    Core/Renderer/RayTracingManager.cpp
+    Core/Renderer/VirtualShadows/VirtualShadowMapCache.h
+    Core/Renderer/VirtualShadows/VirtualShadowMapCache.cpp
     Core/Renderer/FrustumCulling.h
     Core/Renderer/FrustumCulling.cpp
     Core/Renderer/TAASystem.h
     Core/Renderer/TAASystem.cpp
     Core/Renderer/DynamicResolution.h
     Core/Renderer/DynamicResolution.cpp
+    Core/Renderer/Upscaling/TemporalUpscalerManager.h
+    Core/Renderer/Upscaling/TemporalUpscalerManager.cpp
+    Core/Renderer/Upscaling/FrameGenerationController.h
+    Core/Renderer/Upscaling/FrameGenerationController.cpp
+    Core/Renderer/Diagnostics/GPUFrameTraceService.h
+    Core/Renderer/Diagnostics/GPUFrameTraceService.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
+    Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
+    Core/Renderer/VirtualGeometry/VirtualGeometryClusterBuilder.h
+    Core/Renderer/VirtualGeometry/VirtualGeometryClusterBuilder.cpp
+    Core/Renderer/VirtualGeometry/VirtualGeometryStreamingService.h
+    Core/Renderer/VirtualGeometry/VirtualGeometryStreamingService.cpp
     Core/ECS/Scene.h
     Core/ECS/Scene.cpp
     Core/ECS/Entity.h

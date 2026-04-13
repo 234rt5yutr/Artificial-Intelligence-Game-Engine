@@ -5,6 +5,7 @@
 #include "Core/RHI/RHICommandList.h"
 #include "Core/RHI/RHITexture.h"
 #include "Core/RHI/RHIPipelineState.h"
+#include "Core/Renderer/RenderGraph/RenderGraphTypes.h"
 #include <memory>
 #include <vector>
 
@@ -23,6 +24,7 @@ namespace Renderer {
 
         void BeginPass(std::shared_ptr<RHI::RHICommandList> commandList);
         void EndPass(std::shared_ptr<RHI::RHICommandList> commandList);
+        Result<RenderGraphPassHandle> RegisterRenderGraphPassHook() const;
 
         std::shared_ptr<RHI::RHITexture> GetDepthTexture() const { return m_DepthTexture; }
         std::shared_ptr<RHI::RHIRenderPass> GetRenderPass() const { return m_RenderPass; }

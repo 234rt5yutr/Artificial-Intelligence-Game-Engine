@@ -20,7 +20,9 @@ namespace ECS {
         const Renderer::Mesh* Mesh;     // 8 bytes
         uint32_t MaterialIndex;         // 4 bytes
         bool CastShadows;               // 1 byte
-        uint8_t Padding[3];             // 3 bytes padding
+        bool VirtualGeometryFallback;   // 1 byte
+        bool VirtualPagesUnavailable;   // 1 byte
+        uint8_t Padding;                // 1 byte padding
     };
     static_assert(sizeof(DrawCommand) == 80, "DrawCommand size check");
 

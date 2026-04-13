@@ -317,26 +317,31 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 24: Render Graph, Virtualized Geometry & Advanced Upscaling (Weeks 63-67)
 
-* [ ] Step 24.1: Move pass scheduling to an explicit render graph architecture.
-  * [ ] Sub-step 24.1.1: Implement `RegisterRenderGraphPass()` for declarative pass resources, barriers, and dependencies. (v0.24.1.1)
-  * [ ] Sub-step 24.1.2: Implement `ExecuteRenderGraph()` with topological scheduling and transient resource aliasing. (v0.24.1.2)
-* [ ] Step 24.2: Build virtualized geometry streaming path (Nanite-class capability target).
-  * [ ] Sub-step 24.2.1: Implement `BuildVirtualizedGeometryClusters()` from imported mesh topology and material partitions. (v0.24.2.1)
-  * [ ] Sub-step 24.2.2: Implement `StreamVirtualGeometryPages()` with camera-driven residency management. (v0.24.2.2)
-* [ ] Step 24.3: Add modern shadow/GI and hardware RT fallback hierarchy.
-  * [ ] Sub-step 24.3.1: Implement `BuildVirtualShadowMapCache()` for high-density shadow page reuse. (v0.24.3.1)
-  * [ ] Sub-step 24.3.2: Implement `ComputeDynamicGlobalIllumination()` with hybrid SSGI/RT pathways. (v0.24.3.2)
-  * [ ] Sub-step 24.3.3: Implement `TraceHardwareReflections()` with denoise and fallback blending. (v0.24.3.3)
-  * [ ] Sub-step 24.3.4: Implement `TraceHardwareShadows()` with per-light quality tiers. (v0.24.3.4)
-* [ ] Step 24.4: Harden shader compilation and runtime warmup behavior.
-  * [ ] Sub-step 24.4.1: Implement `CompileShaderPermutationLibrary()` for platform/material feature matrices. (v0.24.4.1)
-  * [ ] Sub-step 24.4.2: Implement `WarmupPipelineCache()` to reduce runtime hitching. (v0.24.4.2)
-* [ ] Step 24.5: Add modern temporal upscaling + frame generation controls.
-  * [ ] Sub-step 24.5.1: Implement `SetTemporalUpscalerFSR2()` integration path and quality presets. (v0.24.5.1)
-  * [ ] Sub-step 24.5.2: Implement `SetTemporalUpscalerDLSS()` integration path and quality presets. (v0.24.5.2)
-  * [ ] Sub-step 24.5.3: Implement `SetTemporalUpscalerXeSS()` integration path and quality presets. (v0.24.5.3)
-  * [ ] Sub-step 24.5.4: Implement `EnableFrameGeneration()` with input-latency guardrails and fallback modes. (v0.24.5.4)
-  * [ ] Sub-step 24.5.5: Implement `CaptureGPUFrameTrace()` for graphics diagnostics and regression triage. (v0.24.5.5)
+* [x] Step 24.1: Move pass scheduling to an explicit render graph architecture.
+  * [x] Sub-step 24.1.1: Implement `RegisterRenderGraphPass()` for declarative pass resources, barriers, and dependencies. (v0.24.1.1)
+  * [x] Sub-step 24.1.2: Implement `ExecuteRenderGraph()` with topological scheduling and transient resource aliasing. (v0.24.1.2)
+  * [x] Sub-step 24.1.3: Graph validation tooling + diagnostics export for scheduling/resource hazard visibility. (v0.24.1.3)
+* [x] Step 24.2: Build virtualized geometry streaming path (Nanite-class capability target).
+  * [x] Sub-step 24.2.1: Implement `BuildVirtualizedGeometryClusters()` from imported mesh topology and material partitions. (v0.24.2.1)
+  * [x] Sub-step 24.2.2: Implement `StreamVirtualGeometryPages()` with camera-driven residency management. (v0.24.2.2)
+  * [x] Sub-step 24.2.3: Residency telemetry + failure recovery for virtual geometry streaming. (v0.24.2.3)
+* [x] Step 24.3: Add modern shadow/GI and hardware RT fallback hierarchy.
+  * [x] Sub-step 24.3.1: Implement `BuildVirtualShadowMapCache()` for high-density shadow page reuse. (v0.24.3.1)
+  * [x] Sub-step 24.3.2: Implement `ComputeDynamicGlobalIllumination()` with hybrid SSGI/RT pathways. (v0.24.3.2)
+  * [x] Sub-step 24.3.3: Implement `TraceHardwareReflections()` with denoise and fallback blending. (v0.24.3.3)
+  * [x] Sub-step 24.3.4: Implement `TraceHardwareShadows()` with per-light quality tiers. (v0.24.3.4)
+  * [x] Sub-step 24.3.5: Unified hybrid lighting policy governor with deterministic downgrade order. (v0.24.3.5)
+* [x] Step 24.4: Harden shader compilation and runtime warmup behavior.
+  * [x] Sub-step 24.4.1: Implement `CompileShaderPermutationLibrary()` for platform/material feature matrices. (v0.24.4.1)
+  * [x] Sub-step 24.4.2: Implement `WarmupPipelineCache()` to reduce runtime hitching. (v0.24.4.2)
+  * [x] Sub-step 24.4.3: Pipeline cache persistence + invalidation policy tied to device/driver/shader digest. (v0.24.4.3)
+* [x] Step 24.5: Add modern temporal upscaling + frame generation controls.
+  * [x] Sub-step 24.5.1: Implement `SetTemporalUpscalerFSR2()` integration path and quality presets. (v0.24.5.1)
+  * [x] Sub-step 24.5.2: Implement `SetTemporalUpscalerDLSS()` integration path and quality presets. (v0.24.5.2)
+  * [x] Sub-step 24.5.3: Implement `SetTemporalUpscalerXeSS()` integration path and quality presets. (v0.24.5.3)
+  * [x] Sub-step 24.5.4: Implement `EnableFrameGeneration()` with input-latency guardrails and fallback modes. (v0.24.5.4)
+  * [x] Sub-step 24.5.5: Implement `CaptureGPUFrameTrace()` for graphics diagnostics and regression triage. (v0.24.5.5)
+  * [x] Sub-step 24.5.6: Runtime upscaler/frame-generation policy coordination with deterministic transition events. (v0.24.5.6)
 
 ## Phase 25: Animation Runtime 2.0, Rig Retargeting & Motion Matching (Weeks 68-71)
 

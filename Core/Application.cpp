@@ -4,6 +4,8 @@
 #include "Core/Profile.h"
 #include "Core/Assert.h"
 #include "Core/Input.h"
+#include "Core/Renderer/Diagnostics/GPUFrameTraceService.h"
+#include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
 #include "Core/UI/UIManager.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include <thread>
@@ -12,6 +14,15 @@
 namespace Core {
 
     Application* Application::s_Instance = nullptr;
+    Application::RuntimeOptions Application::s_RuntimeOptions{};
+
+    void Application::SetRuntimeOptions(const RuntimeOptions& options) {
+        s_RuntimeOptions = options;
+    }
+
+    const Application::RuntimeOptions& Application::GetRuntimeOptions() {
+        return s_RuntimeOptions;
+    }
 
     Application::Application() {
         PROFILE_FUNCTION();
@@ -38,6 +49,8 @@ namespace Core {
             UI::UIManager::Get().GetImGui().GetConfig().showDemoWindow = true;
             UI::UIManager::Get().GetImGui().GetConfig().showRenderStats = true;
         }
+
+        ApplyRuntimeOptions();
     }
 
     Application::~Application() {
@@ -67,6 +80,13 @@ namespace Core {
             auto& uiManager = UI::UIManager::Get();
             uiManager.BeginFrame();
             uiManager.Update(deltaTime);
+
+            if (m_StartupTraceCapturePending) {
+                CaptureRuntimeTraceNow(
+                    s_RuntimeOptions.StartupTraceOutputPath.empty() ? std::filesystem::path("build/diagnostics") : s_RuntimeOptions.StartupTraceOutputPath,
+                    "startup");
+                m_StartupTraceCapturePending = false;
+            }
 
             if (m_VulkanContext) {
                 m_VulkanContext->DrawFrame();
@@ -108,6 +128,11 @@ namespace Core {
             return false;
         }
 
+        if (e.GetKeyCode() == SDLK_F9) {
+            CaptureRuntimeTraceNow(std::filesystem::path("build/diagnostics"), "manual-hotkey");
+            return true;
+        }
+
         // Use the native input polling if you want, but since we get the event:
         // We'll close the app when Escape is pressed.
         // SDL3 defines SDLK_ESCAPE.
@@ -116,6 +141,58 @@ namespace Core {
             return true;
         }
         return false;
+    }
+
+    void Application::ApplyRuntimeOptions() {
+        if (m_VulkanContext == nullptr) {
+            return;
+        }
+
+        Renderer::GetGPUFrameTraceService().SetVulkanContext(m_VulkanContext.get());
+
+        if (s_RuntimeOptions.EnableStartupWarmupMode) {
+            m_VulkanContext->SetFrameMarkerEnabled(true);
+            ENGINE_CORE_INFO("Startup warmup mode enabled");
+        }
+
+        const std::string preferred = s_RuntimeOptions.PreferredUpscalerBackend;
+        if (preferred == "fsr2") {
+            Renderer::TemporalUpscalerFSR2Config config{};
+            config.Enabled = true;
+            config.RuntimeFeatureEnabled = true;
+            config.BackendAvailable = true;
+            (void)Renderer::GetTemporalUpscalerManager().SetTemporalUpscalerFSR2(config);
+        } else if (preferred == "dlss") {
+            Renderer::TemporalUpscalerDLSSConfig config{};
+            config.Enabled = true;
+            config.RuntimeFeatureEnabled = true;
+            config.BackendAvailable = true;
+            (void)Renderer::GetTemporalUpscalerManager().SetTemporalUpscalerDLSS(config);
+        } else if (preferred == "xess") {
+            Renderer::TemporalUpscalerXeSSConfig config{};
+            config.Enabled = true;
+            config.RuntimeFeatureEnabled = true;
+            config.BackendAvailable = true;
+            (void)Renderer::GetTemporalUpscalerManager().SetTemporalUpscalerXeSS(config);
+        }
+
+        m_StartupTraceCapturePending = s_RuntimeOptions.CaptureStartupGPUTrace;
+    }
+
+    void Application::CaptureRuntimeTraceNow(const std::filesystem::path& outputPath, const std::string& frameTag) {
+        Renderer::GPUFrameTraceRequest request{};
+        request.FrameCount = 1;
+        request.IncludeMarkers = true;
+        request.IncludePipelineStats = true;
+        request.OutputPath = outputPath;
+        request.FrameTag = frameTag;
+
+        const auto captureResult = Renderer::GetGPUFrameTraceService().CaptureGPUFrameTrace(request);
+        if (!captureResult.Ok) {
+            ENGINE_CORE_WARN("GPU frame trace capture failed: {}", captureResult.Error);
+            return;
+        }
+        ENGINE_CORE_INFO("GPU frame trace captured: {}", captureResult.Value.JsonArtifactPath.string());
     }
 
 } // namespace Core

@@ -37,7 +37,11 @@ namespace RHI {
         }
     }
 
-    VulkanPipelineState::VulkanPipelineState(VulkanContext* context, const GraphicsPipelineDescriptor& desc, VkRenderPass renderPass, VkPipelineLayout pipelineLayout)
+    VulkanPipelineState::VulkanPipelineState(VulkanContext* context,
+                                             const GraphicsPipelineDescriptor& desc,
+                                             VkRenderPass renderPass,
+                                             VkPipelineLayout pipelineLayout,
+                                             VkPipelineCache pipelineCache)
         : m_Context(context) {
 
         std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
@@ -55,6 +59,10 @@ namespace RHI {
                 stageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
             } else if (shaderDesc.stage == ShaderStage::Compute) {
                 stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+            } else if (shaderDesc.stage == ShaderStage::Geometry) {
+                stageInfo.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+            } else if (shaderDesc.stage == ShaderStage::Tessellation) {
+                stageInfo.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
             }
             stageInfo.module = module;
             stageInfo.pName = shaderDesc.entryPoint;
@@ -171,9 +179,10 @@ namespace RHI {
         pipelineInfo.renderPass = renderPass;
         pipelineInfo.subpass = 0;
 
-        if (vkCreateGraphicsPipelines(m_Context->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
+        if (vkCreateGraphicsPipelines(m_Context->GetDevice(), pipelineCache, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "Failed to create graphics pipeline!");
         }
+        m_Context->RecordPipelineWarmupResult(pipelineCache != VK_NULL_HANDLE);
 
         for (VkShaderModule module : modulesToDestroy) {
             vkDestroyShaderModule(m_Context->GetDevice(), module, nullptr);

@@ -5,9 +5,11 @@
 #include "Core/RHI/RHITexture.h"
 #include "Core/RHI/RHIDevice.h"
 #include "Core/RHI/RHICommandList.h"
+#include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
 #include <memory>
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace Core {
 namespace Renderer {
@@ -240,6 +242,12 @@ namespace Renderer {
         // Reset history (call after camera cut or teleport)
         void InvalidateHistory();
 
+        // External temporal upscaler integration hooks
+        void SetExternalTemporalUpscalerBackend(TemporalUpscalerBackend backend, bool forceHistoryReset = true);
+        TemporalUpscalerBackend GetExternalTemporalUpscalerBackend() const { return m_ExternalUpscalerBackend; }
+        uint64_t GetHistoryResetSerial() const { return m_HistoryResetSerial; }
+        const std::string& GetLastHistoryResetReason() const { return m_LastHistoryResetReason; }
+
     private:
         void CreateTextures();
         void CreateBuffers();
@@ -285,6 +293,11 @@ namespace Renderer {
 
         // TAA parameters
         TAAParams m_Params;
+
+        // External upscaler policy coordination
+        TemporalUpscalerBackend m_ExternalUpscalerBackend = TemporalUpscalerBackend::TAA;
+        uint64_t m_HistoryResetSerial = 0;
+        std::string m_LastHistoryResetReason;
     };
 
 } // namespace Renderer

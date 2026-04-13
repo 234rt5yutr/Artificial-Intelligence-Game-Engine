@@ -10,7 +10,9 @@ namespace RHI {
     enum class ShaderStage {
         Vertex,
         Fragment,
-        Compute
+        Compute,
+        Geometry,
+        Tessellation
     };
 
     struct ShaderBytecode {

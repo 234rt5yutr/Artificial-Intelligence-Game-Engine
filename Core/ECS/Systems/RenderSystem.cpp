@@ -43,6 +43,14 @@ namespace ECS {
             cmd.Transform = transform.WorldMatrix;
             cmd.MaterialIndex = mesh.MaterialIndex;
             cmd.CastShadows = mesh.CastShadows;
+            cmd.VirtualPagesUnavailable = false;
+            cmd.VirtualGeometryFallback = false;
+
+            if (cmd.Mesh->HasVirtualGeometry()) {
+                cmd.VirtualPagesUnavailable = !cmd.Mesh->AreVirtualGeometryPagesResident();
+                cmd.VirtualGeometryFallback =
+                    cmd.Mesh->UsesVirtualGeometryFallback() || cmd.VirtualPagesUnavailable;
+            }
 
             m_DrawCommands.push_back(cmd);
             m_VisibleEntityCount++;
@@ -112,6 +120,14 @@ namespace ECS {
             cmd.Transform = transform.WorldMatrix;
             cmd.MaterialIndex = mesh.MaterialIndex;
             cmd.CastShadows = mesh.CastShadows;
+            cmd.VirtualPagesUnavailable = false;
+            cmd.VirtualGeometryFallback = false;
+
+            if (cmd.Mesh->HasVirtualGeometry()) {
+                cmd.VirtualPagesUnavailable = !cmd.Mesh->AreVirtualGeometryPagesResident();
+                cmd.VirtualGeometryFallback =
+                    cmd.Mesh->UsesVirtualGeometryFallback() || cmd.VirtualPagesUnavailable;
+            }
 
             auto& localCommands = m_ThreadLocalCommands.Get();
             localCommands.push_back(cmd);

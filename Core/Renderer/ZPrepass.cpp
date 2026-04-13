@@ -1,5 +1,7 @@
 #include "ZPrepass.h"
 #include "Core/Log.h"
+#include "Core/Renderer/RenderGraph/RenderGraphBuilder.h"
+#include <utility>
 
 namespace Core {
 namespace Renderer {
@@ -66,6 +68,23 @@ namespace Renderer {
         if (m_RenderPass && commandList) {
             commandList->EndRenderPass();
         }
+    }
+
+    Result<RenderGraphPassHandle> ZPrepass::RegisterRenderGraphPassHook() const {
+        RenderGraphPassRegistration registration{};
+        registration.PassId = "ZPrepass";
+        registration.PassName = "ZPrepass";
+        registration.DebugLabel = "Depth Prepass";
+        registration.Queue = RenderGraphQueue::Graphics;
+        registration.Callback = []() {};
+
+        RenderGraphResourceAccessDeclaration depthWrite{};
+        depthWrite.Resource = "SceneDepth";
+        depthWrite.State = RenderGraphResourceState::DepthWrite;
+        registration.Writes.push_back(std::move(depthWrite));
+
+        registration.ImportedResources.push_back("SceneDepth");
+        return RegisterRenderGraphPass(registration);
     }
 
 } // namespace Renderer

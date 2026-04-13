@@ -3,11 +3,14 @@
 #include "Core/Math/Math.h"
 #include "Core/RHI/RHITexture.h"
 #include "Core/RHI/RHIDevice.h"
+#include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
+#include "Core/Renderer/Upscaling/FrameGenerationController.h"
 #include <memory>
 #include <array>
 #include <cstdint>
 #include <chrono>
 #include <deque>
+#include <string>
 
 namespace Core {
 namespace Renderer {
@@ -46,7 +49,8 @@ namespace Renderer {
         Lanczos,            // Lanczos resampling
         TAA,                // Let TAA handle upscaling
         FSR,                // AMD FidelityFX Super Resolution (stub)
-        DLSS                // NVIDIA DLSS (stub)
+        DLSS,               // NVIDIA DLSS (stub)
+        XeSS                // Intel XeSS (stub)
     };
 
     //=========================================================================
@@ -196,6 +200,16 @@ namespace Renderer {
         void SetScaleBounds(float minScale, float maxScale);
         void SetFixedScale(float scale);
 
+        // Explicit upscaler/frame generation controls
+        Result<void> SelectTemporalUpscalerFSR2(const TemporalUpscalerFSR2Config& config);
+        Result<void> SelectTemporalUpscalerDLSS(const TemporalUpscalerDLSSConfig& config);
+        Result<void> SelectTemporalUpscalerXeSS(const TemporalUpscalerXeSSConfig& config);
+        Result<FrameGenerationResult> ConfigureFrameGeneration(const FrameGenerationConfig& config);
+        TemporalUpscalerBackend GetSelectedTemporalUpscalerBackend() const { return m_SelectedTemporalUpscalerBackend; }
+        const FrameGenerationResult& GetLastFrameGenerationResult() const { return m_LastFrameGenerationResult; }
+        const std::string& GetLastUpscalerPolicyError() const { return m_LastUpscalerPolicyError; }
+        const std::string& GetLastFrameGenerationPolicyError() const { return m_LastFrameGenerationPolicyError; }
+
         void Enable() { m_Config.Mode = DRSMode::FrameTime; }
         void Disable() { m_Config.Mode = DRSMode::Disabled; }
         bool IsEnabled() const { return m_Config.Mode != DRSMode::Disabled; }
@@ -308,6 +322,12 @@ namespace Renderer {
         bool m_ScaleLocked = false;
         bool m_ForceScaleNextFrame = false;
         float m_ForcedScale = 1.0f;
+
+        // Runtime upscaler/frame generation policy state
+        TemporalUpscalerBackend m_SelectedTemporalUpscalerBackend = TemporalUpscalerBackend::TAA;
+        FrameGenerationResult m_LastFrameGenerationResult{};
+        std::string m_LastUpscalerPolicyError;
+        std::string m_LastFrameGenerationPolicyError;
 
         // Timing
         std::chrono::steady_clock::time_point m_LastFrameTime;

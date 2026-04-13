@@ -1,7 +1,34 @@
 #include "Core/ECS/Systems/LightSystem.h"
 
+#include <algorithm>
+#include <cstdint>
+
 namespace Core {
 namespace ECS {
+    namespace {
+        uint64_t ComposeLightCacheKey(const uint32_t entityId, const LightComponent& light)
+        {
+            uint64_t key = static_cast<uint64_t>(entityId) << 32U;
+            key ^= static_cast<uint64_t>(light.Type) << 24U;
+            key ^= static_cast<uint64_t>(light.ShadowMapResolution) << 8U;
+            key ^= static_cast<uint64_t>(light.CastShadows ? 1U : 0U);
+            return key;
+        }
+
+        LightQualityTier ComputeShadowTier(const LightComponent& light)
+        {
+            if (!light.CastShadows) {
+                return LightQualityTier::Low;
+            }
+            if (light.ShadowMapResolution >= 2048U && light.Intensity >= 1.5f) {
+                return LightQualityTier::High;
+            }
+            if (light.ShadowMapResolution <= 1024U || light.Intensity < 0.75f) {
+                return LightQualityTier::Low;
+            }
+            return LightQualityTier::Medium;
+        }
+    } // namespace
 
     void LightSystem::Update(Scene& scene)
     {
@@ -12,6 +39,7 @@ namespace ECS {
         m_PointLights.clear();
         m_SpotLights.clear();
         m_ForwardPlusLights.clear();
+        m_LightRoutingHints.clear();
 
         auto view = scene.View<TransformComponent, LightComponent>();
 
@@ -23,6 +51,13 @@ namespace ECS {
             if (!light.Enabled) {
                 continue;
             }
+
+            LightRoutingHint routingHint{};
+            routingHint.CacheKey = ComposeLightCacheKey(static_cast<uint32_t>(entity), light);
+            routingHint.CastShadows = light.CastShadows;
+            routingHint.ShadowTier = ComputeShadowTier(light);
+            routingHint.PreferRTShadow = light.CastShadows && light.ShadowMapResolution >= 2048U;
+            m_LightRoutingHints.push_back(routingHint);
 
             switch (light.Type) {
                 case LightType::Directional: {
