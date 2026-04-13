@@ -361,6 +361,8 @@ add_library(EngineCore
     # Phase 27: Runtime UI Authoring Foundations
     Core/UI/Authoring/WidgetBlueprintAsset.h
     Core/UI/Authoring/WidgetBlueprintAsset.cpp
+    Core/UI/Authoring/WidgetLayoutAsset.h
+    Core/UI/Authoring/WidgetLayoutAsset.cpp
     Core/UI/Authoring/UIAssetAuthoringService.h
     Core/UI/Authoring/UIAssetAuthoringService.cpp
     # Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring

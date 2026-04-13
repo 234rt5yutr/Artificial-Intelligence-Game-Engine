@@ -382,7 +382,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [ ] Step 27.1: Build declarative widget asset pipeline and runtime loader.
   * [x] Sub-step 27.1.1: Implement `CreateWidgetBlueprintAsset()` for reusable UI prefabs and style inheritance. (v0.27.1.1)
-  * [ ] Sub-step 27.1.2: Implement `LoadWidgetLayoutAsset()` with async dependency loading and instance pooling. (v0.27.1.2)
+  * [x] Sub-step 27.1.2: Implement `LoadWidgetLayoutAsset()` with async dependency loading and instance pooling. (v0.27.1.2)
 * [ ] Step 27.2: Add robust UI data binding and transition system.
   * [ ] Sub-step 27.2.1: Implement `BindWidgetPropertyToData()` with one-way/two-way binding modes and validation hooks. (v0.27.2.1)
   * [ ] Sub-step 27.2.2: Implement `AnimateWidgetTransition()` with timeline-driven state changes. (v0.27.2.2)
