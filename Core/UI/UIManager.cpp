@@ -5,6 +5,7 @@
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/UI/Authoring/UIAssetAuthoringService.h"
 #include "Core/UI/Binding/UIBindingService.h"
+#include "Core/UI/Animation/WidgetTransitionService.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 
 namespace Core {
@@ -73,8 +74,9 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     Widgets::WidgetSystem::Get().SetScreenSize(m_ViewportSize);
     (void)Authoring::UIAssetAuthoringService::Get();
     (void)Binding::UIBindingService::Get();
+    (void)Animation::WidgetTransitionService::Get();
     m_Stage27ServicesInitialized = true;
-    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding)");
+    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding + Transition)");
 
     m_Initialized = true;
     ENGINE_CORE_INFO("UIManager initialized (viewport: {}x{})", 
@@ -106,6 +108,8 @@ void UIManager::Shutdown() {
     }
 
     if (m_Stage27ServicesInitialized) {
+        Animation::WidgetTransitionService::Get().ClearTransitions();
+        Binding::UIBindingService::Get().ClearBindings();
         Widgets::WidgetSystem::Get().Shutdown();
         m_Stage27ServicesInitialized = false;
     }
@@ -150,6 +154,7 @@ void UIManager::Update(float deltaTime) {
     if (m_Stage27ServicesInitialized) {
         Widgets::WidgetSystem::Get().Update(deltaTime);
         Binding::UIBindingService::Get().UpdateBindings();
+        Animation::WidgetTransitionService::Get().UpdateTransitions(deltaTime);
     }
 
     if (m_EditorModule && m_EditorModule->IsEnabled()) {

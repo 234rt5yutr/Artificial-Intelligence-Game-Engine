@@ -58,6 +58,9 @@ namespace UI {
 
         void SetSize(const glm::vec2& size);
         glm::vec2 GetSize() const { return m_Size; }
+        void SetScale(const glm::vec2& scale);
+        glm::vec2 GetScale() const { return m_Scale; }
+        glm::vec2 GetScaledSize() const { return m_Size * m_Scale; }
 
         void SetPivot(const glm::vec2& pivotNormalized);
         void SetPivot(Anchor pivotAnchor);
@@ -160,6 +163,7 @@ namespace UI {
         Anchor m_Anchor = Anchor::TopLeft;
         glm::vec2 m_Offset = {0.0f, 0.0f};
         glm::vec2 m_Size = {100.0f, 100.0f};
+        glm::vec2 m_Scale = {1.0f, 1.0f};
         glm::vec2 m_Pivot = {0.0f, 0.0f};
 
         bool m_Visible = true;

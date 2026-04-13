@@ -65,6 +65,11 @@ namespace {
         m_IsDirty = true;
     }
 
+    void Widget::SetScale(const glm::vec2& scale) {
+        m_Scale = glm::max(scale, glm::vec2(0.0f, 0.0f));
+        m_IsDirty = true;
+    }
+
     void Widget::SetPivot(const glm::vec2& pivotNormalized) {
         m_Pivot = glm::vec2(
             glm::clamp(pivotNormalized.x, 0.0f, 1.0f),
@@ -77,22 +82,23 @@ namespace {
     }
 
     glm::vec2 Widget::CalculateScreenPosition(const glm::vec2& viewportSize) const {
+        const glm::vec2 scaledSize = GetScaledSize();
         glm::vec2 anchorPosition;
         if (m_Parent != nullptr) {
             const glm::vec2 parentPosition = m_Parent->CalculateScreenPosition(viewportSize);
-            const glm::vec2 parentSize = m_Parent->GetSize();
+            const glm::vec2 parentSize = m_Parent->GetScaledSize();
             anchorPosition = parentPosition + AnchorUtils::GetAnchorPosition(m_Anchor, parentSize);
         } else {
             anchorPosition = AnchorUtils::GetAnchorPosition(m_Anchor, viewportSize);
         }
 
-        return anchorPosition + m_Offset - (m_Pivot * m_Size);
+        return anchorPosition + m_Offset - (m_Pivot * scaledSize);
     }
 
     UIRect Widget::GetScreenRect(const glm::vec2& viewportSize) const {
         UIRect rect;
         rect.position = CalculateScreenPosition(viewportSize);
-        rect.size = m_Size;
+        rect.size = GetScaledSize();
         return rect;
     }
 
@@ -226,6 +232,13 @@ namespace {
             }
             return false;
         }
+        if (propertyPath == "scale") {
+            if (const glm::vec2* vec2Value = TryGetPropertyValue<glm::vec2>(value)) {
+                SetScale(*vec2Value);
+                return true;
+            }
+            return false;
+        }
         if (propertyPath == "color") {
             if (const glm::vec4* vec4Value = TryGetPropertyValue<glm::vec4>(value)) {
                 SetColor(*vec4Value);
@@ -269,6 +282,9 @@ namespace {
         }
         if (propertyPath == "size") {
             return PropertyValue(m_Size);
+        }
+        if (propertyPath == "scale") {
+            return PropertyValue(m_Scale);
         }
         if (propertyPath == "color") {
             return PropertyValue(m_Color);

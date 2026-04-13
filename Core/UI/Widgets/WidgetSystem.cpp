@@ -120,7 +120,7 @@ namespace Widgets {
         WidgetRenderCommand command;
         command.widget = widget;
         command.screenPosition = CalculateScreenPosition(widget);
-        command.screenSize = widget->GetSize();
+        command.screenSize = widget->GetScaledSize();
         command.alpha = widget->GetAlpha();
         command.textureId = 0;
         command.shaderId = 0;
@@ -334,6 +334,7 @@ namespace Widgets {
         }
         widget->SetVisible(true);
         widget->SetAlpha(1.0f);
+        widget->SetScale({1.0f, 1.0f});
         widget->SetHovered(false);
         widget->SetFocused(false);
         widget->ClearChildren();

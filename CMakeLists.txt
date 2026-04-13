@@ -379,6 +379,9 @@ add_library(EngineCore
     Core/UI/Binding/UIBindingTypes.h
     Core/UI/Binding/UIBindingService.h
     Core/UI/Binding/UIBindingService.cpp
+    Core/UI/Animation/WidgetTransitionTypes.h
+    Core/UI/Animation/WidgetTransitionService.h
+    Core/UI/Animation/WidgetTransitionService.cpp
     # Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring
     Core/Editor/Result.h
     Core/Editor/EditorState.h
