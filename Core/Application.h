@@ -2,6 +2,7 @@
 
 #include "Core/Window.h"
 #include "Core/Event.h"
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -13,10 +14,20 @@ namespace Core {
     class Application {
     public:
         struct RuntimeOptions {
+            enum class RuntimeProfile : uint8_t {
+                Client = 0,
+                ListenServer,
+                DedicatedServer
+            };
+
             bool EnableStartupWarmupMode = false;
             std::string PreferredUpscalerBackend;
             bool CaptureStartupGPUTrace = false;
             std::filesystem::path StartupTraceOutputPath;
+            RuntimeProfile Profile = RuntimeProfile::Client;
+            bool Headless = false;
+            bool DisableRenderer = false;
+            bool DisableUI = false;
         };
 
         Application();
@@ -53,6 +64,7 @@ namespace Core {
         static Application* s_Instance;
         static RuntimeOptions s_RuntimeOptions;
         bool m_StartupTraceCapturePending = false;
+        bool m_HeadlessRuntime = false;
     };
 
     // To be defined in the CLIENT to provide the specific application instance

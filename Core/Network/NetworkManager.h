@@ -71,6 +71,7 @@ namespace Network {
 
         // Get singleton instance
         static NetworkManager& Get();
+        static bool HasInstance();
 
         // Set debug output level
         void SetDebugOutputLevel(ESteamNetworkingSocketsDebugOutputType level);

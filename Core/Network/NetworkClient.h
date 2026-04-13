@@ -65,6 +65,7 @@ namespace Network {
         // Get server info (valid after handshake complete)
         const std::string& GetServerName() const { return m_ServerName; }
         uint32_t GetServerTickRate() const { return m_ServerTickRate; }
+        bool IsContractCompatibilityDowngradeActive() const { return m_ContractCompatibilityDowngrade; }
 
         // Poll for incoming messages and connection changes
         void Update();
@@ -129,6 +130,7 @@ namespace Network {
         std::string m_ServerName;
         uint32_t m_ServerTickRate = 60;
         uint64_t m_ServerTimestamp = 0;
+        bool m_ContractCompatibilityDowngrade = false;
 
         // Handshake timing
         std::chrono::steady_clock::time_point m_HandshakeStartTime;

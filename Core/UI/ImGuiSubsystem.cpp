@@ -3,6 +3,8 @@
 #include "Core/Asset/Bundles/AssetBundleMountService.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/Log.h"
+#include "Core/Network/Diagnostics/NetworkDiagnosticsState.h"
+#include "Core/Network/MultiplayerProductLayer.h"
 #include "Core/Renderer/Diagnostics/GPUFrameTraceService.h"
 #include "Core/Renderer/Upscaling/FrameGenerationController.h"
 #include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
@@ -543,6 +545,66 @@ void ImGuiSubsystem::RenderContentDeliveryPanel() {
                     ImGui::Text("    Failed keys: %zu", eventRecord.FailedAddressKeys.size());
                 }
             }
+        }
+
+        const Network::NetworkDiagnosticsSnapshot networkDiagnostics =
+            Network::NetworkDiagnosticsState::Get().GetSnapshot();
+        ImGui::Spacing();
+        ImGui::Text("Network Contract Compatibility");
+        ImGui::Separator();
+        ImGui::Text("Contract Hash: %llu",
+                    static_cast<unsigned long long>(networkDiagnostics.ContractHash));
+        ImGui::Text("Replication Policies: %u", networkDiagnostics.RegisteredReplicationPolicies);
+        ImGui::Text("RPC Contracts: %u", networkDiagnostics.RegisteredRPCContracts);
+        ImGui::Text("Mismatch Alarms: %u", networkDiagnostics.ContractHashMismatchCount);
+        if (networkDiagnostics.ContractHashMismatchCount > 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f),
+                               "Contract compatibility alarms detected");
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Replay / Rollback / Migration");
+        ImGui::Separator();
+        ImGui::Text("Replay Tick: %u", networkDiagnostics.ReplayCurrentTick);
+        ImGui::Text("Replay Mode: %s", networkDiagnostics.ReplayPlaybackMode.c_str());
+        ImGui::Text("Replay Seek Drift: %.2f ticks", networkDiagnostics.ReplaySeekDriftTicks);
+        ImGui::Text("Replay Decode Time: %llu us",
+                    static_cast<unsigned long long>(networkDiagnostics.ReplayLastDecodeMicroseconds));
+        ImGui::Text("Rollback Tick: %u", networkDiagnostics.LastRollbackTick);
+        ImGui::Text("Snapshot Ring Usage: %u", networkDiagnostics.RollbackSnapshotRingUsage);
+        ImGui::Text("Pending / Last Resim Frames: %u / %u",
+                    networkDiagnostics.PendingResimFrames,
+                    networkDiagnostics.LastResimulatedFrames);
+        ImGui::Text("Migration State: %s (epoch %llu)",
+                    networkDiagnostics.MigrationState.c_str(),
+                    static_cast<unsigned long long>(networkDiagnostics.MigrationEpoch));
+        ImGui::Text("Replay Starts / Completed / Failed: %llu / %llu / %llu",
+                    static_cast<unsigned long long>(networkDiagnostics.ReplayRecordingsStarted),
+                    static_cast<unsigned long long>(networkDiagnostics.ReplayRecordingsCompleted),
+                    static_cast<unsigned long long>(networkDiagnostics.ReplayRecordingFailures));
+        ImGui::Text("Playback Starts / Failed: %llu / %llu",
+                    static_cast<unsigned long long>(networkDiagnostics.ReplayPlaybacksStarted),
+                    static_cast<unsigned long long>(networkDiagnostics.ReplayPlaybackFailures));
+        ImGui::Text("Rollbacks Applied / Fallbacks: %llu / %llu",
+                    static_cast<unsigned long long>(networkDiagnostics.RollbacksApplied),
+                    static_cast<unsigned long long>(networkDiagnostics.RollbackFallbacks));
+        ImGui::Text("Resimulations / Hard Corrections: %llu / %llu",
+                    static_cast<unsigned long long>(networkDiagnostics.ResimulationsExecuted),
+                    static_cast<unsigned long long>(networkDiagnostics.ResimulationHardCorrections));
+        ImGui::Text("Migrations Started / Completed / Failed: %llu / %llu / %llu",
+                    static_cast<unsigned long long>(networkDiagnostics.HostMigrationsStarted),
+                    static_cast<unsigned long long>(networkDiagnostics.HostMigrationsCompleted),
+                    static_cast<unsigned long long>(networkDiagnostics.HostMigrationsFailed));
+
+        Network::MultiplayerRuntimeFeatureGates featureGates =
+            Network::GetMultiplayerRuntimeFeatureGates();
+        bool updatedFeatureGates = false;
+        updatedFeatureGates |= ImGui::Checkbox("Replay Enabled", &featureGates.ReplayEnabled);
+        updatedFeatureGates |= ImGui::Checkbox("Rollback Enabled", &featureGates.RollbackEnabled);
+        updatedFeatureGates |= ImGui::Checkbox("Resimulation Enabled", &featureGates.ResimulationEnabled);
+        updatedFeatureGates |= ImGui::Checkbox("Host Migration Enabled", &featureGates.HostMigrationEnabled);
+        if (updatedFeatureGates) {
+            Network::SetMultiplayerRuntimeFeatureGates(featureGates);
         }
 
         RenderVirtualGeometryResidencySection();

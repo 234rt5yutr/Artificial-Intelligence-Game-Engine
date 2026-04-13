@@ -24,6 +24,8 @@ namespace Security {
             std::filesystem::path ShaderRoot;
             std::filesystem::path BundleRoot;
             std::filesystem::path PatchStagingRoot;
+            std::filesystem::path ReplayArtifactRoot;
+            std::filesystem::path MigrationArtifactRoot;
             bool AllowSymlinks = false;
         };
 
@@ -105,8 +107,7 @@ namespace Security {
                 }
             }
             
-            std::error_code ec;
-            return std::filesystem::weakly_canonical(path, ec);
+            return NormalizePath(path);
         }
 
         // Validate cooked asset path
@@ -123,8 +124,7 @@ namespace Security {
                 }
             }
             
-            std::error_code ec;
-            return std::filesystem::weakly_canonical(path, ec);
+            return NormalizePath(path);
         }
 
         static std::optional<std::filesystem::path> ValidateBundlePath(
@@ -140,8 +140,7 @@ namespace Security {
                 }
             }
 
-            std::error_code ec;
-            return std::filesystem::weakly_canonical(path, ec);
+            return NormalizePath(path);
         }
 
         static std::optional<std::filesystem::path> ValidatePatchStagingPath(
@@ -157,8 +156,7 @@ namespace Security {
                 }
             }
 
-            std::error_code ec;
-            return std::filesystem::weakly_canonical(path, ec);
+            return NormalizePath(path);
         }
 
         // Validate shader path
@@ -175,8 +173,61 @@ namespace Security {
                 }
             }
             
-            std::error_code ec;
-            return std::filesystem::weakly_canonical(path, ec);
+            return NormalizePath(path);
+        }
+
+        static std::optional<std::filesystem::path> ValidateReplayArtifactPath(
+            const std::filesystem::path& path) {
+            if (ContainsTraversalComponents(path)) {
+                return std::nullopt;
+            }
+
+            const std::optional<std::filesystem::path> normalizedPath = NormalizePath(path);
+            if (!normalizedPath.has_value()) {
+                return std::nullopt;
+            }
+
+            if (s_Initialized && !s_Config.ReplayArtifactRoot.empty()) {
+                if (!IsWithinRoot(normalizedPath.value(), s_Config.ReplayArtifactRoot)) {
+                    return std::nullopt;
+                }
+            }
+
+            if (s_Initialized && !s_Config.AllowSymlinks) {
+                std::error_code ec;
+                if (std::filesystem::is_symlink(normalizedPath.value(), ec)) {
+                    return std::nullopt;
+                }
+            }
+
+            return normalizedPath;
+        }
+
+        static std::optional<std::filesystem::path> ValidateMigrationArtifactPath(
+            const std::filesystem::path& path) {
+            if (ContainsTraversalComponents(path)) {
+                return std::nullopt;
+            }
+
+            const std::optional<std::filesystem::path> normalizedPath = NormalizePath(path);
+            if (!normalizedPath.has_value()) {
+                return std::nullopt;
+            }
+
+            if (s_Initialized && !s_Config.MigrationArtifactRoot.empty()) {
+                if (!IsWithinRoot(normalizedPath.value(), s_Config.MigrationArtifactRoot)) {
+                    return std::nullopt;
+                }
+            }
+
+            if (s_Initialized && !s_Config.AllowSymlinks) {
+                std::error_code ec;
+                if (std::filesystem::is_symlink(normalizedPath.value(), ec)) {
+                    return std::nullopt;
+                }
+            }
+
+            return normalizedPath;
         }
 
         // Validate file size is within limits
@@ -206,6 +257,21 @@ namespace Security {
         }
 
     private:
+        static std::optional<std::filesystem::path> NormalizePath(const std::filesystem::path& path) {
+            std::error_code ec;
+            std::filesystem::path normalized = std::filesystem::weakly_canonical(path, ec);
+            if (!ec) {
+                return normalized;
+            }
+
+            ec.clear();
+            normalized = std::filesystem::absolute(path, ec);
+            if (ec) {
+                return std::nullopt;
+            }
+            return normalized.lexically_normal();
+        }
+
         inline static Config s_Config;
         inline static bool s_Initialized = false;
     };

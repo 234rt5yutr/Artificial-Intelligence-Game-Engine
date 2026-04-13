@@ -99,8 +99,9 @@ namespace Network {
     struct ClientHelloPacket {
         HandshakePacketType Type = HandshakePacketType::ClientHello;
         uint32_t ProtocolVersion = NETWORK_PROTOCOL_VERSION;
+        uint64_t ContractSignatureHash = 0;
         char ClientName[64] = {};
-        uint8_t Reserved[27] = {};
+        uint8_t Reserved[19] = {};
     };
     static_assert(sizeof(ClientHelloPacket) == 96, "ClientHelloPacket must be 96 bytes");
 
@@ -109,9 +110,11 @@ namespace Network {
         HandshakePacketType Type = HandshakePacketType::ServerWelcome;
         uint32_t AssignedClientId = 0;
         uint32_t ServerTickRate = 60;
+        uint64_t ContractSignatureHash = 0;
+        uint8_t CompatibilityMode = 0;
         char ServerName[64] = {};
         char Message[64] = {};
-        uint8_t Reserved[23] = {};
+        uint8_t Reserved[14] = {};
     };
     static_assert(sizeof(ServerWelcomePacket) == 160, "ServerWelcomePacket must be 160 bytes");
 

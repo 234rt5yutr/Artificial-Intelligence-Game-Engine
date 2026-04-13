@@ -1,9 +1,11 @@
 #include "Core/Network/ServerReplicationSystem.h"
 #include "Core/Log.h"
+#include "Core/Network/Policies/ReplicationPolicyRegistry.h"
 #include "Core/Profile.h"
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <optional>
 
 // Use engine core log macros
 #define LOG_INFO    ENGINE_CORE_INFO
@@ -465,6 +467,11 @@ namespace Network {
         PROFILE_FUNCTION();
 
         auto& registry = scene.GetRegistry();
+        const std::optional<ReplicatedPropertyPolicy> transformPolicy =
+            ReplicationPolicyRegistry::Get().FindPolicy("NetworkTransformComponent", "Transform");
+        const int policySendFlags = transformPolicy.has_value()
+            ? ToSteamSendFlags(transformPolicy->ReliabilityClass)
+            : k_nSteamNetworkingSend_UnreliableNoDelay;
 
         // Collect transforms to send per client
         std::unordered_map<uint32_t, std::vector<NetTransform>> clientTransforms;
@@ -485,7 +492,9 @@ namespace Network {
             auto* rigidBody = registry.try_get<ECS::RigidBodyComponent>(entity);
 
             // Get send rate for this entity's priority
-            float sendRate = GetSendRateForPriority(netTransform.Priority);
+            float sendRate = transformPolicy.has_value()
+                ? transformPolicy->SendRateHz
+                : GetSendRateForPriority(netTransform.Priority);
             float sendInterval = (sendRate > 0.0f) ? (1.0f / sendRate) : 0.05f;
 
             // Check each client
@@ -554,12 +563,15 @@ namespace Network {
         // Send transform packets to each client
         for (auto& [clientId, transforms] : clientTransforms) {
             if (!transforms.empty()) {
-                SendTransformPacket(clientId, transforms);
+                SendTransformPacket(clientId, transforms, policySendFlags);
             }
         }
     }
 
-    void ServerReplicationSystem::SendTransformPacket(uint32_t clientId, const std::vector<NetTransform>& transforms)
+    void ServerReplicationSystem::SendTransformPacket(
+        uint32_t clientId,
+        const std::vector<NetTransform>& transforms,
+        int sendFlags)
     {
         if (transforms.empty()) {
             return;
@@ -601,7 +613,7 @@ namespace Network {
             // Send
             m_Server->SendToClient(clientId, m_PacketBuffer.data(), 
                                   static_cast<uint32_t>(packetSize),
-                                  k_nSteamNetworkingSend_UnreliableNoDelay);
+                                  sendFlags);
 
             m_TotalBytesSent += packetSize;
             m_TotalPacketsSent++;

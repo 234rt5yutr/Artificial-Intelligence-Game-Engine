@@ -1,5 +1,9 @@
 #include "Core/Network/ServerReconciliationSystem.h"
 #include "Core/Log.h"
+#include "Core/Network/Diagnostics/NetworkDiagnosticsState.h"
+#include "Core/Network/NetworkHash.h"
+#include "Core/Network/Replay/NetworkReplayRecorder.h"
+#include "Core/Network/Rollback/RollbackCoordinator.h"
 #include "Core/Profile.h"
 #include <algorithm>
 #include <chrono>
@@ -554,6 +558,48 @@ namespace Network {
         }
 
         m_CurrentTick++;
+        NetworkDiagnosticsState::Get().SetLastServerTick(m_CurrentTick);
+
+        const std::string& sessionId = m_Server->GetSessionId();
+        if (!sessionId.empty()) {
+            NetworkReplayRecorder::Get().RecordAuthoritativeMarker(sessionId, m_CurrentTick, "authoritative");
+
+            std::vector<uint32_t> sortedClientIds;
+            sortedClientIds.reserve(m_ClientStates.size());
+            for (const auto& [clientId, state] : m_ClientStates) {
+                (void)state;
+                sortedClientIds.push_back(clientId);
+            }
+            std::sort(sortedClientIds.begin(), sortedClientIds.end());
+
+            uint64_t snapshotHash = HashStringFNV1a(sessionId, false);
+            snapshotHash = HashCombineFNV1a(snapshotHash, m_CurrentTick);
+            for (const uint32_t clientId : sortedClientIds) {
+                const auto clientIt = m_ClientStates.find(clientId);
+                if (clientIt == m_ClientStates.end()) {
+                    continue;
+                }
+                const ClientReconciliationState& state = clientIt->second;
+                snapshotHash = HashCombineFNV1a(snapshotHash, clientId);
+                snapshotHash = HashCombineFNV1a(snapshotHash, state.NetworkId);
+                snapshotHash = HashCombineFNV1a(snapshotHash, state.LastProcessedSequence);
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativePosition.x));
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativePosition.y));
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativePosition.z));
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativeRotation.x));
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativeRotation.y));
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativeRotation.z));
+                snapshotHash = HashCombineFNV1a(snapshotHash, HashValueFNV1a(state.AuthoritativeRotation.w));
+            }
+
+            RollbackSnapshotRecord snapshot;
+            snapshot.SessionId = sessionId;
+            snapshot.FrameTick = m_CurrentTick;
+            snapshot.SnapshotHash = snapshotHash;
+            snapshot.EntityCount = static_cast<uint32_t>(m_ClientStates.size());
+            snapshot.SnapshotSizeBytes = static_cast<uint32_t>(m_ClientStates.size() * sizeof(ClientReconciliationState));
+            RollbackCoordinator::Get().RecordAuthoritativeSnapshot(snapshot);
+        }
 
         // Process buffered inputs
         ProcessInputs(scene, deltaTime);

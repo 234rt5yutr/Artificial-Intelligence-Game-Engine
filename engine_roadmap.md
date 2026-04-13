@@ -361,19 +361,22 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 26: Multiplayer Product Layer, Replay System & Rollback Framework (Weeks 72-76)
 
-* [ ] Step 26.1: Add dedicated-server and session orchestration APIs.
-  * [ ] Sub-step 26.1.1: Implement `StartDedicatedServerInstance()` with headless runtime profile and server-only feature flags. (v0.26.1.1)
-  * [ ] Sub-step 26.1.2: Implement `JoinSessionByInviteCode()` with session lookup, validation, and secure join flow. (v0.26.1.2)
-  * [ ] Sub-step 26.1.3: Implement `DiscoverLANSessions()` with query broadcast and compatibility filters. (v0.26.1.3)
-* [ ] Step 26.2: Strengthen replication and RPC contract control.
-  * [ ] Sub-step 26.2.1: Implement `RegisterReplicatedPropertyPolicy()` for update rate, relevance, and quantization rules. (v0.26.2.1)
-  * [ ] Sub-step 26.2.2: Implement `RegisterNetworkRPC()` with reliability class, auth checks, and replay support. (v0.26.2.2)
-* [ ] Step 26.3: Build deterministic replay and rollback systems.
-  * [ ] Sub-step 26.3.1: Implement `RecordNetworkReplay()` capturing network stream + authoritative frame markers. (v0.26.3.1)
-  * [ ] Sub-step 26.3.2: Implement `PlayNetworkReplay()` with time controls and frame-accurate playback state. (v0.26.3.2)
-  * [ ] Sub-step 26.3.3: Implement `RollbackSimulationFrame()` for corrected authoritative rewinds. (v0.26.3.3)
-  * [ ] Sub-step 26.3.4: Implement `ResimulatePredictedFrames()` for reconciliation without hard snaps. (v0.26.3.4)
-  * [ ] Sub-step 26.3.5: Implement `MigrateHostSession()` for resilient peer-host continuity. (v0.26.3.5)
+* [x] Step 26.1: Add dedicated-server and session orchestration APIs.
+  * [x] Sub-step 26.1.1: Implement `StartDedicatedServerInstance()` with headless runtime profile and server-only feature flags. (v0.26.1.1)
+  * [x] Sub-step 26.1.2: Implement `JoinSessionByInviteCode()` with session lookup, validation, and secure join flow. (v0.26.1.2)
+  * [x] Sub-step 26.1.3: Implement `DiscoverLANSessions()` with query broadcast and compatibility filters. (v0.26.1.3)
+  * [x] Sub-step 26.1.4: Session product-layer integration bridge for runtime mode boundaries, diagnostics, and MCP controls. (v0.26.1.4)
+* [x] Step 26.2: Strengthen replication and RPC contract control.
+  * [x] Sub-step 26.2.1: Implement `RegisterReplicatedPropertyPolicy()` for update rate, relevance, and quantization rules. (v0.26.2.1)
+  * [x] Sub-step 26.2.2: Implement `RegisterNetworkRPC()` with reliability class, auth checks, and replay support. (v0.26.2.2)
+  * [x] Sub-step 26.2.3: Contract compatibility and runtime enforcement bridge across handshake/session workflows. (v0.26.2.3)
+* [x] Step 26.3: Build deterministic replay and rollback systems.
+  * [x] Sub-step 26.3.1: Implement `RecordNetworkReplay()` capturing network stream + authoritative frame markers. (v0.26.3.1)
+  * [x] Sub-step 26.3.2: Implement `PlayNetworkReplay()` with time controls and frame-accurate playback state. (v0.26.3.2)
+  * [x] Sub-step 26.3.3: Implement `RollbackSimulationFrame()` for corrected authoritative rewinds. (v0.26.3.3)
+  * [x] Sub-step 26.3.4: Implement `ResimulatePredictedFrames()` for reconciliation without hard snaps. (v0.26.3.4)
+  * [x] Sub-step 26.3.5: Implement `MigrateHostSession()` for resilient peer-host continuity. (v0.26.3.5)
+  * [x] Sub-step 26.3.6: Replay/rollback/migration observability and governance hardening (MCP/UI telemetry + feature gates). (v0.26.3.6)
 
 ## Phase 27: Runtime UI Authoring, Data Binding & World Widgets (Weeks 77-79)
 

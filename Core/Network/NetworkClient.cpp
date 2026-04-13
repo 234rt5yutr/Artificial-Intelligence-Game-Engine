@@ -1,5 +1,7 @@
 #include "Core/Network/NetworkClient.h"
 #include "Core/Log.h"
+#include "Core/Network/Diagnostics/NetworkDiagnosticsState.h"
+#include "Core/Network/NetworkContractState.h"
 #include "Core/Profile.h"
 #include <cstring>
 #include <cctype>
@@ -350,7 +352,8 @@ namespace Network {
 
         ClientHelloPacket packet;
         packet.Type = HandshakePacketType::ClientHello;
-        packet.ProtocolVersion = 1;
+        packet.ProtocolVersion = NETWORK_PROTOCOL_VERSION;
+        packet.ContractSignatureHash = GetNetworkContractHash();
 
         // Copy client name (truncate if too long)
         SAFE_STRCPY(packet.ClientName, m_ClientName.c_str(), sizeof(packet.ClientName));
@@ -463,6 +466,42 @@ namespace Network {
 
         m_AssignedClientId = packet.AssignedClientId;
         m_ServerTickRate = packet.ServerTickRate;
+        NetworkDiagnosticsState::Get().SetContractHash(packet.ContractSignatureHash);
+
+        const uint64_t localContractHash = GetNetworkContractHash();
+        const bool contractMismatch =
+            packet.ContractSignatureHash != 0 &&
+            localContractHash != 0 &&
+            packet.ContractSignatureHash != localContractHash;
+        if (contractMismatch) {
+            const bool allowDowngrade = packet.CompatibilityMode != 0 || IsBackwardsCompatibilityMode();
+            if (!allowDowngrade) {
+                NetworkDiagnosticsState::Get().IncrementContractHashMismatch();
+                NetworkDiagnosticsState::Get().RecordEvent("ContractMismatchRejected: client");
+
+                ENGINE_CORE_ERROR("Server contract mismatch (server: {}, client: {})",
+                                  packet.ContractSignatureHash, localContractHash);
+                m_HandshakeState = HandshakeState::Failed;
+                m_State = ConnectionState::Failed;
+
+                if (m_OnConnectionFailed) {
+                    m_OnConnectionFailed("Contract compatibility mismatch");
+                }
+
+                if (m_Connection != k_HSteamNetConnection_Invalid) {
+                    NetworkManager::Get().GetSockets()->CloseConnection(
+                        m_Connection, 0, "Contract mismatch", false);
+                }
+                ResetState();
+                return;
+            }
+
+            m_ContractCompatibilityDowngrade = true;
+            NetworkDiagnosticsState::Get().IncrementContractHashMismatch();
+            NetworkDiagnosticsState::Get().SetCompatibilityDowngradeActive(true);
+            NetworkDiagnosticsState::Get().RecordEvent("ContractMismatchDowngrade: client accepted server");
+            ENGINE_CORE_WARN("Server contract mismatch accepted in compatibility mode");
+        }
         
         // SECURITY: Force null-termination for string fields from network
         char safeName[sizeof(packet.ServerName) + 1] = {0};
@@ -569,6 +608,7 @@ namespace Network {
         m_ServerName.clear();
         m_ServerTickRate = 60;
         m_ServerTimestamp = 0;
+        m_ContractCompatibilityDowngrade = false;
 
         // Clear message queue
         while (!m_MessageQueue.empty()) {

@@ -38,7 +38,9 @@ namespace Asset {
         AnimationGraph = 19,
         RetargetProfile = 20,
         ControlRig = 21,
-        MotionDatabase = 22
+        MotionDatabase = 22,
+        ReplayArchive = 23,
+        MigrationArtifact = 24
     };
 
     // Texture-specific enums
@@ -192,6 +194,8 @@ namespace Asset {
             case AssetType::RetargetProfile: return "RetargetProfile";
             case AssetType::ControlRig: return "ControlRig";
             case AssetType::MotionDatabase: return "MotionDatabase";
+            case AssetType::ReplayArchive: return "ReplayArchive";
+            case AssetType::MigrationArtifact: return "MigrationArtifact";
             default: return "Unknown";
         }
     }

@@ -20,6 +20,8 @@
 #include <functional>
 #include <thread>
 #include <condition_variable>
+#include <unordered_set>
+#include <vector>
 
 namespace Core {
 
@@ -39,6 +41,8 @@ namespace MCP {
         LogLevel MinLogLevel = LogLevel::Info;
         std::string ServerName = "AIGameEngine-MCP";
         std::string ServerVersion = "1.0.0";
+        bool EnforceCapabilityScopes = false;
+        std::vector<std::string> GrantedCapabilities;
     };
 
     // Connection state for an MCP session
@@ -46,6 +50,7 @@ namespace MCP {
         bool Initialized = false;
         ClientInfo Client;
         LogLevel CurrentLogLevel = LogLevel::Info;
+        std::unordered_set<std::string> GrantedCapabilities;
     };
 
     // MCP Server implementation
@@ -124,6 +129,8 @@ namespace MCP {
         JsonRpcResponse HandleToolsList(const JsonRpcRequest& request);
         JsonRpcResponse HandleToolsCall(const JsonRpcRequest& request);
         JsonRpcResponse HandleSetLogLevel(const JsonRpcRequest& request);
+        bool HasGrantedCapability(const std::string& capability) const;
+        void RebuildConfigCapabilities();
 
         // Setup HTTP routes
         void SetupRoutes();
@@ -146,6 +153,7 @@ namespace MCP {
         // Session state
         mutable std::mutex m_SessionMutex;
         MCPSession m_Session;
+        std::unordered_set<std::string> m_ConfigCapabilities;
 
         // Main thread request queue
         mutable std::mutex m_RequestQueueMutex;

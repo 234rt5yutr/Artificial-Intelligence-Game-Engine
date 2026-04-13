@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace Core {
 
@@ -61,6 +62,9 @@ namespace MCP {
         // Optional: Check if tool is available in current context
         virtual bool IsAvailable() const { return true; }
 
+        // Optional: Capability scopes required to invoke the tool
+        virtual std::vector<std::string> RequiredCapabilities() const { return {}; }
+
     protected:
         std::string m_Name;
         std::string m_Description;
@@ -81,11 +85,13 @@ namespace MCP {
                    const std::string& description,
                    const ToolInputSchema& schema,
                    ExecuteFunc executeFunc,
-                   bool requiresScene = true)
+                   bool requiresScene = true,
+                   std::vector<std::string> requiredCapabilities = {})
             : MCPTool(name, description)
             , m_Schema(schema)
             , m_ExecuteFunc(std::move(executeFunc))
-            , m_RequiresScene(requiresScene) {}
+            , m_RequiresScene(requiresScene)
+            , m_RequiredCapabilities(std::move(requiredCapabilities)) {}
 
         ToolInputSchema GetInputSchema() const override { return m_Schema; }
         
@@ -94,11 +100,13 @@ namespace MCP {
         }
 
         bool RequiresScene() const override { return m_RequiresScene; }
+        std::vector<std::string> RequiredCapabilities() const override { return m_RequiredCapabilities; }
 
     private:
         ToolInputSchema m_Schema;
         ExecuteFunc m_ExecuteFunc;
         bool m_RequiresScene;
+        std::vector<std::string> m_RequiredCapabilities;
     };
 
     // Helper to create a lambda-based tool
@@ -107,10 +115,11 @@ namespace MCP {
         const std::string& description,
         const ToolInputSchema& schema,
         LambdaTool::ExecuteFunc executeFunc,
-        bool requiresScene = true)
+        bool requiresScene = true,
+        std::vector<std::string> requiredCapabilities = {})
     {
         return std::make_shared<LambdaTool>(name, description, schema, 
-                                             std::move(executeFunc), requiresScene);
+                                             std::move(executeFunc), requiresScene, std::move(requiredCapabilities));
     }
 
 } // namespace MCP

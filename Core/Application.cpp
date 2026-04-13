@@ -28,26 +28,34 @@ namespace Core {
         PROFILE_FUNCTION();
         ENGINE_CORE_ASSERT(!s_Instance, "Application already exists!");
         s_Instance = this;
+        m_HeadlessRuntime =
+            s_RuntimeOptions.Headless ||
+            s_RuntimeOptions.DisableRenderer ||
+            s_RuntimeOptions.Profile == RuntimeOptions::RuntimeProfile::DedicatedServer;
 
-        m_Window = std::make_unique<Window>(WindowProps("AIGameEngine", 1280, 720));
-        m_Window->SetEventCallback(std::bind(&Application::OnEvent, this, std::placeholders::_1));
+        if (!m_HeadlessRuntime) {
+            m_Window = std::make_unique<Window>(WindowProps("AIGameEngine", 1280, 720));
+            m_Window->SetEventCallback(std::bind(&Application::OnEvent, this, std::placeholders::_1));
 
-        Input::Init();
-        m_VulkanContext = std::make_unique<RHI::VulkanContext>(m_Window.get());
-        m_VulkanContext->Init();
+            Input::Init();
+            m_VulkanContext = std::make_unique<RHI::VulkanContext>(m_Window.get());
+            m_VulkanContext->Init();
 
-        // Initialize debug/development UI
-        UI::UIManager::Get().Initialize(
-            m_VulkanContext.get(),
-            m_Window.get(),
-            m_VulkanContext->GetRenderPass()
-        );
+            if (!s_RuntimeOptions.DisableUI) {
+                // Initialize debug/development UI
+                UI::UIManager::Get().Initialize(
+                    m_VulkanContext.get(),
+                    m_Window.get(),
+                    m_VulkanContext->GetRenderPass()
+                );
 
-        if (UI::UIManager::Get().IsInitialized()) {
-            UI::UIManager::Get().SetDebugOverlayEnabled(true);
-            // Keep the interactive demo visible to confirm UI input works in release.
-            UI::UIManager::Get().GetImGui().GetConfig().showDemoWindow = true;
-            UI::UIManager::Get().GetImGui().GetConfig().showRenderStats = true;
+                if (UI::UIManager::Get().IsInitialized()) {
+                    UI::UIManager::Get().SetDebugOverlayEnabled(true);
+                    // Keep the interactive demo visible to confirm UI input works in release.
+                    UI::UIManager::Get().GetImGui().GetConfig().showDemoWindow = true;
+                    UI::UIManager::Get().GetImGui().GetConfig().showRenderStats = true;
+                }
+            }
         }
 
         ApplyRuntimeOptions();
@@ -64,6 +72,15 @@ namespace Core {
     void Application::Run() {
         PROFILE_FUNCTION();
         ENGINE_CORE_INFO("Application initialized and running.");
+
+        if (m_HeadlessRuntime) {
+            while (m_Running) {
+                Asset::HotReload::AssetHotReloadService::Get().PumpFrameSafePoint();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            ENGINE_CORE_INFO("Application shutting down.");
+            return;
+        }
 
         auto lastFrameTime = std::chrono::high_resolution_clock::now();
 
@@ -123,6 +140,10 @@ namespace Core {
     }
 
     bool Application::OnKeyPress(KeyPressedEvent& e) {
+        if (m_HeadlessRuntime) {
+            return false;
+        }
+
         // Don't hijack keyboard if UI currently owns input.
         if (UI::UIManager::Get().WantsKeyboardInput()) {
             return false;

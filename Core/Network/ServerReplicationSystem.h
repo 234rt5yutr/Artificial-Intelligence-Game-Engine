@@ -236,7 +236,7 @@ namespace Network {
         void ProcessTransformUpdates(ECS::Scene& scene, float deltaTime);
 
         // Send a transform sync packet to a client
-        void SendTransformPacket(uint32_t clientId, const std::vector<NetTransform>& transforms);
+        void SendTransformPacket(uint32_t clientId, const std::vector<NetTransform>& transforms, int sendFlags);
 
         // Send entity spawn packet
         void SendEntitySpawnPacket(uint32_t clientId, uint32_t networkId, ECS::Scene& scene);

@@ -1,5 +1,10 @@
 #include "Core/Network/NetworkServer.h"
 #include "Core/Log.h"
+#include "Core/Network/Diagnostics/NetworkDiagnosticsState.h"
+#include "Core/Network/NetworkContractState.h"
+#include "Core/Network/NetworkHash.h"
+#include "Core/Network/Replay/NetworkReplayRecorder.h"
+#include "Core/Network/RPC/NetworkRPCRegistry.h"
 #include "Core/Profile.h"
 #include <cstring>
 
@@ -146,6 +151,7 @@ namespace Network {
         PROFILE_FUNCTION();
 
         ISteamNetworkingSockets* sockets = NetworkManager::Get().GetSockets();
+        const uint32_t replayFrameTick = NetworkDiagnosticsState::Get().GetSnapshot().LastServerTick;
 
         // Receive messages from all clients in the poll group
         constexpr int MAX_MESSAGES = 64;
@@ -159,6 +165,24 @@ namespace Network {
             // Find which client sent this message
             uint32_t clientId = FindClientIdByConnection(msg->m_conn);
             if (clientId != 0) {
+                if (!m_SessionId.empty() && msg->m_cbSize > 0) {
+                    uint32_t packetType = 0;
+                    if (msg->m_cbSize >= static_cast<int>(sizeof(PacketHeader))) {
+                        const auto* header = static_cast<const PacketHeader*>(msg->m_pData);
+                        packetType = static_cast<uint32_t>(header->Type);
+                    }
+
+                    const uint64_t payloadHash = HashBytesFNV1a(msg->m_pData, static_cast<size_t>(msg->m_cbSize));
+                    NetworkReplayRecorder::Get().RecordPacketSample(
+                        m_SessionId,
+                        ReplayPacketDirection::Inbound,
+                        replayFrameTick,
+                        0,
+                        static_cast<uint32_t>(msg->m_cbSize),
+                        payloadHash,
+                        packetType);
+                }
+
                 auto it = m_Clients.find(clientId);
                 if (it != m_Clients.end()) {
                     // Check if handshake is complete
@@ -166,9 +190,50 @@ namespace Network {
                         // Process as handshake packet
                         ProcessHandshakePacket(clientId, msg->m_pData, static_cast<uint32_t>(msg->m_cbSize));
                     }
-                    else if (m_OnMessage) {
-                        // Forward to game message callback
-                        m_OnMessage(clientId, msg->m_pData, msg->m_cbSize);
+                    else {
+                        bool allowForward = true;
+                        if (msg->m_cbSize >= static_cast<int>(sizeof(PacketHeader))) {
+                            const auto* header = static_cast<const PacketHeader*>(msg->m_pData);
+                            if (header->Type == PacketType::RemoteCall &&
+                                msg->m_cbSize >= static_cast<int>(sizeof(RemoteCallPacket))) {
+                                const auto* rpcPacket = static_cast<const RemoteCallPacket*>(msg->m_pData);
+                                const NetworkRPCValidationResult validation =
+                                    NetworkRPCRegistry::Get().ValidateInvocation(
+                                        rpcPacket->FunctionHash,
+                                        it->second.IsAuthenticated,
+                                        false);
+                                if (!validation.Allowed) {
+                                    allowForward = false;
+
+                                    NetworkDiagnosticsState::Get().RecordEvent(
+                                        "RPCRejected: client=" + std::to_string(clientId) +
+                                        " reason=" + validation.ErrorCode);
+
+                                    RemoteCallResponsePacket response;
+                                    response.Header.Type = PacketType::RemoteCallResponse;
+                                    response.Header.Flags = static_cast<uint8_t>(PacketFlags::Reliable);
+                                    response.Header.PayloadSize =
+                                        static_cast<uint16_t>(sizeof(RemoteCallResponsePacket) - sizeof(PacketHeader));
+                                    response.Header.SequenceNumber = 0;
+                                    response.Header.Timestamp = static_cast<uint64_t>(NetworkManager::Get().GetCurrentTime());
+                                    response.CallId = rpcPacket->CallId;
+                                    response.ResultCode = (validation.ErrorCode == NET_RPC_AUTH_FAILED) ? 403U : 400U;
+                                    response.PayloadSize = 0;
+
+                                    sockets->SendMessageToConnection(
+                                        msg->m_conn,
+                                        &response,
+                                        sizeof(response),
+                                        k_nSteamNetworkingSend_Reliable,
+                                        nullptr);
+                                }
+                            }
+                        }
+
+                        if (allowForward && m_OnMessage) {
+                            // Forward to game message callback
+                            m_OnMessage(clientId, msg->m_pData, msg->m_cbSize);
+                        }
                     }
                 }
             }
@@ -195,6 +260,25 @@ namespace Network {
             sendFlags,
             nullptr
         );
+
+        if (result == k_EResultOK && !m_SessionId.empty() && data != nullptr && size > 0) {
+            uint32_t packetType = 0;
+            if (size >= sizeof(PacketHeader)) {
+                const auto* header = static_cast<const PacketHeader*>(data);
+                packetType = static_cast<uint32_t>(header->Type);
+            }
+
+            const uint64_t payloadHash = HashBytesFNV1a(data, size);
+            const uint32_t replayFrameTick = NetworkDiagnosticsState::Get().GetSnapshot().LastServerTick;
+            NetworkReplayRecorder::Get().RecordPacketSample(
+                m_SessionId,
+                ReplayPacketDirection::Outbound,
+                replayFrameTick,
+                0,
+                size,
+                payloadHash,
+                packetType);
+        }
 
         return result == k_EResultOK;
     }
@@ -500,19 +584,42 @@ namespace Network {
         }
 
         // Check protocol version
-        if (packet.ProtocolVersion != 1) {
-            ENGINE_CORE_WARN("Client {}: Protocol version mismatch (client: {}, server: 1)",
-                             clientId, packet.ProtocolVersion);
+        if (packet.ProtocolVersion != NETWORK_PROTOCOL_VERSION) {
+            ENGINE_CORE_WARN("Client {}: Protocol version mismatch (client: {}, server: {})",
+                             clientId, packet.ProtocolVersion, NETWORK_PROTOCOL_VERSION);
             RejectClient(clientId, RejectionReason::VersionMismatch, "Protocol version mismatch");
             return;
+        }
+
+        const uint64_t serverContractHash = GetNetworkContractHash();
+        const bool contractMismatch =
+            serverContractHash != 0 && packet.ContractSignatureHash != serverContractHash;
+        if (contractMismatch) {
+            if (!IsBackwardsCompatibilityMode()) {
+                ENGINE_CORE_WARN("Client {}: Contract hash mismatch (client: {}, server: {})",
+                                 clientId,
+                                 packet.ContractSignatureHash,
+                                 serverContractHash);
+                NetworkDiagnosticsState::Get().IncrementContractHashMismatch();
+                NetworkDiagnosticsState::Get().RecordEvent("ContractMismatchRejected: client=" + std::to_string(clientId));
+                RejectClient(clientId, RejectionReason::VersionMismatch, "Contract compatibility mismatch");
+                return;
+            }
+
+            it->second.UsedCompatibilityDowngrade = true;
+            NetworkDiagnosticsState::Get().IncrementContractHashMismatch();
+            NetworkDiagnosticsState::Get().SetCompatibilityDowngradeActive(true);
+            NetworkDiagnosticsState::Get().RecordEvent("ContractMismatchDowngrade: client=" + std::to_string(clientId));
         }
 
         // Store client info
         it->second.ClientName = packet.ClientName;
         it->second.ProtocolVersion = packet.ProtocolVersion;
+        it->second.ContractHash = packet.ContractSignatureHash;
+        NetworkDiagnosticsState::Get().SetContractHash(serverContractHash);
 
-        ENGINE_CORE_INFO("Client {}: ClientHello received - Name: '{}', Protocol: {}",
-                         clientId, it->second.ClientName, packet.ProtocolVersion);
+        ENGINE_CORE_INFO("Client {}: ClientHello received - Name: '{}', Protocol: {}, ContractHash: {}",
+                         clientId, it->second.ClientName, packet.ProtocolVersion, packet.ContractSignatureHash);
 
         // Send welcome response
         SendServerWelcome(clientId);
@@ -559,6 +666,8 @@ namespace Network {
         packet.Type = HandshakePacketType::ServerWelcome;
         packet.AssignedClientId = clientId;
         packet.ServerTickRate = m_Config.TickRate;
+        packet.ContractSignatureHash = GetNetworkContractHash();
+        packet.CompatibilityMode = IsBackwardsCompatibilityMode() ? 1 : 0;
 
         SAFE_STRCPY(packet.ServerName, m_Config.ServerName.c_str(), sizeof(packet.ServerName));
         SAFE_STRCPY(packet.Message, m_Config.WelcomeMessage.c_str(), sizeof(packet.Message));

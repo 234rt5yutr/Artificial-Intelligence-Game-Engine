@@ -30,8 +30,32 @@ int main(int argc, char** argv) {
             runtimeOptions.EnableStartupWarmupMode = true;
             continue;
         }
+        if (arg == "--headless") {
+            runtimeOptions.Headless = true;
+            continue;
+        }
+        if (arg == "--disable-renderer") {
+            runtimeOptions.DisableRenderer = true;
+            continue;
+        }
+        if (arg == "--disable-ui") {
+            runtimeOptions.DisableUI = true;
+            continue;
+        }
         if (arg == "--capture-trace") {
             runtimeOptions.CaptureStartupGPUTrace = true;
+            continue;
+        }
+        constexpr std::string_view runtimeProfilePrefix = "--runtime-profile=";
+        if (arg.rfind(runtimeProfilePrefix, 0) == 0) {
+            const std::string_view profileValue = arg.substr(runtimeProfilePrefix.size());
+            if (profileValue == "client") {
+                runtimeOptions.Profile = Core::Application::RuntimeOptions::RuntimeProfile::Client;
+            } else if (profileValue == "listen") {
+                runtimeOptions.Profile = Core::Application::RuntimeOptions::RuntimeProfile::ListenServer;
+            } else if (profileValue == "dedicated") {
+                runtimeOptions.Profile = Core::Application::RuntimeOptions::RuntimeProfile::DedicatedServer;
+            }
             continue;
         }
         constexpr std::string_view upscalerPrefix = "--upscaler=";

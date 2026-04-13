@@ -14,6 +14,7 @@ namespace MCP {
         m_HttpServer = std::make_unique<HttpServer>();
         m_ServerInfo.Name = config.ServerName;
         m_ServerInfo.Version = config.ServerVersion;
+        RebuildConfigCapabilities();
         
         ENGINE_CORE_INFO("MCP Server created: {}:{}", config.Host, config.Port);
     }
@@ -30,6 +31,7 @@ namespace MCP {
         m_Config = config;
         m_ServerInfo.Name = config.ServerName;
         m_ServerInfo.Version = config.ServerVersion;
+        RebuildConfigCapabilities();
     }
 
     void MCPServer::SetActiveScene(ECS::Scene* scene) {
@@ -347,21 +349,39 @@ namespace MCP {
             }
         }
 
+        std::unordered_set<std::string> grantedCapabilities = m_ConfigCapabilities;
+        if (request.params.contains("capabilityScopes") && request.params["capabilityScopes"].is_array()) {
+            grantedCapabilities.clear();
+            for (const auto& capability : request.params["capabilityScopes"]) {
+                if (capability.is_string()) {
+                    grantedCapabilities.insert(capability.get<std::string>());
+                }
+            }
+        }
+
         // Update session state
         {
             std::lock_guard lock(m_SessionMutex);
             m_Session.Initialized = true;
             m_Session.Client = clientInfo;
+            m_Session.GrantedCapabilities = grantedCapabilities;
         }
 
         ENGINE_CORE_INFO("MCP: Client initialized - {} v{}", 
                          clientInfo.Name, clientInfo.Version);
 
+        Json capabilitiesArray = Json::array();
+        for (const auto& capability : grantedCapabilities) {
+            capabilitiesArray.push_back(capability);
+        }
+
         // Build response
         Json result = {
             {"protocolVersion", MCP_PROTOCOL_VERSION},
             {"capabilities", m_Capabilities.ToJson()},
-            {"serverInfo", m_ServerInfo.ToJson()}
+            {"serverInfo", m_ServerInfo.ToJson()},
+            {"capabilityScopes", capabilitiesArray},
+            {"capabilityScopeEnforced", m_Config.EnforceCapabilityScopes}
         };
 
         return JsonRpcResponse::Success(request.id, result);
@@ -421,6 +441,19 @@ namespace MCP {
                 JsonRpcError::InternalError,
                 "Tool is not available: " + toolName
             );
+        }
+
+        if (m_Config.EnforceCapabilityScopes) {
+            const auto requiredCapabilities = tool->RequiredCapabilities();
+            for (const std::string& capability : requiredCapabilities) {
+                if (!HasGrantedCapability(capability)) {
+                    return JsonRpcResponse::Error(
+                        request.id,
+                        JsonRpcError::InvalidParams,
+                        "Missing capability scope: " + capability
+                    );
+                }
+            }
         }
 
         // Validate arguments
@@ -506,6 +539,23 @@ namespace MCP {
         
         if (m_Config.EnableLogging) {
             ENGINE_CORE_TRACE("MCP Notification: {} - {}", method, params.dump());
+        }
+    }
+
+    bool MCPServer::HasGrantedCapability(const std::string& capability) const {
+        std::lock_guard lock(m_SessionMutex);
+
+        if (!m_Session.GrantedCapabilities.empty()) {
+            return m_Session.GrantedCapabilities.contains(capability);
+        }
+
+        return m_ConfigCapabilities.contains(capability);
+    }
+
+    void MCPServer::RebuildConfigCapabilities() {
+        m_ConfigCapabilities.clear();
+        for (const std::string& capability : m_Config.GrantedCapabilities) {
+            m_ConfigCapabilities.insert(capability);
         }
     }
 

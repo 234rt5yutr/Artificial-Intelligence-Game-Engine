@@ -27,6 +27,9 @@ namespace Network {
         uint64_t ConnectedTimestamp = 0;
         uint32_t ClientId = 0;      // Server-assigned unique ID
         uint32_t ProtocolVersion = 0;   // Client's protocol version
+        uint64_t ContractHash = 0;
+        bool UsedCompatibilityDowngrade = false;
+        bool IsAuthenticated = false;
         NetworkStats Stats;
     };
 
@@ -106,6 +109,10 @@ namespace Network {
         // Reject a client with reason
         void RejectClient(uint32_t clientId, RejectionReason reason, const char* message = nullptr);
 
+        // Associate a product-layer session ID with this server instance.
+        void SetSessionId(const std::string& sessionId) { m_SessionId = sessionId; }
+        const std::string& GetSessionId() const { return m_SessionId; }
+
     private:
         // Handle connection status changes
         void OnConnectionStatusChanged(SteamNetConnectionStatusChangedCallback_t* pInfo);
@@ -167,6 +174,9 @@ namespace Network {
 
         // Singleton for callback routing
         static NetworkServer* s_Instance;
+
+        // Optional product-layer session identity
+        std::string m_SessionId;
     };
 
 } // namespace Network

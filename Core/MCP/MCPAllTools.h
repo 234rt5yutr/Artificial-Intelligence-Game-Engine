@@ -17,6 +17,7 @@
 #include "MCPGameplayTools.h"
 #include "MCPRayTracingTools.h"
 #include "MCPPhysicsTools.h"
+#include "MCPNetworkTools.h"
 
 namespace Core {
 namespace MCP {
@@ -124,6 +125,10 @@ namespace MCP {
         // Add physics tools (TriggerDestruction, SpawnRagdoll, ModifyConstraint, QueryPhysicsState, ApplyForce)
         auto physicsTools = CreatePhysicsTools();
         tools.insert(tools.end(), physicsTools.begin(), physicsTools.end());
+
+        // Add network product-layer tools (session, discovery, diagnostics)
+        auto networkTools = CreateNetworkTools();
+        tools.insert(tools.end(), networkTools.begin(), networkTools.end());
 
         return tools;
     }

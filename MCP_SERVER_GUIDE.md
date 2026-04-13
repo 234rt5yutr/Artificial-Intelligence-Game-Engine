@@ -148,4 +148,3 @@ Implemented by `MCPServer`:
 2. Validate and gate tool exposure in production-like environments.
 3. If tools require scene mutation, ensure `SetActiveScene(...)` is configured.
 4. Prefer explicit allowlists for external clients and requests.
-

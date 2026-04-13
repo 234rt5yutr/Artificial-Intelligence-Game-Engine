@@ -164,6 +164,7 @@ add_library(EngineCore
     Core/MCP/AutoLevelDesigner.h
     Core/MCP/MCPAllTools.h
     Core/MCP/MCPAudioTools.h
+    Core/MCP/MCPNetworkTools.h
     Core/State/SceneLoader.h
     Core/State/SceneLoader.cpp
     Core/State/TransitionManager.h
@@ -283,6 +284,37 @@ add_library(EngineCore
     Core/Physics/PhysicsWorld.cpp
     Core/Physics/EngineJobSystemAdapter.h
     Core/Physics/EngineJobSystemAdapter.cpp
+    Core/Network/NetworkHash.h
+    Core/Network/NetworkContractState.h
+    Core/Network/NetworkContractState.cpp
+    Core/Network/Diagnostics/NetworkDiagnosticsState.h
+    Core/Network/Diagnostics/NetworkDiagnosticsState.cpp
+    Core/Network/Session/SessionTypes.h
+    Core/Network/Session/SessionOrchestrator.h
+    Core/Network/Session/SessionOrchestrator.cpp
+    Core/Network/Policies/ReplicationPolicyTypes.h
+    Core/Network/Policies/ReplicationPolicyRegistry.h
+    Core/Network/Policies/ReplicationPolicyRegistry.cpp
+    Core/Network/RPC/NetworkRPCTypes.h
+    Core/Network/RPC/NetworkRPCRegistry.h
+    Core/Network/RPC/NetworkRPCRegistry.cpp
+    Core/Network/Replay/ReplayTypes.h
+    Core/Network/Replay/NetworkReplayRecorder.h
+    Core/Network/Replay/NetworkReplayRecorder.cpp
+    Core/Network/Replay/NetworkReplayPlayer.h
+    Core/Network/Replay/NetworkReplayPlayer.cpp
+    Core/Network/Rollback/RollbackTypes.h
+    Core/Network/Rollback/RollbackCoordinator.h
+    Core/Network/Rollback/RollbackCoordinator.cpp
+    Core/Network/Rollback/PredictionResimulation.h
+    Core/Network/Rollback/PredictionResimulation.cpp
+    Core/Network/Migration/HostMigrationTypes.h
+    Core/Network/Migration/HostMigrationCoordinator.h
+    Core/Network/Migration/HostMigrationCoordinator.cpp
+    Core/Network/MultiplayerRuntimeFeatures.h
+    Core/Network/MultiplayerRuntimeFeatures.cpp
+    Core/Network/MultiplayerProductLayer.h
+    Core/Network/MultiplayerProductLayer.cpp
     Core/Network/NetworkManager.h
     Core/Network/NetworkManager.cpp
     Core/Network/NetworkPackets.h

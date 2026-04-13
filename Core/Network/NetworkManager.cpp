@@ -53,6 +53,11 @@ namespace Network {
         return *s_Instance;
     }
 
+    bool NetworkManager::HasInstance()
+    {
+        return s_Instance != nullptr;
+    }
+
     bool NetworkManager::Initialize()
     {
         PROFILE_FUNCTION();
