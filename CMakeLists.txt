@@ -376,6 +376,9 @@ add_library(EngineCore
     Core/UI/Authoring/WidgetLayoutAsset.cpp
     Core/UI/Authoring/UIAssetAuthoringService.h
     Core/UI/Authoring/UIAssetAuthoringService.cpp
+    Core/UI/Binding/UIBindingTypes.h
+    Core/UI/Binding/UIBindingService.h
+    Core/UI/Binding/UIBindingService.cpp
     # Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring
     Core/Editor/Result.h
     Core/Editor/EditorState.h

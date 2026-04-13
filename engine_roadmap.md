@@ -387,7 +387,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 27.1.4: Reconcile `Widget`/`WidgetSystem` runtime contract for Stage 27. (v0.27.1.4)
   * [x] Sub-step 27.1.5: Wire Stage 27 compile surface + runtime initialization flow. (v0.27.1.5)
 * [ ] Step 27.2: Add robust UI data binding and transition system.
-  * [ ] Sub-step 27.2.1: Implement `BindWidgetPropertyToData()` with one-way/two-way binding modes and validation hooks. (v0.27.2.1)
+  * [x] Sub-step 27.2.1: Implement `BindWidgetPropertyToData()` with one-way/two-way binding modes and validation hooks. (v0.27.2.1)
   * [ ] Sub-step 27.2.2: Implement `AnimateWidgetTransition()` with timeline-driven state changes. (v0.27.2.2)
   * [ ] Sub-step 27.2.3: Add binding/transition precedence arbitration and conflict diagnostics. (v0.27.2.3)
   * [ ] Sub-step 27.2.4: Extend MCP/debug tooling for live binding/transition control. (v0.27.2.4)

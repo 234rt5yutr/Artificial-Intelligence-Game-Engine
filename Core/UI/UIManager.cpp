@@ -4,6 +4,7 @@
 #include "Core/Window.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/UI/Authoring/UIAssetAuthoringService.h"
+#include "Core/UI/Binding/UIBindingService.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 
 namespace Core {
@@ -71,8 +72,9 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     Widgets::WidgetSystem::Get().Initialize();
     Widgets::WidgetSystem::Get().SetScreenSize(m_ViewportSize);
     (void)Authoring::UIAssetAuthoringService::Get();
+    (void)Binding::UIBindingService::Get();
     m_Stage27ServicesInitialized = true;
-    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + UIAssetAuthoringService)");
+    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding)");
 
     m_Initialized = true;
     ENGINE_CORE_INFO("UIManager initialized (viewport: {}x{})", 
@@ -147,6 +149,7 @@ void UIManager::Update(float deltaTime) {
 
     if (m_Stage27ServicesInitialized) {
         Widgets::WidgetSystem::Get().Update(deltaTime);
+        Binding::UIBindingService::Get().UpdateBindings();
     }
 
     if (m_EditorModule && m_EditorModule->IsEnabled()) {
