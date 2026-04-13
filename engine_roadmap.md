@@ -384,7 +384,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 27.1.1: Implement `CreateWidgetBlueprintAsset()` for reusable UI prefabs and style inheritance. (v0.27.1.1)
   * [x] Sub-step 27.1.2: Implement `LoadWidgetLayoutAsset()` with async dependency loading and instance pooling. (v0.27.1.2)
   * [x] Sub-step 27.1.3: Integrate Stage 27 UI asset cook/load pipeline and dependency tracking. (v0.27.1.3)
-  * [ ] Sub-step 27.1.4: Reconcile `Widget`/`WidgetSystem` runtime contract for Stage 27. (v0.27.1.4)
+  * [x] Sub-step 27.1.4: Reconcile `Widget`/`WidgetSystem` runtime contract for Stage 27. (v0.27.1.4)
   * [ ] Sub-step 27.1.5: Wire Stage 27 compile surface + runtime initialization flow. (v0.27.1.5)
 * [ ] Step 27.2: Add robust UI data binding and transition system.
   * [ ] Sub-step 27.2.1: Implement `BindWidgetPropertyToData()` with one-way/two-way binding modes and validation hooks. (v0.27.2.1)

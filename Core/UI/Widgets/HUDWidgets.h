@@ -25,6 +25,9 @@ namespace Widgets {
         void SetWrapWidth(float width) { m_WrapWidth = width; }
         float GetWrapWidth() const { return m_WrapWidth; }
 
+        bool SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) override;
+        std::optional<PropertyValue> GetPropertyValue(std::string_view propertyPath) const override;
+
     protected:
         void OnRender(float deltaTime) override;
         glm::vec2 CalculatePreferredSize() const override;
@@ -89,6 +92,9 @@ namespace Widgets {
         void SetAnimated(bool animated) { m_Animated = animated; }
         void SetAnimationSpeed(float speed) { m_AnimationSpeed = speed; }
 
+        bool SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) override;
+        std::optional<PropertyValue> GetPropertyValue(std::string_view propertyPath) const override;
+
     protected:
         void OnRender(float deltaTime) override;
         void OnUpdate(float deltaTime) override;
@@ -132,6 +138,9 @@ namespace Widgets {
 
         void SetDamageFlashDuration(float duration) { m_DamageFlashDuration = duration; }
         void TriggerDamageFlash();
+
+        bool SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) override;
+        std::optional<PropertyValue> GetPropertyValue(std::string_view propertyPath) const override;
 
     protected:
         void OnRender(float deltaTime) override;
@@ -186,6 +195,9 @@ namespace Widgets {
 
         void SetHitMarkerEnabled(bool enabled) { m_HitMarkerEnabled = enabled; }
         void TriggerHitMarker();
+
+        bool SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) override;
+        std::optional<PropertyValue> GetPropertyValue(std::string_view propertyPath) const override;
 
     protected:
         void OnRender(float deltaTime) override;
@@ -332,6 +344,9 @@ namespace Widgets {
         void Hide();
 
         void SetIcon(NotificationType type, const std::string& iconPath);
+
+        bool SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) override;
+        std::optional<PropertyValue> GetPropertyValue(std::string_view propertyPath) const override;
 
     protected:
         void OnRender(float deltaTime) override;

@@ -5,6 +5,14 @@
 namespace Core {
 namespace UI {
 namespace Widgets {
+namespace {
+
+    template<typename T>
+    const T* TryGetHudValue(const Widget::PropertyValue& value) {
+        return std::get_if<T>(&value);
+    }
+
+}
 
 // =============================================================================
 // Label Widget
@@ -16,6 +24,34 @@ Label::Label(const std::string& id) : Widget(id) {
 
 void Label::SetText(const std::string& text) {
     m_Text = text;
+}
+
+bool Label::SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) {
+    if (propertyPath == "text") {
+        if (const std::string* stringValue = TryGetHudValue<std::string>(value)) {
+            SetText(*stringValue);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "wrapWidth") {
+        if (const float* wrapValue = TryGetHudValue<float>(value)) {
+            SetWrapWidth(*wrapValue);
+            return true;
+        }
+        return false;
+    }
+    return Widget::SetPropertyValue(propertyPath, value);
+}
+
+std::optional<Widget::PropertyValue> Label::GetPropertyValue(std::string_view propertyPath) const {
+    if (propertyPath == "text") {
+        return PropertyValue(m_Text);
+    }
+    if (propertyPath == "wrapWidth") {
+        return PropertyValue(m_WrapWidth);
+    }
+    return Widget::GetPropertyValue(propertyPath);
 }
 
 void Label::OnRender(float deltaTime) {
@@ -60,6 +96,54 @@ void ProgressBar::SetValue(float value) {
     m_Value = std::clamp(value, m_MinValue, m_MaxValue);
 }
 
+bool ProgressBar::SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) {
+    if (propertyPath == "value") {
+        if (const float* floatValue = TryGetHudValue<float>(value)) {
+            SetValue(*floatValue);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "minValue") {
+        if (const float* floatValue = TryGetHudValue<float>(value)) {
+            SetMinValue(*floatValue);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "maxValue") {
+        if (const float* floatValue = TryGetHudValue<float>(value)) {
+            SetMaxValue(*floatValue);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "showPercentage") {
+        if (const bool* boolValue = TryGetHudValue<bool>(value)) {
+            SetShowPercentage(*boolValue);
+            return true;
+        }
+        return false;
+    }
+    return Widget::SetPropertyValue(propertyPath, value);
+}
+
+std::optional<Widget::PropertyValue> ProgressBar::GetPropertyValue(std::string_view propertyPath) const {
+    if (propertyPath == "value") {
+        return PropertyValue(m_Value);
+    }
+    if (propertyPath == "minValue") {
+        return PropertyValue(m_MinValue);
+    }
+    if (propertyPath == "maxValue") {
+        return PropertyValue(m_MaxValue);
+    }
+    if (propertyPath == "showPercentage") {
+        return PropertyValue(m_ShowPercentage);
+    }
+    return Widget::GetPropertyValue(propertyPath);
+}
+
 void ProgressBar::OnUpdate(float deltaTime) {
     Widget::OnUpdate(deltaTime);
     
@@ -93,6 +177,44 @@ void HealthBar::SetHealth(float current, float max) {
     if (current < oldHealth) {
         TriggerDamageFlash();
     }
+}
+
+bool HealthBar::SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) {
+    if (propertyPath == "health.current") {
+        if (const float* currentHealth = TryGetHudValue<float>(value)) {
+            SetHealth(*currentHealth, m_MaxHealth);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "health.max") {
+        if (const float* maxHealth = TryGetHudValue<float>(value)) {
+            SetHealth(m_CurrentHealth, *maxHealth);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "showNumbers") {
+        if (const bool* boolValue = TryGetHudValue<bool>(value)) {
+            SetShowNumbers(*boolValue);
+            return true;
+        }
+        return false;
+    }
+    return Widget::SetPropertyValue(propertyPath, value);
+}
+
+std::optional<Widget::PropertyValue> HealthBar::GetPropertyValue(std::string_view propertyPath) const {
+    if (propertyPath == "health.current") {
+        return PropertyValue(m_CurrentHealth);
+    }
+    if (propertyPath == "health.max") {
+        return PropertyValue(m_MaxHealth);
+    }
+    if (propertyPath == "showNumbers") {
+        return PropertyValue(m_ShowNumbers);
+    }
+    return Widget::GetPropertyValue(propertyPath);
 }
 
 void HealthBar::TriggerDamageFlash() {
@@ -137,13 +259,41 @@ glm::vec4 HealthBar::GetHealthColor(float percentage) const {
 // =============================================================================
 
 Crosshair::Crosshair(const std::string& id) : Widget(id) {
-    SetSize({64, 64});
+    Widget::SetSize({64, 64});
     SetAnchor(Anchor::Center);
     SetPivot(Anchor::Center);
 }
 
 void Crosshair::SetSpread(float spread) {
     m_Spread = std::max(0.0f, spread);
+}
+
+bool Crosshair::SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) {
+    if (propertyPath == "spread") {
+        if (const float* spreadValue = TryGetHudValue<float>(value)) {
+            SetSpread(*spreadValue);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "hitMarkerEnabled") {
+        if (const bool* boolValue = TryGetHudValue<bool>(value)) {
+            SetHitMarkerEnabled(*boolValue);
+            return true;
+        }
+        return false;
+    }
+    return Widget::SetPropertyValue(propertyPath, value);
+}
+
+std::optional<Widget::PropertyValue> Crosshair::GetPropertyValue(std::string_view propertyPath) const {
+    if (propertyPath == "spread") {
+        return PropertyValue(m_Spread);
+    }
+    if (propertyPath == "hitMarkerEnabled") {
+        return PropertyValue(m_HitMarkerEnabled);
+    }
+    return Widget::GetPropertyValue(propertyPath);
 }
 
 void Crosshair::TriggerHitMarker() {
@@ -264,6 +414,34 @@ void Notification::Hide() {
 
 void Notification::SetIcon(NotificationType type, const std::string& iconPath) {
     m_Icons[type] = iconPath;
+}
+
+bool Notification::SetPropertyValue(std::string_view propertyPath, const PropertyValue& value) {
+    if (propertyPath == "message") {
+        if (const std::string* message = TryGetHudValue<std::string>(value)) {
+            Show(*message, m_Type, m_DisplayDuration);
+            return true;
+        }
+        return false;
+    }
+    if (propertyPath == "displayDuration") {
+        if (const float* duration = TryGetHudValue<float>(value)) {
+            m_DisplayDuration = std::max(0.0f, *duration);
+            return true;
+        }
+        return false;
+    }
+    return Widget::SetPropertyValue(propertyPath, value);
+}
+
+std::optional<Widget::PropertyValue> Notification::GetPropertyValue(std::string_view propertyPath) const {
+    if (propertyPath == "message") {
+        return PropertyValue(m_Message);
+    }
+    if (propertyPath == "displayDuration") {
+        return PropertyValue(m_DisplayDuration);
+    }
+    return Widget::GetPropertyValue(propertyPath);
 }
 
 void Notification::OnUpdate(float deltaTime) {

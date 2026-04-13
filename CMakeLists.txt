@@ -358,6 +358,12 @@ add_library(EngineCore
     Core/UI/FontAtlas.h
     Core/UI/FontAtlas.cpp
     Core/UI/Anchoring.h
+    Core/UI/Widgets/Widget.h
+    Core/UI/Widgets/Widget.cpp
+    Core/UI/Widgets/WidgetSystem.h
+    Core/UI/Widgets/WidgetSystem.cpp
+    Core/UI/Widgets/HUDWidgets.h
+    Core/UI/Widgets/HUDWidgets.cpp
     # Phase 27: Runtime UI Authoring Foundations
     Core/UI/Authoring/WidgetBlueprintAsset.h
     Core/UI/Authoring/WidgetBlueprintAsset.cpp
