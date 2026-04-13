@@ -6,6 +6,7 @@
 
 #include <deque>
 #include <optional>
+#include <string_view>
 #include <unordered_map>
 
 namespace Core {
@@ -28,6 +29,14 @@ namespace Animation {
         uint32_t CancelWidgetTransitions(const std::string& widgetId);
         void ClearTransitions();
 
+        void SetPropertyLockMode(
+            const std::string& widgetId,
+            std::string_view propertyPath,
+            TransitionPropertyLockMode mode);
+        TransitionPropertyLockMode GetPropertyLockMode(
+            const std::string& widgetId,
+            std::string_view propertyPath) const;
+
         void UpdateTransitions(float deltaTime);
 
         std::optional<WidgetTransitionState> GetTransitionState(uint64_t transitionHandle) const;
@@ -48,6 +57,10 @@ namespace Animation {
             std::string* errorCode,
             std::string* message) const;
         bool IsSupportedPropertyPath(const std::string& path) const;
+        static std::string CanonicalizePropertyPath(std::string_view propertyPath);
+        static std::string MakeWidgetPropertyKey(
+            const std::string& widgetId,
+            std::string_view propertyPath);
 
         void PromoteQueuedTransitions();
         void MarkTransitionCancelled(TransitionRecord* record);
@@ -62,6 +75,7 @@ namespace Animation {
         uint64_t m_NextTransitionHandle = 1;
         std::unordered_map<uint64_t, TransitionRecord> m_Transitions;
         std::unordered_map<std::string, std::deque<uint64_t>> m_QueuedByWidget;
+        std::unordered_map<std::string, TransitionPropertyLockMode> m_PropertyLockModes;
         WidgetTransitionDiagnostics m_Diagnostics;
     };
 

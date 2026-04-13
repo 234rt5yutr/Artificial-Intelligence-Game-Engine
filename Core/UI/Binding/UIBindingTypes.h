@@ -46,6 +46,7 @@ namespace Binding {
         uint64_t ValidationFailures = 0;
         uint64_t CycleRejections = 0;
         uint64_t AutoCleanupRemovals = 0;
+        uint64_t TransitionSuppressions = 0;
     };
 
     using WidgetPropertyValue = Widget::PropertyValue;

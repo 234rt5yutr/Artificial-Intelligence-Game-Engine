@@ -1,11 +1,13 @@
 #include "Core/UI/Animation/WidgetTransitionService.h"
 
+#include "Core/UI/Binding/UIBindingService.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <type_traits>
+#include <utility>
 
 namespace Core {
 namespace UI {
@@ -156,6 +158,23 @@ namespace {
         }
         if (const glm::vec4* vec4Value = std::get_if<glm::vec4>(&value.value())) {
             return *vec4Value;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<float> ExtractFloat(
+        const std::optional<Widgets::WidgetSystem::WidgetPropertyValue>& value) {
+        if (!value.has_value()) {
+            return std::nullopt;
+        }
+        if (const float* floatValue = std::get_if<float>(&value.value())) {
+            return *floatValue;
+        }
+        if (const int32_t* intValue = std::get_if<int32_t>(&value.value())) {
+            return static_cast<float>(*intValue);
+        }
+        if (const bool* boolValue = std::get_if<bool>(&value.value())) {
+            return *boolValue ? 1.0f : 0.0f;
         }
         return std::nullopt;
     }
@@ -318,6 +337,31 @@ namespace {
         RefreshDiagnostics();
     }
 
+    void WidgetTransitionService::SetPropertyLockMode(
+        const std::string& widgetId,
+        std::string_view propertyPath,
+        TransitionPropertyLockMode mode) {
+        if (widgetId.empty()) {
+            return;
+        }
+        const std::string key = MakeWidgetPropertyKey(widgetId, propertyPath);
+        m_PropertyLockModes[key] = mode;
+    }
+
+    TransitionPropertyLockMode WidgetTransitionService::GetPropertyLockMode(
+        const std::string& widgetId,
+        std::string_view propertyPath) const {
+        if (widgetId.empty()) {
+            return TransitionPropertyLockMode::TransitionWins;
+        }
+        const std::string key = MakeWidgetPropertyKey(widgetId, propertyPath);
+        const auto modeIt = m_PropertyLockModes.find(key);
+        if (modeIt == m_PropertyLockModes.end()) {
+            return TransitionPropertyLockMode::TransitionWins;
+        }
+        return modeIt->second;
+    }
+
     void WidgetTransitionService::UpdateTransitions(float deltaTime) {
         if (deltaTime < 0.0f) {
             deltaTime = 0.0f;
@@ -415,19 +459,54 @@ namespace {
             }
         }
 
+        Binding::UIBindingService& bindingService = Binding::UIBindingService::Get();
+
         for (auto& [widgetId, accumulators] : widgetAccumulators) {
             if (Widgets::WidgetSystem::Get().FindWidget(widgetId) == nullptr) {
                 continue;
             }
 
+            auto resolveArbitration = [&](std::string_view propertyPath) {
+                const bool hasBinding = bindingService.HasBindingForProperty(widgetId, propertyPath);
+                const TransitionPropertyLockMode mode = GetPropertyLockMode(widgetId, propertyPath);
+                if (hasBinding) {
+                    ++m_Diagnostics.ArbitrationConflicts;
+                    switch (mode) {
+                        case TransitionPropertyLockMode::BindingWins:
+                            ++m_Diagnostics.BindingWinsResolutions;
+                            break;
+                        case TransitionPropertyLockMode::Blend:
+                            ++m_Diagnostics.BlendResolutions;
+                            break;
+                        case TransitionPropertyLockMode::TransitionWins:
+                        default:
+                            ++m_Diagnostics.TransitionWinsResolutions;
+                            break;
+                    }
+                }
+                return std::make_pair(mode, hasBinding);
+            };
+
             if (HasValue(accumulators.Alpha)) {
-                const float alpha = glm::clamp(GetAverage(accumulators.Alpha, 1.0f), 0.0f, 1.0f);
+                float alpha = glm::clamp(GetAverage(accumulators.Alpha, 1.0f), 0.0f, 1.0f);
+                const float currentAlpha = ExtractFloat(
+                    Widgets::WidgetSystem::Get().GetWidgetProperty(widgetId, "alpha")).value_or(alpha);
+                auto [mode, hasBinding] = resolveArbitration("alpha");
+                if (hasBinding && mode == TransitionPropertyLockMode::BindingWins) {
+                    continue;
+                }
+                if (hasBinding && mode == TransitionPropertyLockMode::Blend) {
+                    alpha = glm::mix(currentAlpha, alpha, 0.5f);
+                }
+
                 const bool applied = Widgets::WidgetSystem::Get().SetWidgetProperty(
                     widgetId,
                     "alpha",
                     Widgets::WidgetSystem::WidgetPropertyValue(alpha));
                 if (!applied) {
                     ++m_Diagnostics.ApplyFailures;
+                } else if (hasBinding) {
+                    bindingService.NotifyTransitionMutation(widgetId, "alpha");
                 }
             }
 
@@ -439,12 +518,26 @@ namespace {
                 }
                 base.x = GetAverage(accumulators.Position.X, base.x);
                 base.y = GetAverage(accumulators.Position.Y, base.y);
+
+                auto [mode, hasBinding] = resolveArbitration("position");
+                if (hasBinding && mode == TransitionPropertyLockMode::BindingWins) {
+                    continue;
+                }
+                if (hasBinding && mode == TransitionPropertyLockMode::Blend) {
+                    const glm::vec2 current = ExtractVec2(
+                        Widgets::WidgetSystem::Get().GetWidgetProperty(widgetId, "position")).value_or(base);
+                    base.x = glm::mix(current.x, base.x, 0.5f);
+                    base.y = glm::mix(current.y, base.y, 0.5f);
+                }
+
                 const bool applied = Widgets::WidgetSystem::Get().SetWidgetProperty(
                     widgetId,
                     "position",
                     Widgets::WidgetSystem::WidgetPropertyValue(base));
                 if (!applied) {
                     ++m_Diagnostics.ApplyFailures;
+                } else if (hasBinding) {
+                    bindingService.NotifyTransitionMutation(widgetId, "position");
                 }
             }
 
@@ -456,12 +549,26 @@ namespace {
                 }
                 base.x = glm::max(0.0f, GetAverage(accumulators.Scale.X, base.x));
                 base.y = glm::max(0.0f, GetAverage(accumulators.Scale.Y, base.y));
+
+                auto [mode, hasBinding] = resolveArbitration("scale");
+                if (hasBinding && mode == TransitionPropertyLockMode::BindingWins) {
+                    continue;
+                }
+                if (hasBinding && mode == TransitionPropertyLockMode::Blend) {
+                    const glm::vec2 current = ExtractVec2(
+                        Widgets::WidgetSystem::Get().GetWidgetProperty(widgetId, "scale")).value_or(base);
+                    base.x = glm::mix(current.x, base.x, 0.5f);
+                    base.y = glm::mix(current.y, base.y, 0.5f);
+                }
+
                 const bool applied = Widgets::WidgetSystem::Get().SetWidgetProperty(
                     widgetId,
                     "scale",
                     Widgets::WidgetSystem::WidgetPropertyValue(base));
                 if (!applied) {
                     ++m_Diagnostics.ApplyFailures;
+                } else if (hasBinding) {
+                    bindingService.NotifyTransitionMutation(widgetId, "scale");
                 }
             }
 
@@ -478,12 +585,28 @@ namespace {
                 base.g = glm::clamp(GetAverage(accumulators.Color.G, base.g), 0.0f, 1.0f);
                 base.b = glm::clamp(GetAverage(accumulators.Color.B, base.b), 0.0f, 1.0f);
                 base.a = glm::clamp(GetAverage(accumulators.Color.A, base.a), 0.0f, 1.0f);
+
+                auto [mode, hasBinding] = resolveArbitration("color");
+                if (hasBinding && mode == TransitionPropertyLockMode::BindingWins) {
+                    continue;
+                }
+                if (hasBinding && mode == TransitionPropertyLockMode::Blend) {
+                    const glm::vec4 current = ExtractVec4(
+                        Widgets::WidgetSystem::Get().GetWidgetProperty(widgetId, "color")).value_or(base);
+                    base.r = glm::mix(current.r, base.r, 0.5f);
+                    base.g = glm::mix(current.g, base.g, 0.5f);
+                    base.b = glm::mix(current.b, base.b, 0.5f);
+                    base.a = glm::mix(current.a, base.a, 0.5f);
+                }
+
                 const bool applied = Widgets::WidgetSystem::Get().SetWidgetProperty(
                     widgetId,
                     "color",
                     Widgets::WidgetSystem::WidgetPropertyValue(base));
                 if (!applied) {
                     ++m_Diagnostics.ApplyFailures;
+                } else if (hasBinding) {
+                    bindingService.NotifyTransitionMutation(widgetId, "color");
                 }
             }
 
@@ -491,12 +614,26 @@ namespace {
                 if (!HasValue(customAccumulator)) {
                     continue;
                 }
+
+                float customValue = GetAverage(customAccumulator, 0.0f);
+                const float currentValue = ExtractFloat(
+                    Widgets::WidgetSystem::Get().GetWidgetProperty(widgetId, propertyPath)).value_or(customValue);
+                auto [mode, hasBinding] = resolveArbitration(propertyPath);
+                if (hasBinding && mode == TransitionPropertyLockMode::BindingWins) {
+                    continue;
+                }
+                if (hasBinding && mode == TransitionPropertyLockMode::Blend) {
+                    customValue = glm::mix(currentValue, customValue, 0.5f);
+                }
+
                 const bool applied = Widgets::WidgetSystem::Get().SetWidgetProperty(
                     widgetId,
                     propertyPath,
-                    Widgets::WidgetSystem::WidgetPropertyValue(GetAverage(customAccumulator, 0.0f)));
+                    Widgets::WidgetSystem::WidgetPropertyValue(customValue));
                 if (!applied) {
                     ++m_Diagnostics.ApplyFailures;
+                } else if (hasBinding) {
+                    bindingService.NotifyTransitionMutation(widgetId, propertyPath);
                 }
             }
         }
@@ -635,6 +772,32 @@ namespace {
             previousWasDot = false;
         }
         return true;
+    }
+
+    std::string WidgetTransitionService::CanonicalizePropertyPath(std::string_view propertyPath) {
+        if (propertyPath == "offset") {
+            return "position";
+        }
+        if (propertyPath == "position" || propertyPath == "position.x" || propertyPath == "position.y") {
+            return "position";
+        }
+        if (propertyPath == "scale" || propertyPath == "scale.x" || propertyPath == "scale.y") {
+            return "scale";
+        }
+        if (propertyPath == "color" || propertyPath == "color.r" || propertyPath == "color.g" ||
+            propertyPath == "color.b" || propertyPath == "color.a") {
+            return "color";
+        }
+        if (propertyPath == "alpha") {
+            return "alpha";
+        }
+        return std::string(propertyPath);
+    }
+
+    std::string WidgetTransitionService::MakeWidgetPropertyKey(
+        const std::string& widgetId,
+        std::string_view propertyPath) {
+        return widgetId + "|" + CanonicalizePropertyPath(propertyPath);
     }
 
     void WidgetTransitionService::PromoteQueuedTransitions() {

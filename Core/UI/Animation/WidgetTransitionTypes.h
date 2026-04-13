@@ -51,6 +51,12 @@ namespace Animation {
         Cancelled
     };
 
+    enum class TransitionPropertyLockMode : uint8_t {
+        BindingWins = 0,
+        TransitionWins,
+        Blend
+    };
+
     struct TransitionChannelDefinition {
         TransitionChannelTarget Target = TransitionChannelTarget::Alpha;
         std::string PropertyPath;
@@ -102,6 +108,10 @@ namespace Animation {
         uint64_t CancelledTransitions = 0;
         uint64_t ParseFailures = 0;
         uint64_t ApplyFailures = 0;
+        uint64_t ArbitrationConflicts = 0;
+        uint64_t BindingWinsResolutions = 0;
+        uint64_t TransitionWinsResolutions = 0;
+        uint64_t BlendResolutions = 0;
     };
 
     inline std::optional<TransitionInterruptionPolicy> TransitionInterruptionPolicyFromString(
@@ -143,6 +153,33 @@ namespace Animation {
                 return "cancelled";
             default:
                 return "running";
+        }
+    }
+
+    inline std::optional<TransitionPropertyLockMode> TransitionPropertyLockModeFromString(
+        std::string_view value) {
+        if (value == "binding_wins") {
+            return TransitionPropertyLockMode::BindingWins;
+        }
+        if (value == "transition_wins") {
+            return TransitionPropertyLockMode::TransitionWins;
+        }
+        if (value == "blend") {
+            return TransitionPropertyLockMode::Blend;
+        }
+        return std::nullopt;
+    }
+
+    inline std::string TransitionPropertyLockModeToString(TransitionPropertyLockMode mode) {
+        switch (mode) {
+            case TransitionPropertyLockMode::BindingWins:
+                return "binding_wins";
+            case TransitionPropertyLockMode::TransitionWins:
+                return "transition_wins";
+            case TransitionPropertyLockMode::Blend:
+                return "blend";
+            default:
+                return "transition_wins";
         }
     }
 

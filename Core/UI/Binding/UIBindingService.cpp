@@ -141,6 +141,7 @@ namespace {
         m_BindingsByWidget.clear();
         m_BindingsByDataPath.clear();
         m_DirtyQueue.clear();
+        m_TwoWaySuppressionFrames.clear();
         m_Diagnostics.ActiveBindings = 0;
     }
 
@@ -183,6 +184,36 @@ namespace {
             return std::nullopt;
         }
         return std::make_optional<nlohmann::json>(*resolved);
+    }
+
+    bool UIBindingService::HasBindingForProperty(
+        const std::string& widgetId,
+        std::string_view propertyPath) const {
+        const std::string canonicalRequestedPath = CanonicalizePropertyPath(propertyPath);
+        for (const auto& [handle, binding] : m_Bindings) {
+            (void)handle;
+            if (binding.Destroyed || binding.Request.WidgetId != widgetId) {
+                continue;
+            }
+
+            const std::string canonicalBindingPath =
+                CanonicalizePropertyPath(binding.Request.WidgetPropertyPath);
+            if (canonicalBindingPath == canonicalRequestedPath) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void UIBindingService::NotifyTransitionMutation(
+        const std::string& widgetId,
+        std::string_view propertyPath) {
+        if (widgetId.empty()) {
+            return;
+        }
+
+        const std::string key = MakeWidgetPropertyKey(widgetId, propertyPath);
+        m_TwoWaySuppressionFrames[key] = std::max<uint32_t>(m_TwoWaySuppressionFrames[key], 1u);
     }
 
     void UIBindingService::UpdateBindings(uint32_t maxIterations) {
@@ -260,6 +291,16 @@ namespace {
                 binding.Request.WidgetPropertyPath);
 
             if (binding.Request.Mode == BindingMode::TwoWay && binding.LastWidgetValue.has_value()) {
+                const std::string suppressionKey = MakeWidgetPropertyKey(
+                    binding.Request.WidgetId,
+                    binding.Request.WidgetPropertyPath);
+                auto suppressionIt = m_TwoWaySuppressionFrames.find(suppressionKey);
+                if (suppressionIt != m_TwoWaySuppressionFrames.end() && suppressionIt->second > 0) {
+                    ++m_Diagnostics.TransitionSuppressions;
+                    ++iterations;
+                    continue;
+                }
+
                 std::optional<nlohmann::json> jsonValue =
                     ConvertPropertyValueToJson(binding.LastWidgetValue.value());
                 if (jsonValue.has_value()) {
@@ -277,6 +318,7 @@ namespace {
         }
 
         m_Diagnostics.UpdateIterations += iterations;
+        AdvanceTransitionSuppressions();
         RemoveDestroyedBindings();
     }
 
@@ -402,6 +444,49 @@ namespace {
         for (const uint64_t handle : handlesIt->second) {
             m_DirtyQueue.push_back(handle);
         }
+    }
+
+    void UIBindingService::AdvanceTransitionSuppressions() {
+        std::vector<std::string> keysToErase;
+        keysToErase.reserve(m_TwoWaySuppressionFrames.size());
+        for (auto& [key, frames] : m_TwoWaySuppressionFrames) {
+            if (frames == 0) {
+                keysToErase.push_back(key);
+                continue;
+            }
+
+            --frames;
+            if (frames == 0) {
+                keysToErase.push_back(key);
+            }
+        }
+
+        for (const std::string& key : keysToErase) {
+            m_TwoWaySuppressionFrames.erase(key);
+        }
+    }
+
+    std::string UIBindingService::CanonicalizePropertyPath(std::string_view propertyPath) {
+        if (propertyPath == "offset") {
+            return "position";
+        }
+        if (propertyPath == "position.x" || propertyPath == "position.y") {
+            return "position";
+        }
+        if (propertyPath == "scale.x" || propertyPath == "scale.y") {
+            return "scale";
+        }
+        if (propertyPath == "color.r" || propertyPath == "color.g" ||
+            propertyPath == "color.b" || propertyPath == "color.a") {
+            return "color";
+        }
+        return std::string(propertyPath);
+    }
+
+    std::string UIBindingService::MakeWidgetPropertyKey(
+        const std::string& widgetId,
+        std::string_view propertyPath) {
+        return widgetId + "|" + CanonicalizePropertyPath(propertyPath);
     }
 
     void UIBindingService::RemoveDestroyedBindings() {
