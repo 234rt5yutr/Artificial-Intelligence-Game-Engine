@@ -2,6 +2,7 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Components/TransformComponent.h"
 #include "Core/UI/TextRenderer.h"
+#include "Core/UI/World/WorldSpaceWidgetRenderer.h"
 #include "Core/Log.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -97,33 +98,42 @@ void UISystem::UpdateUIComponent(UIComponent& ui, float deltaTime, const glm::ve
 void UISystem::UpdateWorldUIComponent(WorldUIComponent& worldUI, const glm::vec3& entityPosition,
                                        const glm::mat4& viewProj, const glm::vec3& cameraPosition,
                                        const glm::vec2& viewportSize) {
-    // Calculate distance to camera
-    worldUI.DistanceToCamera = glm::length(entityPosition - cameraPosition);
-
-    // Project to screen
-    worldUI.ScreenPosition = WorldToScreen(entityPosition, viewProj, viewportSize, worldUI.IsOnScreen);
-
-    // Calculate distance fade
-    if (worldUI.EnableDistanceFade) {
-        if (worldUI.DistanceToCamera >= worldUI.FadeEndDistance) {
-            worldUI.CurrentAlpha = 0.0f;
-        } else if (worldUI.DistanceToCamera <= worldUI.FadeStartDistance) {
-            worldUI.CurrentAlpha = 1.0f;
-        } else {
-            float t = (worldUI.DistanceToCamera - worldUI.FadeStartDistance) / 
-                      (worldUI.FadeEndDistance - worldUI.FadeStartDistance);
-            worldUI.CurrentAlpha = 1.0f - t;
-        }
+    (void)viewportSize;
+    UI::World::WorldSpaceWidgetRenderRequest request;
+    request.WidgetInstanceId = worldUI.WidgetId;
+    request.WorldPosition = entityPosition;
+    request.CameraPosition = cameraPosition;
+    request.ViewProjection = viewProj;
+    request.PerformOcclusionCheck = worldUI.OccludeByGeometry;
+    request.EnableDistanceFade = worldUI.EnableDistanceFade;
+    request.FadeStartDistance = worldUI.FadeStartDistance;
+    request.FadeEndDistance = worldUI.FadeEndDistance;
+    request.ScaleWithDistance = worldUI.ScaleWithDistance;
+    request.MinScale = worldUI.MinScale;
+    request.MaxScale = worldUI.MaxScale;
+    request.ReferenceDistance = worldUI.ReferenceDistance;
+    request.RouteInteraction = true;
+    if (worldUI.OccludeByGeometry && worldUI.EnableDistanceFade) {
+        request.DepthMode = UI::World::WorldWidgetDepthMode::DepthFade;
+    } else if (worldUI.OccludeByGeometry) {
+        request.DepthMode = UI::World::WorldWidgetDepthMode::DepthTest;
     } else {
-        worldUI.CurrentAlpha = 1.0f;
+        request.DepthMode = UI::World::WorldWidgetDepthMode::Overlay;
     }
 
-    // Scale based on distance
-    if (worldUI.ScaleWithDistance) {
-        float scaleFactor = worldUI.ReferenceDistance / glm::max(worldUI.DistanceToCamera, 0.1f);
-        scaleFactor = glm::clamp(scaleFactor, worldUI.MinScale, worldUI.MaxScale);
-        // Apply scale factor to size (stored for rendering)
+    const UI::World::WorldSpaceWidgetRenderResult renderResult =
+        UI::World::WorldSpaceWidgetRenderer::Get().RenderWorldSpaceWidget(request);
+    if (!renderResult.Success) {
+        worldUI.DistanceToCamera = glm::length(entityPosition - cameraPosition);
+        worldUI.ScreenPosition = WorldToScreen(entityPosition, viewProj, viewportSize, worldUI.IsOnScreen);
+        worldUI.CurrentAlpha = worldUI.IsOnScreen ? 1.0f : 0.0f;
+        return;
     }
+
+    worldUI.DistanceToCamera = renderResult.Visibility.DistanceToCamera;
+    worldUI.ScreenPosition = renderResult.Visibility.ScreenPosition;
+    worldUI.IsOnScreen = renderResult.Visibility.OnScreen;
+    worldUI.CurrentAlpha = renderResult.Visibility.Alpha;
 }
 
 glm::vec2 UISystem::WorldToScreen(const glm::vec3& worldPos, const glm::mat4& viewProj,

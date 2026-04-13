@@ -6,6 +6,7 @@
 #include "Core/UI/Authoring/UIAssetAuthoringService.h"
 #include "Core/UI/Binding/UIBindingService.h"
 #include "Core/UI/Animation/WidgetTransitionService.h"
+#include "Core/UI/World/WorldSpaceWidgetRenderer.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 
 #include <imgui.h>
@@ -81,8 +82,9 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     (void)Authoring::UIAssetAuthoringService::Get();
     (void)Binding::UIBindingService::Get();
     (void)Animation::WidgetTransitionService::Get();
+    (void)World::WorldSpaceWidgetRenderer::Get();
     m_Stage27ServicesInitialized = true;
-    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding + Transition)");
+    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding + Transition + World)");
 
     m_Initialized = true;
     ENGINE_CORE_INFO("UIManager initialized (viewport: {}x{})", 
@@ -114,6 +116,7 @@ void UIManager::Shutdown() {
     }
 
     if (m_Stage27ServicesInitialized) {
+        World::WorldSpaceWidgetRenderer::Get().ClearDiagnostics();
         Animation::WidgetTransitionService::Get().ClearTransitions();
         Binding::UIBindingService::Get().ClearBindings();
         Widgets::WidgetSystem::Get().Shutdown();
