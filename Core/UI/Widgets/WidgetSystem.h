@@ -79,6 +79,7 @@ namespace Widgets {
         void OnMouseButton(int button, bool pressed);
         void OnKeyEvent(int key, bool pressed);
         Widget* GetWidgetUnderCursor() const { return m_HoveredWidget; }
+        Widget* GetFocusedWidget() const { return m_FocusedWidget; }
 
         // Reflection hooks consumed by Stage 27 binding/transition services.
         bool SetWidgetProperty(const std::string& widgetId, std::string_view propertyPath, const WidgetPropertyValue& value);

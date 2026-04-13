@@ -6,11 +6,14 @@
 #include "Core/UI/Authoring/UIAssetAuthoringService.h"
 #include "Core/UI/Binding/UIBindingService.h"
 #include "Core/UI/Animation/WidgetTransitionService.h"
+#include "Core/UI/Localization/LocalizationService.h"
+#include "Core/UI/Modal/ModalDialogService.h"
 #include "Core/UI/World/WorldSpaceWidgetRenderer.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 
 #include <imgui.h>
 #include <algorithm>
+#include <optional>
 
 namespace Core {
 namespace UI {
@@ -82,9 +85,11 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     (void)Authoring::UIAssetAuthoringService::Get();
     (void)Binding::UIBindingService::Get();
     (void)Animation::WidgetTransitionService::Get();
+    (void)Localization::LocalizationService::Get();
+    (void)Modal::ModalDialogService::Get();
     (void)World::WorldSpaceWidgetRenderer::Get();
     m_Stage27ServicesInitialized = true;
-    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding + Transition + World)");
+    ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding + Transition + Localization + Modal + World)");
 
     m_Initialized = true;
     ENGINE_CORE_INFO("UIManager initialized (viewport: {}x{})", 
@@ -117,6 +122,7 @@ void UIManager::Shutdown() {
 
     if (m_Stage27ServicesInitialized) {
         World::WorldSpaceWidgetRenderer::Get().ClearDiagnostics();
+        Modal::ModalDialogService::Get().ClearModals();
         Animation::WidgetTransitionService::Get().ClearTransitions();
         Binding::UIBindingService::Get().ClearBindings();
         Widgets::WidgetSystem::Get().Shutdown();
@@ -161,6 +167,7 @@ void UIManager::Update(float deltaTime) {
     m_DeltaTime = deltaTime;
 
     if (m_Stage27ServicesInitialized) {
+        Modal::ModalDialogService::Get().Update(deltaTime);
         Widgets::WidgetSystem::Get().Update(deltaTime);
         Binding::UIBindingService::Get().UpdateBindings();
         Animation::WidgetTransitionService::Get().UpdateTransitions(deltaTime);
@@ -373,6 +380,8 @@ void UIManager::RenderStage27DiagnosticsPanel() {
     const std::vector<Binding::UIBindingState> bindings = Binding::UIBindingService::Get().GetBindingStates();
     const std::vector<Animation::WidgetTransitionState> transitions =
         Animation::WidgetTransitionService::Get().GetAllTransitionStates();
+    const std::optional<Modal::ModalSnapshot> activeModal = Modal::ModalDialogService::Get().GetActiveModal();
+    const std::vector<Modal::ModalSnapshot> queuedModals = Modal::ModalDialogService::Get().GetQueuedModals();
 
     if (!ImGui::Begin("Stage 27 Runtime Diagnostics", &m_ShowStage27DiagnosticsPanel)) {
         ImGui::End();
@@ -394,6 +403,10 @@ void UIManager::RenderStage27DiagnosticsPanel() {
                 static_cast<unsigned long long>(transitionDiagnostics.BindingWinsResolutions),
                 static_cast<unsigned long long>(transitionDiagnostics.TransitionWinsResolutions),
                 static_cast<unsigned long long>(transitionDiagnostics.BlendResolutions));
+    ImGui::Text("Modals: active=%s, queued=%zu, focusLock=%s",
+                activeModal.has_value() ? activeModal->ModalId.c_str() : "none",
+                queuedModals.size(),
+                Modal::ModalDialogService::Get().HasFocusLock() ? "true" : "false");
 
     if (ImGui::CollapsingHeader("Active Bindings", ImGuiTreeNodeFlags_DefaultOpen)) {
         const size_t displayCount = std::min<size_t>(bindings.size(), 32);
@@ -429,6 +442,16 @@ void UIManager::RenderStage27DiagnosticsPanel() {
         if (transitions.size() > displayCount) {
             ImGui::Text("... %zu more transitions", transitions.size() - displayCount);
         }
+    }
+
+    if (activeModal.has_value() &&
+        ImGui::CollapsingHeader("Active Localized Modal", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("ModalId: %s", activeModal->ModalId.c_str());
+        ImGui::Text("DialogId: %s", activeModal->DialogId.c_str());
+        ImGui::Text("ResolvedLocale: %s", activeModal->ResolvedLocale.c_str());
+        ImGui::Text("FallbackUsed: %s", activeModal->FallbackUsed ? "true" : "false");
+        ImGui::TextWrapped("Title: %s", activeModal->TitleText.c_str());
+        ImGui::TextWrapped("Body: %s", activeModal->BodyText.c_str());
     }
 
     ImGui::End();
@@ -470,6 +493,9 @@ bool UIManager::ProcessEvent(const SDL_Event& event) {
     }
 
     if (m_Stage27ServicesInitialized) {
+        if (Modal::ModalDialogService::Get().ProcessEvent(event)) {
+            return true;
+        }
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             Widgets::WidgetSystem::Get().OnMouseMove(
                 glm::vec2(event.motion.x, event.motion.y));
