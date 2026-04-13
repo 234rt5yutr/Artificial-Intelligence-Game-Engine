@@ -387,6 +387,8 @@ add_library(EngineCore
     Core/UI/Localization/LocalizationService.cpp
     Core/UI/Modal/ModalDialogService.h
     Core/UI/Modal/ModalDialogService.cpp
+    Core/UI/Focus/UIFocusRouter.h
+    Core/UI/Focus/UIFocusRouter.cpp
     Core/UI/World/WorldSpaceWidgetRenderer.h
     Core/UI/World/WorldSpaceWidgetRenderer.cpp
     # Phase 21: Editor Foundations, Prefab Workflow & Visual Authoring

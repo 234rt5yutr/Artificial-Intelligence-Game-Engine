@@ -394,7 +394,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [ ] Step 27.3: Expand world-space and localized modal UI primitives.
   * [x] Sub-step 27.3.1: Implement `RenderWorldSpaceWidget()` with depth-aware compositing and interaction routing. (v0.27.3.1)
   * [x] Sub-step 27.3.2: Implement `ShowLocalizedModalDialog()` with locale fallback, focus management, and action callbacks. (v0.27.3.2)
-  * [ ] Sub-step 27.3.3: Build unified interaction/focus arbitration across modal/world/screen/ImGui layers. (v0.27.3.3)
+  * [x] Sub-step 27.3.3: Build unified interaction/focus arbitration across modal/world/screen/ImGui layers. (v0.27.3.3)
   * [ ] Sub-step 27.3.4: Extend scene serialization/persistence for Stage 27 UI metadata. (v0.27.3.4)
 
 ## Phase 28: Profiling, Automation & Production Build Pipeline (Weeks 80-83)

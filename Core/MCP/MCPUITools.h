@@ -8,6 +8,7 @@
 #include "MCPTypes.h"
 #include "Core/UI/Animation/WidgetTransitionService.h"
 #include "Core/UI/Binding/UIBindingService.h"
+#include "Core/UI/Focus/UIFocusRouter.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 #include <entt/entt.hpp>
 #include <algorithm>
@@ -677,6 +678,8 @@ namespace MCP {
                     Binding::UIBindingService::Get().GetDiagnostics();
                 const Animation::WidgetTransitionDiagnostics& transitionDiagnostics =
                     Animation::WidgetTransitionService::Get().GetDiagnostics();
+                const Focus::FocusArbitrationDiagnostics& focusDiagnostics =
+                    Focus::UIFocusRouter::Get().GetDiagnostics();
 
                 std::vector<Binding::UIBindingState> bindings = Binding::UIBindingService::Get().GetBindingStates();
                 std::vector<Animation::WidgetTransitionState> transitions =
@@ -721,6 +724,17 @@ namespace MCP {
                     {"bindingWinsResolutions", transitionDiagnostics.BindingWinsResolutions},
                     {"transitionWinsResolutions", transitionDiagnostics.TransitionWinsResolutions},
                     {"blendResolutions", transitionDiagnostics.BlendResolutions}
+                };
+                result["focusDiagnostics"] = {
+                    {"currentOwner", Focus::FocusOwnerToString(focusDiagnostics.CurrentOwner)},
+                    {"previousOwner", Focus::FocusOwnerToString(focusDiagnostics.PreviousOwner)},
+                    {"currentTarget", focusDiagnostics.CurrentTarget},
+                    {"ownershipTransitions", focusDiagnostics.OwnershipTransitions},
+                    {"modalCaptures", focusDiagnostics.ModalCaptures},
+                    {"worldWidgetCaptures", focusDiagnostics.WorldWidgetCaptures},
+                    {"screenWidgetCaptures", focusDiagnostics.ScreenWidgetCaptures},
+                    {"imguiCaptures", focusDiagnostics.ImGuiCaptures},
+                    {"cancelActions", focusDiagnostics.CancelActions}
                 };
 
                 Json bindingStates = Json::array();

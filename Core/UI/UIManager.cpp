@@ -6,6 +6,7 @@
 #include "Core/UI/Authoring/UIAssetAuthoringService.h"
 #include "Core/UI/Binding/UIBindingService.h"
 #include "Core/UI/Animation/WidgetTransitionService.h"
+#include "Core/UI/Focus/UIFocusRouter.h"
 #include "Core/UI/Localization/LocalizationService.h"
 #include "Core/UI/Modal/ModalDialogService.h"
 #include "Core/UI/World/WorldSpaceWidgetRenderer.h"
@@ -88,6 +89,7 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     (void)Localization::LocalizationService::Get();
     (void)Modal::ModalDialogService::Get();
     (void)World::WorldSpaceWidgetRenderer::Get();
+    Focus::UIFocusRouter::Get().Reset();
     m_Stage27ServicesInitialized = true;
     ENGINE_CORE_INFO("Stage 27 UI services initialized (WidgetSystem + Authoring + Binding + Transition + Localization + Modal + World)");
 
@@ -121,6 +123,7 @@ void UIManager::Shutdown() {
     }
 
     if (m_Stage27ServicesInitialized) {
+        Focus::UIFocusRouter::Get().Reset();
         World::WorldSpaceWidgetRenderer::Get().ClearDiagnostics();
         Modal::ModalDialogService::Get().ClearModals();
         Animation::WidgetTransitionService::Get().ClearTransitions();
@@ -382,6 +385,7 @@ void UIManager::RenderStage27DiagnosticsPanel() {
         Animation::WidgetTransitionService::Get().GetAllTransitionStates();
     const std::optional<Modal::ModalSnapshot> activeModal = Modal::ModalDialogService::Get().GetActiveModal();
     const std::vector<Modal::ModalSnapshot> queuedModals = Modal::ModalDialogService::Get().GetQueuedModals();
+    const Focus::FocusArbitrationDiagnostics& focusDiagnostics = Focus::UIFocusRouter::Get().GetDiagnostics();
 
     if (!ImGui::Begin("Stage 27 Runtime Diagnostics", &m_ShowStage27DiagnosticsPanel)) {
         ImGui::End();
@@ -407,6 +411,11 @@ void UIManager::RenderStage27DiagnosticsPanel() {
                 activeModal.has_value() ? activeModal->ModalId.c_str() : "none",
                 queuedModals.size(),
                 Modal::ModalDialogService::Get().HasFocusLock() ? "true" : "false");
+    ImGui::Text("Focus owner=%s target=%s transitions=%llu cancelActions=%llu",
+                Focus::FocusOwnerToString(focusDiagnostics.CurrentOwner),
+                focusDiagnostics.CurrentTarget.empty() ? "none" : focusDiagnostics.CurrentTarget.c_str(),
+                static_cast<unsigned long long>(focusDiagnostics.OwnershipTransitions),
+                static_cast<unsigned long long>(focusDiagnostics.CancelActions));
 
     if (ImGui::CollapsingHeader("Active Bindings", ImGuiTreeNodeFlags_DefaultOpen)) {
         const size_t displayCount = std::min<size_t>(bindings.size(), 32);
@@ -486,16 +495,17 @@ bool UIManager::ProcessEvent(const SDL_Event& event) {
         return false;
     }
 
-    if (m_ImGui) {
-        if (m_ImGui->ProcessEvent(event)) {
+    if (m_Stage27ServicesInitialized && m_ImGui) {
+        if (Focus::UIFocusRouter::Get().RouteEvent(event, *m_ImGui, Widgets::WidgetSystem::Get())) {
             return true;
         }
     }
 
+    if (m_ImGui && m_ImGui->ProcessEvent(event)) {
+        return true;
+    }
+
     if (m_Stage27ServicesInitialized) {
-        if (Modal::ModalDialogService::Get().ProcessEvent(event)) {
-            return true;
-        }
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             Widgets::WidgetSystem::Get().OnMouseMove(
                 glm::vec2(event.motion.x, event.motion.y));
