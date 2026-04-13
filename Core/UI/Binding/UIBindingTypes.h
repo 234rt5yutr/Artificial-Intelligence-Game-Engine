@@ -49,10 +49,30 @@ namespace Binding {
         uint64_t TransitionSuppressions = 0;
     };
 
+    struct UIBindingState {
+        uint64_t Handle = 0;
+        std::string WidgetId;
+        std::string WidgetPropertyPath;
+        std::string DataPath;
+        BindingMode Mode = BindingMode::OneWay;
+        bool Destroyed = false;
+    };
+
     using WidgetPropertyValue = Widget::PropertyValue;
     using BindingConverter = std::function<std::optional<WidgetPropertyValue>(
         const WidgetPropertyValue&)>;
     using BindingValidator = std::function<bool(const WidgetPropertyValue&)>;
+
+    inline const char* BindingModeToString(BindingMode mode) {
+        switch (mode) {
+            case BindingMode::OneWay:
+                return "one_way";
+            case BindingMode::TwoWay:
+                return "two_way";
+            default:
+                return "one_way";
+        }
+    }
 
 } // namespace Binding
 } // namespace UI

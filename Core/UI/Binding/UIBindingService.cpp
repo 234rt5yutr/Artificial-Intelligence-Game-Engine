@@ -186,6 +186,29 @@ namespace {
         return std::make_optional<nlohmann::json>(*resolved);
     }
 
+    std::vector<UIBindingState> UIBindingService::GetBindingStates() const {
+        std::vector<UIBindingState> states;
+        states.reserve(m_Bindings.size());
+        for (const auto& [handle, binding] : m_Bindings) {
+            UIBindingState state;
+            state.Handle = handle;
+            state.WidgetId = binding.Request.WidgetId;
+            state.WidgetPropertyPath = binding.Request.WidgetPropertyPath;
+            state.DataPath = binding.Request.DataPath;
+            state.Mode = binding.Request.Mode;
+            state.Destroyed = binding.Destroyed;
+            states.push_back(std::move(state));
+        }
+
+        std::sort(
+            states.begin(),
+            states.end(),
+            [](const UIBindingState& lhs, const UIBindingState& rhs) {
+                return lhs.Handle < rhs.Handle;
+            });
+        return states;
+    }
+
     bool UIBindingService::HasBindingForProperty(
         const std::string& widgetId,
         std::string_view propertyPath) const {

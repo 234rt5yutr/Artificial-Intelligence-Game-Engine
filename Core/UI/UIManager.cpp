@@ -8,6 +8,9 @@
 #include "Core/UI/Animation/WidgetTransitionService.h"
 #include "Core/UI/Widgets/WidgetSystem.h"
 
+#include <imgui.h>
+#include <algorithm>
+
 namespace Core {
 namespace UI {
 
@@ -65,6 +68,9 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
     m_EditorModule = std::make_unique<Editor::EditorModule>();
     m_EditorModule->Initialize(nullptr);
     m_ImGui->SetDebugDrawCallback([this]() {
+        if (m_ShowStage27DiagnosticsPanel) {
+            RenderStage27DiagnosticsPanel();
+        }
         if (m_EditorModule && m_EditorModule->IsEnabled()) {
             m_EditorModule->RenderPanels();
         }
@@ -351,6 +357,78 @@ void UIManager::RenderMessages() {
         glm::vec2 pos = GetMessagePosition(msg, i);
         m_TextRenderer->DrawText(msg.text, pos, style);
     }
+}
+
+void UIManager::RenderStage27DiagnosticsPanel() {
+    if (!m_Stage27ServicesInitialized) {
+        return;
+    }
+
+    const Binding::UIBindingDiagnostics& bindingDiagnostics = Binding::UIBindingService::Get().GetDiagnostics();
+    const Animation::WidgetTransitionDiagnostics& transitionDiagnostics =
+        Animation::WidgetTransitionService::Get().GetDiagnostics();
+    const std::vector<Binding::UIBindingState> bindings = Binding::UIBindingService::Get().GetBindingStates();
+    const std::vector<Animation::WidgetTransitionState> transitions =
+        Animation::WidgetTransitionService::Get().GetAllTransitionStates();
+
+    if (!ImGui::Begin("Stage 27 Runtime Diagnostics", &m_ShowStage27DiagnosticsPanel)) {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::Text("Bindings: active=%u, validationFailures=%llu, cycleRejections=%llu, suppressions=%llu",
+                bindingDiagnostics.ActiveBindings,
+                static_cast<unsigned long long>(bindingDiagnostics.ValidationFailures),
+                static_cast<unsigned long long>(bindingDiagnostics.CycleRejections),
+                static_cast<unsigned long long>(bindingDiagnostics.TransitionSuppressions));
+    ImGui::Text("Transitions: active=%u, queued=%u, completed=%llu, cancelled=%llu",
+                transitionDiagnostics.ActiveTransitions,
+                transitionDiagnostics.QueuedTransitions,
+                static_cast<unsigned long long>(transitionDiagnostics.CompletedTransitions),
+                static_cast<unsigned long long>(transitionDiagnostics.CancelledTransitions));
+    ImGui::Text("Arbitration conflicts=%llu (bindingWins=%llu, transitionWins=%llu, blend=%llu)",
+                static_cast<unsigned long long>(transitionDiagnostics.ArbitrationConflicts),
+                static_cast<unsigned long long>(transitionDiagnostics.BindingWinsResolutions),
+                static_cast<unsigned long long>(transitionDiagnostics.TransitionWinsResolutions),
+                static_cast<unsigned long long>(transitionDiagnostics.BlendResolutions));
+
+    if (ImGui::CollapsingHeader("Active Bindings", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const size_t displayCount = std::min<size_t>(bindings.size(), 32);
+        for (size_t index = 0; index < displayCount; ++index) {
+            const Binding::UIBindingState& state = bindings[index];
+            ImGui::BulletText("#%llu %s.%s <- %s (%s)%s",
+                              static_cast<unsigned long long>(state.Handle),
+                              state.WidgetId.c_str(),
+                              state.WidgetPropertyPath.c_str(),
+                              state.DataPath.c_str(),
+                              Binding::BindingModeToString(state.Mode),
+                              state.Destroyed ? " [destroyed]" : "");
+        }
+        if (bindings.size() > displayCount) {
+            ImGui::Text("... %zu more bindings", bindings.size() - displayCount);
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Transition Timelines", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const size_t displayCount = std::min<size_t>(transitions.size(), 32);
+        for (size_t index = 0; index < displayCount; ++index) {
+            const Animation::WidgetTransitionState& state = transitions[index];
+            ImGui::BulletText("#%llu %s (%s) widget=%s elapsed=%.3f/%.3f channels=%u policy=%s",
+                              static_cast<unsigned long long>(state.Handle),
+                              state.TransitionId.c_str(),
+                              Animation::TransitionRuntimeStateToString(state.State).c_str(),
+                              state.WidgetId.c_str(),
+                              state.ElapsedTime,
+                              state.Duration,
+                              state.ChannelCount,
+                              Animation::TransitionInterruptionPolicyToString(state.InterruptionPolicy).c_str());
+        }
+        if (transitions.size() > displayCount) {
+            ImGui::Text("... %zu more transitions", transitions.size() - displayCount);
+        }
+    }
+
+    ImGui::End();
 }
 
 // ============================================================================

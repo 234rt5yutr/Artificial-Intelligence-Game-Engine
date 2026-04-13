@@ -692,6 +692,23 @@ namespace {
         return states;
     }
 
+    std::vector<WidgetTransitionState> WidgetTransitionService::GetAllTransitionStates() const {
+        std::vector<WidgetTransitionState> states;
+        states.reserve(m_Transitions.size());
+        for (const auto& [handle, record] : m_Transitions) {
+            (void)handle;
+            states.push_back(record.State);
+        }
+
+        std::sort(
+            states.begin(),
+            states.end(),
+            [](const WidgetTransitionState& lhs, const WidgetTransitionState& rhs) {
+                return lhs.Handle < rhs.Handle;
+            });
+        return states;
+    }
+
     bool WidgetTransitionService::ValidateTimeline(
         const WidgetTransitionTimeline& timeline,
         std::string* errorCode,

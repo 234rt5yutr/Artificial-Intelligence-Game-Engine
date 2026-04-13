@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace Core {
 namespace UI {
@@ -28,6 +29,7 @@ namespace Binding {
 
         bool SetDataValue(const std::string& dataPath, const nlohmann::json& value);
         std::optional<nlohmann::json> GetDataValue(const std::string& dataPath) const;
+        std::vector<UIBindingState> GetBindingStates() const;
 
         bool HasBindingForProperty(const std::string& widgetId, std::string_view propertyPath) const;
         void NotifyTransitionMutation(const std::string& widgetId, std::string_view propertyPath);

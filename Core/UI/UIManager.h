@@ -207,6 +207,9 @@ namespace UI {
         /// @brief Render active messages
         void RenderMessages();
 
+        /// @brief Render Stage 27 binding/transition diagnostics panel
+        void RenderStage27DiagnosticsPanel();
+
     private:
         bool m_Initialized = false;
         RHI::VulkanContext* m_VulkanContext = nullptr;
@@ -226,6 +229,7 @@ namespace UI {
         // Frame state
         bool m_InFrame = false;
         float m_DeltaTime = 0.0f;
+        bool m_ShowStage27DiagnosticsPanel = true;
     };
 
 } // namespace UI

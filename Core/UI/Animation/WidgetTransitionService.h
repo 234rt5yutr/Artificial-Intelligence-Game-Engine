@@ -41,6 +41,7 @@ namespace Animation {
 
         std::optional<WidgetTransitionState> GetTransitionState(uint64_t transitionHandle) const;
         std::vector<WidgetTransitionState> GetWidgetTransitionStates(const std::string& widgetId) const;
+        std::vector<WidgetTransitionState> GetAllTransitionStates() const;
         const WidgetTransitionDiagnostics& GetDiagnostics() const { return m_Diagnostics; }
 
     private:
