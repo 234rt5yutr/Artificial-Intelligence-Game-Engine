@@ -30,6 +30,12 @@ enum class FieldSerializationMappingFixKind : uint8_t {
     SerializedPathCorrection = 2
 };
 
+enum class FieldSchemaMigrationTransformKind : uint8_t {
+    TypeNameMigration = 0,
+    RequiredFlagMigration = 1,
+    CompatibilityAliasBackfill = 2
+};
+
 struct FieldSchemaPatchSourceFinding {
     std::string FindingId;
     std::string Owner;
@@ -187,6 +193,85 @@ struct FieldSerializationMappingFixResult {
     std::string RemediationBatchId;
     std::vector<FieldSerializationMappingFixRecord> FixRecords;
     FieldSerializationMappingFixSummary Summary;
+    std::string DeterministicDigest;
+};
+
+struct FieldSchemaMigrationCompatibilityWindow {
+    uint32_t MinimumReadableVersion = 0;
+    uint32_t MaximumReadableVersion = 0;
+};
+
+struct FieldSchemaMigrationEvidence {
+    std::string SnapshotScope;
+    std::string FieldId;
+    std::string TypeName;
+    bool Required = true;
+    uint32_t SchemaVersion = 0;
+    std::vector<std::string> CompatibilityAliases;
+};
+
+struct FieldSchemaMigrationFinding {
+    std::string FindingId;
+    std::string Owner;
+    std::string RuleId;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    FieldSchemaMigrationEvidence SourceEvidence;
+    FieldSchemaMigrationEvidence TargetEvidence;
+};
+
+struct FieldSchemaMigrationRequest {
+    std::string Scope = "schema-definitions";
+    std::filesystem::path OutputDirectory;
+    std::string RemediationBatchId;
+    uint32_t SourceSchemaVersion = 0;
+    uint32_t TargetSchemaVersion = 0;
+    FieldSchemaMigrationCompatibilityWindow CompatibilityWindow;
+    std::vector<FieldSchemaMigrationFinding> Findings;
+};
+
+struct FieldSchemaMigrationRollbackMetadata {
+    std::string RollbackCheckpointId;
+    std::string RollbackPropertyPath;
+    std::string RollbackValue;
+    bool RollbackRequired = true;
+};
+
+struct FieldSchemaMigrationRecord {
+    std::string MigrationId;
+    FieldSchemaMigrationTransformKind TransformKind = FieldSchemaMigrationTransformKind::TypeNameMigration;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    std::string TargetFieldId;
+    std::string PropertyPath;
+    std::string ExistingValue;
+    std::string ReplacementValue;
+    std::string ForwardTransform;
+    std::string RollbackTransform;
+    FieldSchemaMigrationCompatibilityWindow CompatibilityWindow;
+    FieldSchemaMigrationRollbackMetadata Rollback;
+    FieldSchemaPatchProvenanceMetadata Provenance;
+    std::string DeterministicDigest;
+};
+
+struct FieldSchemaMigrationSummary {
+    uint32_t TypeMigrationCount = 0;
+    uint32_t RequiredFlagMigrationCount = 0;
+    uint32_t CompatibilityAliasBackfillCount = 0;
+    uint32_t RollbackSafeMigrationCount = 0;
+    uint32_t TotalMigrationCount = 0;
+};
+
+struct FieldSchemaMigrationResult {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::string RemediationBatchId;
+    uint32_t SourceSchemaVersion = 0;
+    uint32_t TargetSchemaVersion = 0;
+    FieldSchemaMigrationCompatibilityWindow CompatibilityWindow;
+    std::vector<FieldSchemaMigrationRecord> MigrationRecords;
+    FieldSchemaMigrationSummary Summary;
+    std::string RollbackManifestDigest;
     std::string DeterministicDigest;
 };
 

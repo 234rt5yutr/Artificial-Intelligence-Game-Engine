@@ -484,6 +484,199 @@ namespace {
     return HashToHex(HashString(digestMaterial));
 }
 
+[[nodiscard]] bool IsValidSchemaMigrationEvidence(const FieldSchemaMigrationEvidence& evidence) {
+    if (evidence.SnapshotScope.empty() || evidence.FieldId.empty() || evidence.TypeName.empty()) {
+        return false;
+    }
+    for (const std::string& alias : evidence.CompatibilityAliases) {
+        if (alias.empty()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool IsValidSchemaMigrationFinding(const FieldSchemaMigrationFinding& finding,
+                                                 const uint32_t sourceSchemaVersion,
+                                                 const uint32_t targetSchemaVersion) {
+    if (finding.FindingId.empty() || finding.Owner.empty() || finding.RuleId.empty() || finding.StableFieldKey.empty() ||
+        finding.DomainPair.empty()) {
+        return false;
+    }
+    if (!IsValidSchemaMigrationEvidence(finding.SourceEvidence) || !IsValidSchemaMigrationEvidence(finding.TargetEvidence)) {
+        return false;
+    }
+    if (finding.SourceEvidence.SchemaVersion != sourceSchemaVersion ||
+        finding.TargetEvidence.SchemaVersion != targetSchemaVersion) {
+        return false;
+    }
+    return finding.SourceEvidence.SchemaVersion < finding.TargetEvidence.SchemaVersion;
+}
+
+[[nodiscard]] bool IsCompatibilityWindowSupported(const FieldSchemaMigrationRequest& request) {
+    if (request.CompatibilityWindow.MinimumReadableVersion > request.CompatibilityWindow.MaximumReadableVersion) {
+        return false;
+    }
+    if (request.TargetSchemaVersion <= request.SourceSchemaVersion) {
+        return false;
+    }
+    return request.CompatibilityWindow.MinimumReadableVersion <= request.SourceSchemaVersion &&
+           request.CompatibilityWindow.MaximumReadableVersion >= request.TargetSchemaVersion;
+}
+
+[[nodiscard]] bool HasAlias(const std::vector<std::string>& aliases, const std::string& alias) {
+    return std::find(aliases.begin(), aliases.end(), alias) != aliases.end();
+}
+
+[[nodiscard]] std::string BuildMigrationId(const FieldSchemaMigrationRecord& record,
+                                           const uint32_t sourceSchemaVersion,
+                                           const uint32_t targetSchemaVersion) {
+    std::string idMaterial;
+    idMaterial.reserve(320u);
+    idMaterial.append("migration|");
+    idMaterial.append(record.Provenance.FindingId);
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.TransformKind)));
+    idMaterial.push_back('|');
+    idMaterial.append(record.StableFieldKey);
+    idMaterial.push_back('|');
+    idMaterial.append(record.TargetFieldId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.PropertyPath);
+    idMaterial.push_back('|');
+    idMaterial.append(record.ReplacementValue);
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(sourceSchemaVersion));
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(targetSchemaVersion));
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(record.CompatibilityWindow.MinimumReadableVersion));
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(record.CompatibilityWindow.MaximumReadableVersion));
+    return HashToHex(HashString(idMaterial));
+}
+
+[[nodiscard]] std::string ComputeMigrationRecordDigest(const FieldSchemaMigrationRecord& record,
+                                                       const uint32_t sourceSchemaVersion,
+                                                       const uint32_t targetSchemaVersion) {
+    std::string digestMaterial;
+    digestMaterial.reserve(640u);
+    digestMaterial.append(record.MigrationId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.TransformKind)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.StableFieldKey);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.DomainPair);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.TargetFieldId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.PropertyPath);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.ExistingValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.ReplacementValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.ForwardTransform);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.RollbackTransform);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(sourceSchemaVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(targetSchemaVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(record.CompatibilityWindow.MinimumReadableVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(record.CompatibilityWindow.MaximumReadableVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Rollback.RollbackCheckpointId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Rollback.RollbackPropertyPath);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Rollback.RollbackValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Rollback.RollbackRequired ? "true" : "false");
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.FindingId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.RuleId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.Owner);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.RemediationBatchId);
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::string ComputeMigrationRollbackManifestDigest(const FieldSchemaMigrationResult& result) {
+    std::string digestMaterial;
+    digestMaterial.reserve((result.MigrationRecords.size() * 96u) + 256u);
+    digestMaterial.append(result.Scope);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.SourceSchemaVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.TargetSchemaVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.CompatibilityWindow.MinimumReadableVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.CompatibilityWindow.MaximumReadableVersion));
+    digestMaterial.push_back('\n');
+
+    for (const FieldSchemaMigrationRecord& record : result.MigrationRecords) {
+        digestMaterial.append(record.MigrationId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.Rollback.RollbackCheckpointId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.Rollback.RollbackPropertyPath);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.Rollback.RollbackValue);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.RollbackTransform);
+        digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::string ComputeMigrationResultDigest(const FieldSchemaMigrationResult& result) {
+    std::string digestMaterial;
+    digestMaterial.reserve((result.MigrationRecords.size() * 96u) + 256u);
+    digestMaterial.append(result.Scope);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.SourceSchemaVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.TargetSchemaVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.CompatibilityWindow.MinimumReadableVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.CompatibilityWindow.MaximumReadableVersion));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.TypeMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.RequiredFlagMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.CompatibilityAliasBackfillCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.RollbackSafeMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.TotalMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.RollbackManifestDigest);
+    digestMaterial.push_back('\n');
+
+    for (const FieldSchemaMigrationRecord& record : result.MigrationRecords) {
+        digestMaterial.append(record.MigrationId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.DeterministicDigest);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.TargetFieldId);
+        digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
 void SortNormalizationRecords(std::vector<FieldDefaultFallbackNormalizationRecord>& normalizationRecords) {
     std::sort(normalizationRecords.begin(),
               normalizationRecords.end(),
@@ -553,6 +746,30 @@ void SortSerializationMappingFixRecords(std::vector<FieldSerializationMappingFix
                       return left.PropertyPath < right.PropertyPath;
                   }
                   return left.FixId < right.FixId;
+               });
+}
+
+void SortMigrationRecords(std::vector<FieldSchemaMigrationRecord>& migrationRecords) {
+    std::sort(migrationRecords.begin(),
+              migrationRecords.end(),
+              [](const FieldSchemaMigrationRecord& left, const FieldSchemaMigrationRecord& right) {
+                  if (left.Provenance.FindingId != right.Provenance.FindingId) {
+                      return left.Provenance.FindingId < right.Provenance.FindingId;
+                  }
+                  if (left.StableFieldKey != right.StableFieldKey) {
+                      return left.StableFieldKey < right.StableFieldKey;
+                  }
+                  if (left.TargetFieldId != right.TargetFieldId) {
+                      return left.TargetFieldId < right.TargetFieldId;
+                  }
+                  if (left.TransformKind != right.TransformKind) {
+                      return static_cast<uint32_t>(left.TransformKind) <
+                             static_cast<uint32_t>(right.TransformKind);
+                  }
+                  if (left.PropertyPath != right.PropertyPath) {
+                      return left.PropertyPath < right.PropertyPath;
+                  }
+                  return left.MigrationId < right.MigrationId;
               });
 }
 
@@ -918,6 +1135,153 @@ Result<FieldSerializationMappingFixResult> FixFieldSerializationMappings(
     result.Summary.TotalFixCount = static_cast<uint32_t>(result.FixRecords.size());
     result.DeterministicDigest = ComputeSerializationMappingFixResultDigest(result);
     return Result<FieldSerializationMappingFixResult>::Success(std::move(result));
+}
+
+Result<FieldSchemaMigrationResult> VersionAndApplyFieldSchemaMigrations(const FieldSchemaMigrationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.Findings.empty() || request.SourceSchemaVersion == 0u || request.TargetSchemaVersion == 0u) {
+        return Result<FieldSchemaMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "schema-definitions") {
+        return Result<FieldSchemaMigrationResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!IsCompatibilityWindowSupported(request)) {
+        return Result<FieldSchemaMigrationResult>::Failure("FIELD_AUDIT_COMPATIBILITY_WINDOW_UNSUPPORTED");
+    }
+
+    for (const FieldSchemaMigrationFinding& finding : request.Findings) {
+        if (!IsValidSchemaMigrationFinding(finding, request.SourceSchemaVersion, request.TargetSchemaVersion)) {
+            return Result<FieldSchemaMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldSchemaMigrationResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldSchemaMigrationRecord> migrationRecords;
+    std::map<std::string, bool> seenMigrationKeys;
+
+    for (const FieldSchemaMigrationFinding& finding : request.Findings) {
+        const FieldSchemaMigrationEvidence& source = finding.SourceEvidence;
+        const FieldSchemaMigrationEvidence& target = finding.TargetEvidence;
+
+        auto emitMigration = [&](const FieldSchemaMigrationTransformKind transformKind,
+                                 const std::string& targetFieldId,
+                                 const std::string& propertyPath,
+                                 const std::string& existingValue,
+                                 const std::string& replacementValue,
+                                 const std::string& forwardTransform,
+                                 const std::string& rollbackTransform) {
+            std::string dedupeKey;
+            dedupeKey.reserve(288u);
+            dedupeKey.append(finding.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(targetFieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(transformKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenMigrationKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenMigrationKeys.emplace(dedupeKey, true);
+
+            FieldSchemaMigrationRecord record{};
+            record.TransformKind = transformKind;
+            record.StableFieldKey = finding.StableFieldKey;
+            record.DomainPair = finding.DomainPair;
+            record.TargetFieldId = targetFieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.ForwardTransform = forwardTransform;
+            record.RollbackTransform = rollbackTransform;
+            record.CompatibilityWindow = request.CompatibilityWindow;
+            record.Rollback.RollbackRequired = true;
+            record.Rollback.RollbackPropertyPath = propertyPath;
+            record.Rollback.RollbackValue = existingValue;
+            record.Rollback.RollbackCheckpointId = HashToHex(HashString(finding.FindingId + "|" + targetFieldId +
+                                                                        "|" + propertyPath + "|" + existingValue +
+                                                                        "|" + request.RemediationBatchId));
+            record.Provenance.FindingId = finding.FindingId;
+            record.Provenance.RuleId = finding.RuleId;
+            record.Provenance.Owner = finding.Owner;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.MigrationId = BuildMigrationId(record, request.SourceSchemaVersion, request.TargetSchemaVersion);
+            record.DeterministicDigest =
+                ComputeMigrationRecordDigest(record, request.SourceSchemaVersion, request.TargetSchemaVersion);
+            migrationRecords.push_back(std::move(record));
+        };
+
+        if (source.TypeName != target.TypeName) {
+            emitMigration(FieldSchemaMigrationTransformKind::TypeNameMigration,
+                          source.FieldId,
+                          "typeName",
+                          source.TypeName,
+                          target.TypeName,
+                          "apply-type-name:" + target.TypeName,
+                          "restore-type-name:" + source.TypeName);
+        }
+
+        if (source.Required != target.Required) {
+            emitMigration(FieldSchemaMigrationTransformKind::RequiredFlagMigration,
+                          source.FieldId,
+                          "required",
+                          BoolToString(source.Required),
+                          BoolToString(target.Required),
+                          "apply-required-flag:" + BoolToString(target.Required),
+                          "restore-required-flag:" + BoolToString(source.Required));
+        }
+
+        const std::vector<std::string> normalizedSourceAliases = NormalizeAliasNames(source.CompatibilityAliases);
+        if (source.FieldId != target.FieldId && !HasAlias(normalizedSourceAliases, target.FieldId)) {
+            std::vector<std::string> replacementAliases = normalizedSourceAliases;
+            replacementAliases.push_back(target.FieldId);
+            std::sort(replacementAliases.begin(), replacementAliases.end());
+            replacementAliases.erase(std::unique(replacementAliases.begin(), replacementAliases.end()),
+                                     replacementAliases.end());
+
+            emitMigration(FieldSchemaMigrationTransformKind::CompatibilityAliasBackfill,
+                          source.FieldId,
+                          "compatibility.aliases",
+                          JoinAliasNames(normalizedSourceAliases),
+                          JoinAliasNames(replacementAliases),
+                          "append-compatibility-alias:" + target.FieldId,
+                          "restore-compatibility-aliases");
+        }
+    }
+
+    SortMigrationRecords(migrationRecords);
+
+    FieldSchemaMigrationResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.SourceSchemaVersion = request.SourceSchemaVersion;
+    result.TargetSchemaVersion = request.TargetSchemaVersion;
+    result.CompatibilityWindow = request.CompatibilityWindow;
+    result.MigrationRecords = std::move(migrationRecords);
+    for (const FieldSchemaMigrationRecord& record : result.MigrationRecords) {
+        if (record.TransformKind == FieldSchemaMigrationTransformKind::TypeNameMigration) {
+            ++result.Summary.TypeMigrationCount;
+        } else if (record.TransformKind == FieldSchemaMigrationTransformKind::RequiredFlagMigration) {
+            ++result.Summary.RequiredFlagMigrationCount;
+        } else if (record.TransformKind == FieldSchemaMigrationTransformKind::CompatibilityAliasBackfill) {
+            ++result.Summary.CompatibilityAliasBackfillCount;
+        }
+        if (record.Rollback.RollbackRequired) {
+            ++result.Summary.RollbackSafeMigrationCount;
+        }
+    }
+    result.Summary.TotalMigrationCount = static_cast<uint32_t>(result.MigrationRecords.size());
+    result.RollbackManifestDigest = ComputeMigrationRollbackManifestDigest(result);
+    result.DeterministicDigest = ComputeMigrationResultDigest(result);
+    return Result<FieldSchemaMigrationResult>::Success(std::move(result));
 }
 
 } // namespace Core::Remediation

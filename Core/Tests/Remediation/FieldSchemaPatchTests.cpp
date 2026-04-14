@@ -118,6 +118,41 @@ Core::Remediation::FieldSerializationMappingFinding BuildSerializationMappingFin
     return finding;
 }
 
+Core::Remediation::FieldSchemaMigrationEvidence BuildSchemaMigrationEvidence(const std::string& scope,
+                                                                             const std::string& fieldId,
+                                                                             const std::string& typeName,
+                                                                             const bool required,
+                                                                             const uint32_t schemaVersion,
+                                                                             const std::vector<std::string>& aliases) {
+    Core::Remediation::FieldSchemaMigrationEvidence evidence{};
+    evidence.SnapshotScope = scope;
+    evidence.FieldId = fieldId;
+    evidence.TypeName = typeName;
+    evidence.Required = required;
+    evidence.SchemaVersion = schemaVersion;
+    evidence.CompatibilityAliases = aliases;
+    return evidence;
+}
+
+Core::Remediation::FieldSchemaMigrationFinding BuildSchemaMigrationFinding(
+    const std::string& findingId,
+    const std::string& owner,
+    const std::string& ruleId,
+    const std::string& stableFieldKey,
+    const std::string& domainPair,
+    const Core::Remediation::FieldSchemaMigrationEvidence& source,
+    const Core::Remediation::FieldSchemaMigrationEvidence& target) {
+    Core::Remediation::FieldSchemaMigrationFinding finding{};
+    finding.FindingId = findingId;
+    finding.Owner = owner;
+    finding.RuleId = ruleId;
+    finding.StableFieldKey = stableFieldKey;
+    finding.DomainPair = domainPair;
+    finding.SourceEvidence = source;
+    finding.TargetEvidence = target;
+    return finding;
+}
+
 } // namespace
 
 int main() {
@@ -436,6 +471,173 @@ int main() {
             assert(second.Value.FixRecords[index].Provenance.Owner == first.Value.FixRecords[index].Provenance.Owner);
             assert(second.Value.FixRecords[index].Provenance.RemediationBatchId ==
                    first.Value.FixRecords[index].Provenance.RemediationBatchId);
+        }
+    }
+
+    {
+        FieldSchemaMigrationRequest invalidRequest{};
+        const Result<FieldSchemaMigrationResult> result = VersionAndApplyFieldSchemaMigrations(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldSchemaMigrationRequest unsupportedScopeRequest{};
+        unsupportedScopeRequest.Scope = "schema-definitions-v2";
+        unsupportedScopeRequest.OutputDirectory = root / "migration-unsupported";
+        unsupportedScopeRequest.RemediationBatchId = "batch-006";
+        unsupportedScopeRequest.SourceSchemaVersion = 4u;
+        unsupportedScopeRequest.TargetSchemaVersion = 5u;
+        unsupportedScopeRequest.CompatibilityWindow.MinimumReadableVersion = 4u;
+        unsupportedScopeRequest.CompatibilityWindow.MaximumReadableVersion = 5u;
+        unsupportedScopeRequest.Findings = {BuildSchemaMigrationFinding(
+            "migration-finding-001",
+            "runtime-systems",
+            "FIELD_AUDIT_RULE_MIGRATION_WINDOW_MISMATCH",
+            "PlayerState::Health",
+            "runtime<->serialized",
+            BuildSchemaMigrationEvidence("runtime",
+                                         "runtime::PlayerState::Health",
+                                         "float",
+                                         true,
+                                         4u,
+                                         {"serialized::PlayerState::Health"}),
+            BuildSchemaMigrationEvidence("serialized",
+                                         "serialized::PlayerState::Health",
+                                         "double",
+                                         true,
+                                         5u,
+                                         {"runtime::PlayerState::Health"}))};
+
+        const Result<FieldSchemaMigrationResult> result =
+            VersionAndApplyFieldSchemaMigrations(unsupportedScopeRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldSchemaMigrationRequest request{};
+        request.Scope = "schema-definitions";
+        request.OutputDirectory = root / "migration-window-failure";
+        request.RemediationBatchId = "batch-007";
+        request.SourceSchemaVersion = 4u;
+        request.TargetSchemaVersion = 6u;
+        request.CompatibilityWindow.MinimumReadableVersion = 5u;
+        request.CompatibilityWindow.MaximumReadableVersion = 6u;
+        request.Findings = {BuildSchemaMigrationFinding(
+            "migration-finding-002",
+            "save-systems",
+            "FIELD_AUDIT_RULE_MIGRATION_WINDOW_MISMATCH",
+            "PlayerState::DisplayName",
+            "runtime<->serialized",
+            BuildSchemaMigrationEvidence("runtime", "runtime::PlayerState::DisplayName", "string", false, 4u, {}),
+            BuildSchemaMigrationEvidence("serialized",
+                                         "serialized::PlayerState::DisplayName",
+                                         "string",
+                                         true,
+                                         6u,
+                                         {"runtime::PlayerState::DisplayName"}))};
+
+        const Result<FieldSchemaMigrationResult> result = VersionAndApplyFieldSchemaMigrations(request);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_COMPATIBILITY_WINDOW_UNSUPPORTED");
+    }
+
+    {
+        FieldSchemaMigrationRequest request{};
+        request.Scope = "schema-definitions";
+        request.OutputDirectory = root / "migration-success";
+        request.RemediationBatchId = "batch-008";
+        request.SourceSchemaVersion = 4u;
+        request.TargetSchemaVersion = 5u;
+        request.CompatibilityWindow.MinimumReadableVersion = 4u;
+        request.CompatibilityWindow.MaximumReadableVersion = 5u;
+        request.Findings = {
+            BuildSchemaMigrationFinding(
+                "migration-finding-b",
+                "runtime-systems",
+                "FIELD_AUDIT_RULE_MIGRATION_WINDOW_MISMATCH",
+                "PlayerState::Health",
+                "runtime<->serialized",
+                BuildSchemaMigrationEvidence("runtime", "runtime::PlayerState::Health", "float", true, 4u, {}),
+                BuildSchemaMigrationEvidence("serialized",
+                                             "serialized::PlayerState::HealthV2",
+                                             "double",
+                                             false,
+                                             5u,
+                                             {"runtime::PlayerState::Health"})),
+            BuildSchemaMigrationFinding(
+                "migration-finding-a",
+                "ui-systems",
+                "FIELD_AUDIT_RULE_MIGRATION_WINDOW_MISMATCH",
+                "PlayerState::DisplayName",
+                "runtime<->serialized",
+                BuildSchemaMigrationEvidence("runtime", "runtime::PlayerState::DisplayName", "string", false, 4u, {}),
+                BuildSchemaMigrationEvidence("serialized",
+                                             "serialized::PlayerState::DisplayName",
+                                             "string",
+                                             true,
+                                             5u,
+                                             {"runtime::PlayerState::DisplayName"}))};
+
+        const Result<FieldSchemaMigrationResult> first = VersionAndApplyFieldSchemaMigrations(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.RemediationBatchId == request.RemediationBatchId);
+        assert(first.Value.SourceSchemaVersion == request.SourceSchemaVersion);
+        assert(first.Value.TargetSchemaVersion == request.TargetSchemaVersion);
+        assert(first.Value.CompatibilityWindow.MinimumReadableVersion == request.CompatibilityWindow.MinimumReadableVersion);
+        assert(first.Value.CompatibilityWindow.MaximumReadableVersion == request.CompatibilityWindow.MaximumReadableVersion);
+        assert(first.Value.Summary.TotalMigrationCount == first.Value.MigrationRecords.size());
+        assert(first.Value.Summary.TotalMigrationCount == 4u);
+        assert(first.Value.Summary.RollbackSafeMigrationCount == first.Value.Summary.TotalMigrationCount);
+        assert(!first.Value.RollbackManifestDigest.empty());
+        assert(!first.Value.DeterministicDigest.empty());
+
+        bool sawTypeMigration = false;
+        bool sawRequiredMigration = false;
+        bool sawAliasMigration = false;
+        for (const FieldSchemaMigrationRecord& record : first.Value.MigrationRecords) {
+            assert(!record.MigrationId.empty());
+            assert(!record.DeterministicDigest.empty());
+            assert(!record.PropertyPath.empty());
+            assert(!record.ExistingValue.empty());
+            assert(!record.ReplacementValue.empty());
+            assert(!record.ForwardTransform.empty());
+            assert(!record.RollbackTransform.empty());
+            assert(record.Rollback.RollbackRequired);
+            assert(!record.Rollback.RollbackCheckpointId.empty());
+            assert(!record.Rollback.RollbackPropertyPath.empty());
+            assert(!record.Rollback.RollbackValue.empty());
+            assert(record.CompatibilityWindow.MinimumReadableVersion ==
+                   request.CompatibilityWindow.MinimumReadableVersion);
+            assert(record.CompatibilityWindow.MaximumReadableVersion ==
+                   request.CompatibilityWindow.MaximumReadableVersion);
+            assert(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+
+            if (record.TransformKind == FieldSchemaMigrationTransformKind::TypeNameMigration) {
+                sawTypeMigration = true;
+            } else if (record.TransformKind == FieldSchemaMigrationTransformKind::RequiredFlagMigration) {
+                sawRequiredMigration = true;
+            } else if (record.TransformKind == FieldSchemaMigrationTransformKind::CompatibilityAliasBackfill) {
+                sawAliasMigration = true;
+            }
+        }
+        assert(sawTypeMigration);
+        assert(sawRequiredMigration);
+        assert(sawAliasMigration);
+
+        const Result<FieldSchemaMigrationResult> second = VersionAndApplyFieldSchemaMigrations(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
+        assert(second.Value.MigrationRecords.size() == first.Value.MigrationRecords.size());
+        for (std::size_t index = 0; index < first.Value.MigrationRecords.size(); ++index) {
+            assert(second.Value.MigrationRecords[index].MigrationId == first.Value.MigrationRecords[index].MigrationId);
+            assert(second.Value.MigrationRecords[index].DeterministicDigest ==
+                   first.Value.MigrationRecords[index].DeterministicDigest);
+            assert(second.Value.MigrationRecords[index].Rollback.RollbackCheckpointId ==
+                   first.Value.MigrationRecords[index].Rollback.RollbackCheckpointId);
         }
     }
 

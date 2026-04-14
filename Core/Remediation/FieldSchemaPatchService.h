@@ -9,5 +9,6 @@ Result<FieldDefaultFallbackNormalizationResult> NormalizeFieldDefaultAndFallback
     const FieldDefaultFallbackNormalizationRequest& request);
 Result<FieldSerializationMappingFixResult> FixFieldSerializationMappings(
     const FieldSerializationMappingFixRequest& request);
+Result<FieldSchemaMigrationResult> VersionAndApplyFieldSchemaMigrations(const FieldSchemaMigrationRequest& request);
 
 } // namespace Core::Remediation
