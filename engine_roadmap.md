@@ -426,7 +426,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [ ] Step 29.3: Execute full-surface audit runs over live runtime and offline artifacts.
   * [x] Sub-step 29.3.1: Implement `RunRuntimeStateFieldAudit()` with deterministic snapshots during gameplay/editor/runtime service transitions. (v0.29.3.1)
   * [x] Sub-step 29.3.2: Implement `RunCookedAndPackagedArtifactFieldAudit()` for cooked assets, build manifests, store bundles, and dedicated-server outputs. (v0.29.3.2)
-  * [ ] Sub-step 29.3.3: Implement `RunNetworkAndReplayFieldAudit()` to verify replication payload parity, rollback/replay schema fidelity, and host-migration continuity fields. (v0.29.3.3)
+  * [x] Sub-step 29.3.3: Implement `RunNetworkAndReplayFieldAudit()` to verify replication payload parity, rollback/replay schema fidelity, and host-migration continuity fields. (v0.29.3.3)
   * [ ] Sub-step 29.3.4: Implement `RunToolingAndAuthoringFieldAudit()` for editor pipelines, MCP tool payloads, and automation report schemas. (v0.29.3.4)
 * [ ] Step 29.4: Generate actionable findings with severity, ownership, and traceable evidence.
   * [ ] Sub-step 29.4.1: Implement `GenerateFieldAuditIssueLedger()` with deduplicated issue IDs, first-seen revision, and reproducible evidence pointers. (v0.29.4.1)

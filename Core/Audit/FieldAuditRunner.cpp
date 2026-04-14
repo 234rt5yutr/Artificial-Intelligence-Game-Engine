@@ -407,4 +407,83 @@ Result<FieldAuditRunReport> RunCookedAndPackagedArtifactFieldAudit(const FieldAu
     return Result<FieldAuditRunReport>::Success(BuildRunReport(request, std::move(phaseStamps)));
 }
 
+Result<FieldAuditRunReport> RunNetworkAndReplayFieldAudit(const FieldAuditRunRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "network-replay") {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    const Result<FieldInventorySnapshot> runtimeInventory =
+        GenerateBaselineSnapshot("runtime", request.OutputDirectory / "baseline-runtime");
+    if (!runtimeInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(runtimeInventory.Error);
+    }
+
+    const Result<FieldInventorySnapshot> serializedInventory =
+        GenerateBaselineSnapshot("serialized", request.OutputDirectory / "baseline-serialized");
+    if (!serializedInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(serializedInventory.Error);
+    }
+
+    const Result<FieldInventorySnapshot> protocolInventory =
+        GenerateBaselineSnapshot("protocol", request.OutputDirectory / "baseline-protocol");
+    if (!protocolInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(protocolInventory.Error);
+    }
+
+    std::vector<FieldAuditPhaseStamp> phaseStamps;
+    phaseStamps.reserve(4u);
+
+    const auto runNetworkPhase = [&](const std::string_view phaseId,
+                                     const std::string_view phaseLabel,
+                                     const uint32_t phaseOrdinal,
+                                     const std::vector<std::string_view>& protocolDomains) -> Result<FieldAuditPhaseStamp> {
+        const std::filesystem::path phaseRoot = request.OutputDirectory / ("network-phase-" + std::to_string(phaseOrdinal));
+        const FieldInventorySnapshot filteredProtocol =
+            BuildDomainFilteredSnapshot(protocolInventory.Value, phaseRoot / "protocol-channel-snapshot", protocolDomains);
+        return RunAuditPhase(phaseId,
+                             phaseLabel,
+                             phaseOrdinal,
+                             phaseRoot,
+                             runtimeInventory.Value,
+                             serializedInventory.Value,
+                             filteredProtocol);
+    };
+
+    const Result<FieldAuditPhaseStamp> replicationPhase =
+        runNetworkPhase("replication-parity", "ReplicationParity", 1u, {"packets"});
+    if (!replicationPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(replicationPhase.Error);
+    }
+    phaseStamps.push_back(replicationPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> rpcPhase = runNetworkPhase("rpc-fidelity", "RpcFidelity", 2u, {"rpc"});
+    if (!rpcPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(rpcPhase.Error);
+    }
+    phaseStamps.push_back(rpcPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> replayPhase = runNetworkPhase("replay-integrity", "ReplayIntegrity", 3u, {"replay"});
+    if (!replayPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(replayPhase.Error);
+    }
+    phaseStamps.push_back(replayPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> rollbackPhase =
+        runNetworkPhase("rollback-consistency", "RollbackConsistency", 4u, {"replay", "packets"});
+    if (!rollbackPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(rollbackPhase.Error);
+    }
+    phaseStamps.push_back(rollbackPhase.Value);
+
+    return Result<FieldAuditRunReport>::Success(BuildRunReport(request, std::move(phaseStamps)));
+}
+
 } // namespace Core::Audit
