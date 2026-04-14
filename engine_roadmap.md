@@ -410,3 +410,54 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 28.3.1: Implement `BuildForPlatformTarget()` with profile-driven compile/cook/package stages. (v0.28.3.1)
   * [x] Sub-step 28.3.2: Implement `PackageStoreSubmissionArtifacts()` for storefront-compliant output bundles. (v0.28.3.2)
   * [x] Sub-step 28.3.3: Implement `GenerateDedicatedServerBuildArtifacts()` for headless deploy images and symbols. (v0.28.3.3)
+
+## Phase 29: Comprehensive Field Audit & Contract Validation (Weeks 84-87)
+
+* [ ] Step 29.1: Build an exhaustive field inventory across runtime, serialized assets, build outputs, and tooling surfaces.
+  * [ ] Sub-step 29.1.1: Implement `GenerateRuntimeFieldInventory()` to enumerate ECS/component/renderer/physics/network/UI/editor-exposed fields with canonical identifiers. (v0.29.1.1)
+  * [ ] Sub-step 29.1.2: Implement `GenerateSerializedFieldInventory()` to enumerate scene/prefab/save/widget/localization/addressable/bundle field schemas. (v0.29.1.2)
+  * [ ] Sub-step 29.1.3: Implement `GenerateProtocolFieldInventory()` for packet/RPC/replay/MCP payload fields and transport-level metadata constraints. (v0.29.1.3)
+  * [ ] Sub-step 29.1.4: Implement `MergeFieldInventorySnapshots()` with stable field IDs, ownership tags, source traces, and version lineage metadata. (v0.29.1.4)
+* [ ] Step 29.2: Add strict field-level validation rules and invariant analysis.
+  * [ ] Sub-step 29.2.1: Implement `ValidateFieldTypeAndNullabilityContracts()` across runtime reflection, serializers, and generated manifests. (v0.29.2.1)
+  * [ ] Sub-step 29.2.2: Implement `ValidateFieldRangeEnumAndPatternDomains()` for numeric bounds, enum domains, string formats, and identifier normalization. (v0.29.2.2)
+  * [ ] Sub-step 29.2.3: Implement `ValidateCrossFieldInvariantRules()` for dependency ordering, conditional required fields, and subsystem coupling assumptions. (v0.29.2.3)
+  * [ ] Sub-step 29.2.4: Implement `ValidateFieldEvolutionCompatibility()` for forward/backward schema evolution and migration safety checks. (v0.29.2.4)
+* [ ] Step 29.3: Execute full-surface audit runs over live runtime and offline artifacts.
+  * [ ] Sub-step 29.3.1: Implement `RunRuntimeStateFieldAudit()` with deterministic snapshots during gameplay/editor/runtime service transitions. (v0.29.3.1)
+  * [ ] Sub-step 29.3.2: Implement `RunCookedAndPackagedArtifactFieldAudit()` for cooked assets, build manifests, store bundles, and dedicated-server outputs. (v0.29.3.2)
+  * [ ] Sub-step 29.3.3: Implement `RunNetworkAndReplayFieldAudit()` to verify replication payload parity, rollback/replay schema fidelity, and host-migration continuity fields. (v0.29.3.3)
+  * [ ] Sub-step 29.3.4: Implement `RunToolingAndAuthoringFieldAudit()` for editor pipelines, MCP tool payloads, and automation report schemas. (v0.29.3.4)
+* [ ] Step 29.4: Generate actionable findings with severity, ownership, and traceable evidence.
+  * [ ] Sub-step 29.4.1: Implement `GenerateFieldAuditIssueLedger()` with deduplicated issue IDs, first-seen revision, and reproducible evidence pointers. (v0.29.4.1)
+  * [ ] Sub-step 29.4.2: Implement `ComputeFieldIssueSeverityAndBlastRadius()` with gameplay/runtime/build/release impact scoring heuristics. (v0.29.4.2)
+  * [ ] Sub-step 29.4.3: Implement `ExportFieldAuditComplianceReport()` with machine-readable summaries and human triage views. (v0.29.4.3)
+  * [ ] Sub-step 29.4.4: Implement `CreateFieldRemediationBacklogFromAudit()` that emits prioritized fix tasks grouped by subsystem ownership. (v0.29.4.4)
+
+## Phase 30: Field Integrity Remediation, Hardening & Closure (Weeks 88-92)
+
+* [ ] Step 30.1: Fix schema and contract defects discovered during Phase 29 audit.
+  * [ ] Sub-step 30.1.1: Implement `PatchFieldSchemaDefinitions()` for incorrect types, nullability flags, and required/optional mismatches. (v0.30.1.1)
+  * [ ] Sub-step 30.1.2: Implement `NormalizeFieldDefaultAndFallbackPolicies()` to remove ambiguous defaults and ensure deterministic initialization. (v0.30.1.2)
+  * [ ] Sub-step 30.1.3: Implement `FixFieldSerializationMappings()` aligning runtime/editor/cooked naming, aliases, and path mappings. (v0.30.1.3)
+  * [ ] Sub-step 30.1.4: Implement `VersionAndApplyFieldSchemaMigrations()` with explicit compatibility windows and rollback-safe transforms. (v0.30.1.4)
+* [ ] Step 30.2: Repair data-at-rest integrity across authored and generated content.
+  * [ ] Sub-step 30.2.1: Implement `MigrateSceneAndPrefabFieldData()` to backfill required values and normalize stale object graphs. (v0.30.2.1)
+  * [ ] Sub-step 30.2.2: Implement `MigrateUIAndLocalizationFieldData()` to correct binding keys, locale schema drift, and modal/world-widget metadata. (v0.30.2.2)
+  * [ ] Sub-step 30.2.3: Implement `MigrateAddressableBundleAndBuildManifestFieldData()` for catalog/bundle/build profile parity. (v0.30.2.3)
+  * [ ] Sub-step 30.2.4: Implement `RepairPlayerSaveReplayAndAutomationFieldData()` to restore compatibility for persistence and deterministic test baselines. (v0.30.2.4)
+* [ ] Step 30.3: Fix runtime, networking, and deployment-time field integrity defects.
+  * [ ] Sub-step 30.3.1: Implement `FixRuntimeFieldBindingAndReflectionRoutes()` across ECS systems, UI binding, animation, and tool-facing APIs. (v0.30.3.1)
+  * [ ] Sub-step 30.3.2: Implement `FixReplicationRPCAndRollbackFieldParity()` to guarantee authoritative/client schema consistency and replay determinism. (v0.30.3.2)
+  * [ ] Sub-step 30.3.3: Implement `FixFieldUpdateOrderingForDeterminism()` across frame phases, job boundaries, and serialization checkpoints. (v0.30.3.3)
+  * [ ] Sub-step 30.3.4: Implement `FixStoreAndDedicatedServerFieldContracts()` for release metadata, artifact manifests, and deployment descriptors. (v0.30.3.4)
+* [ ] Step 30.4: Add permanent guardrails to prevent future field regressions.
+  * [ ] Sub-step 30.4.1: Implement `AddFieldInvariantAssertions()` in runtime/editor/build pipelines with explicit error taxonomies. (v0.30.4.1)
+  * [ ] Sub-step 30.4.2: Implement `AddFieldContractRegressionSuites()` spanning profiling, automation, packaging, networking, persistence, and tooling flows. (v0.30.4.2)
+  * [ ] Sub-step 30.4.3: Implement `AddFieldAuditGateToBuildPipeline()` that blocks release lanes on unresolved critical/high field defects. (v0.30.4.3)
+  * [ ] Sub-step 30.4.4: Implement `AddFieldDriftMonitoringAndAlerting()` for schema drift detection between commits and build artifacts. (v0.30.4.4)
+* [ ] Step 30.5: Close remediation with independent verification and governance sign-off.
+  * [ ] Sub-step 30.5.1: Implement `ReRunFullFieldAuditAndDiffAgainstBaseline()` to verify net defect reduction and detect regressions. (v0.30.5.1)
+  * [ ] Sub-step 30.5.2: Implement `EnforceZeroCriticalFieldDefectGate()` across runtime, network, persistence, and release artifact domains. (v0.30.5.2)
+  * [ ] Sub-step 30.5.3: Implement `PublishFieldIntegritySignoffReport()` with unresolved-risk disclosures and ownership acknowledgements. (v0.30.5.3)
+  * [ ] Sub-step 30.5.4: Implement `FreezeFieldContractVersionForNextPhase()` with policy checkpoints for controlled schema evolution. (v0.30.5.4)
