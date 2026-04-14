@@ -213,6 +213,62 @@ namespace {
         CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Artifacts.Hash", "Core/Build/BuildPipelineTypes.h", "BuildManifestSchema::Artifacts.Hash", 25u, std::string(collector), false)};
 }
 
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectPacketProtocolFields() {
+    constexpr std::string_view domain = "packets";
+    constexpr std::string_view owner = "network-transport";
+    constexpr std::string_view collector = "protocol-packet-collector";
+    constexpr std::string_view schemaType = "PacketEnvelope.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Header.Sequence", "Core/Network/Session/SessionTypes.h", "PacketEnvelope::Header.Sequence", 63u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.ChannelId", "Core/Network/Session/SessionTypes.h", "PacketEnvelope::Transport.ChannelId", 64u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.Reliability", "Core/Network/Session/SessionTypes.h", "PacketEnvelope::Transport.Reliability", 65u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.CompressionPreset", "Core/Network/Session/SessionTypes.h", "PacketEnvelope::Transport.CompressionPreset", 66u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectRpcProtocolFields() {
+    constexpr std::string_view domain = "rpc";
+    constexpr std::string_view owner = "network-rpc";
+    constexpr std::string_view collector = "protocol-rpc-collector";
+    constexpr std::string_view schemaType = "RpcEnvelope.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Method.Name", "Core/Network/Session/SessionTypes.h", "RpcEnvelope::Method.Name", 71u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.TimeoutMs", "Core/Network/Session/SessionTypes.h", "RpcEnvelope::Transport.TimeoutMs", 72u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.IdempotencyKey", "Core/Network/Session/SessionTypes.h", "RpcEnvelope::Transport.IdempotencyKey", 73u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectReplayProtocolFields() {
+    constexpr std::string_view domain = "replay";
+    constexpr std::string_view owner = "replay-streaming";
+    constexpr std::string_view collector = "protocol-replay-collector";
+    constexpr std::string_view schemaType = "ReplayRecord.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Frame.Tick", "Core/Network/Session/SessionTypes.h", "ReplayRecord::Frame.Tick", 81u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.StreamOffset", "Core/Network/Session/SessionTypes.h", "ReplayRecord::Transport.StreamOffset", 82u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.DeltaEncoded", "Core/Network/Session/SessionTypes.h", "ReplayRecord::Transport.DeltaEncoded", 83u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectMcpRequestProtocolFields() {
+    constexpr std::string_view domain = "mcp-request";
+    constexpr std::string_view owner = "mcp-gateway";
+    constexpr std::string_view collector = "protocol-mcp-request-collector";
+    constexpr std::string_view schemaType = "McpRequestEnvelope.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Request.Method", "Core/Tools/Mcp/McpGateway.h", "McpRequestEnvelope::Request.Method", 28u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.RequestId", "Core/Tools/Mcp/McpGateway.h", "McpRequestEnvelope::Transport.RequestId", 29u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.SessionToken", "Core/Tools/Mcp/McpGateway.h", "McpRequestEnvelope::Transport.SessionToken", 30u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectMcpResponseProtocolFields() {
+    constexpr std::string_view domain = "mcp-response";
+    constexpr std::string_view owner = "mcp-gateway";
+    constexpr std::string_view collector = "protocol-mcp-response-collector";
+    constexpr std::string_view schemaType = "McpResponseEnvelope.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Response.StatusCode", "Core/Tools/Mcp/McpGateway.h", "McpResponseEnvelope::Response.StatusCode", 36u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.RequestId", "Core/Tools/Mcp/McpGateway.h", "McpResponseEnvelope::Transport.RequestId", 37u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Transport.RetryAfterMs", "Core/Tools/Mcp/McpGateway.h", "McpResponseEnvelope::Transport.RetryAfterMs", 38u, std::string(collector), false)};
+}
+
 [[nodiscard]] bool EnsureOutputDirectory(const std::filesystem::path& outputDirectory) {
     std::error_code errorCode;
     const bool outputExists = std::filesystem::exists(outputDirectory, errorCode);
@@ -353,6 +409,40 @@ Result<FieldInventorySnapshot> GenerateSerializedFieldInventory(const FieldInven
         CollectAddressableSerializedFields(),
         CollectBundleSerializedFields(),
         CollectBuildManifestSerializedFields()};
+
+    for (const std::vector<FieldInventoryEntry>& domainEntries : collectedEntries) {
+        entries.insert(entries.end(), domainEntries.begin(), domainEntries.end());
+    }
+
+    SortEntries(entries);
+
+    if (!ValidateEntries(entries)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_INVENTORY_FAILED");
+    }
+
+    return Result<FieldInventorySnapshot>::Success(CreateSnapshot(request, std::move(entries)));
+}
+
+Result<FieldInventorySnapshot> GenerateProtocolFieldInventory(const FieldInventoryRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "protocol") {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldInventoryEntry> entries;
+    const std::array<std::vector<FieldInventoryEntry>, 5> collectedEntries = {
+        CollectPacketProtocolFields(),
+        CollectRpcProtocolFields(),
+        CollectReplayProtocolFields(),
+        CollectMcpRequestProtocolFields(),
+        CollectMcpResponseProtocolFields()};
 
     for (const std::vector<FieldInventoryEntry>& domainEntries : collectedEntries) {
         entries.insert(entries.end(), domainEntries.begin(), domainEntries.end());

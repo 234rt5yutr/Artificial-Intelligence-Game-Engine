@@ -179,5 +179,67 @@ int main() {
         assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
     }
 
+    {
+        FieldInventoryRequest invalidRequest{};
+        const Result<FieldInventorySnapshot> result = GenerateProtocolFieldInventory(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        const FieldInventoryRequest request = BuildValidRequest(root / "protocol-output", "protocol");
+        const Result<FieldInventorySnapshot> first = GenerateProtocolFieldInventory(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == "protocol");
+        assert(!first.Value.Entries.empty());
+        assert(!first.Value.DeterministicDigest.empty());
+        assert(AreFieldEntriesSorted(first.Value));
+
+        const std::set<std::string> domains = CollectDomains(first.Value);
+        const std::array<std::string, 5> requiredDomains = {"packets", "rpc", "replay", "mcp-request", "mcp-response"};
+        for (const std::string& requiredDomain : requiredDomains) {
+            if (!domains.contains(requiredDomain)) {
+                return 1;
+            }
+        }
+
+        bool foundRequiredField = false;
+        bool foundOptionalField = false;
+        for (const FieldInventoryEntry& entry : first.Value.Entries) {
+            if (entry.Required) {
+                foundRequiredField = true;
+            } else {
+                foundOptionalField = true;
+            }
+
+            const bool hasCanonicalId = entry.FieldId == entry.Domain + "::" + entry.TypeName + "::" + entry.FieldPath;
+            const bool hasTraceMetadata = !entry.SourceTrace.SourceFile.empty() && !entry.SourceTrace.SourceSymbol.empty() &&
+                                          !entry.SourceTrace.CollectorId.empty() && entry.SourceTrace.SourceLine > 0;
+            const bool hasInventoryMetadata =
+                !entry.Domain.empty() && !entry.TypeName.empty() && !entry.FieldPath.empty();
+            if (!hasCanonicalId || !hasTraceMetadata || !hasInventoryMetadata) {
+                return 1;
+            }
+        }
+        assert(foundRequiredField);
+        assert(foundOptionalField);
+
+        const Result<FieldInventorySnapshot> second = GenerateProtocolFieldInventory(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.Entries.size() == first.Value.Entries.size());
+        for (std::size_t index = 0; index < first.Value.Entries.size(); ++index) {
+            assert(second.Value.Entries[index].FieldId == first.Value.Entries[index].FieldId);
+            assert(second.Value.Entries[index].Required == first.Value.Entries[index].Required);
+        }
+    }
+
+    {
+        const FieldInventoryRequest invalidScope = BuildValidRequest(root / "protocol-scope-error", "runtime");
+        const Result<FieldInventorySnapshot> result = GenerateProtocolFieldInventory(invalidScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
     return 0;
 }
