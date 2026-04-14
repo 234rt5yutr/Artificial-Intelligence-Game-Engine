@@ -229,4 +229,40 @@ struct FieldAuditComplianceReport {
     std::string DeterministicDigest;
 };
 
+enum class FieldRemediationPriority : uint8_t {
+    P0Critical = 0,
+    P1High = 1,
+    P2Medium = 2,
+    P3Low = 3,
+    P4Info = 4
+};
+
+struct FieldRemediationTask {
+    std::string TaskId;
+    std::string IssueId;
+    std::string OwnerSubsystem;
+    std::string FixCategory;
+    FieldRemediationPriority Priority = FieldRemediationPriority::P4Info;
+    std::string Title;
+    std::string Description;
+    std::vector<std::string> EvidencePointers;
+    std::string DeterministicDigest;
+};
+
+struct FieldRemediationBacklogRequest {
+    std::string Scope = "remediation-backlog";
+    std::filesystem::path OutputDirectory;
+    std::string Revision;
+    FieldIssueLedgerReport LedgerReport;
+};
+
+struct FieldRemediationBacklogReport {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::string Revision;
+    std::vector<FieldRemediationTask> Tasks;
+    uint32_t TotalTaskCount = 0;
+    std::string DeterministicDigest;
+};
+
 } // namespace Core::Audit

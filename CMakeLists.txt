@@ -249,6 +249,8 @@ add_library(EngineCore
     Core/Audit/FieldIssueLedger.cpp
     Core/Audit/FieldAuditReportWriter.h
     Core/Audit/FieldAuditReportWriter.cpp
+    Core/Audit/FieldRemediationBacklog.h
+    Core/Audit/FieldRemediationBacklog.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -532,3 +534,9 @@ add_executable(EngineCoreFieldAuditReportWriterTests
 )
 target_link_libraries(EngineCoreFieldAuditReportWriterTests PRIVATE EngineCore)
 add_test(NAME EngineCoreFieldAuditReportWriterTests COMMAND EngineCoreFieldAuditReportWriterTests)
+
+add_executable(EngineCoreFieldRemediationBacklogTests
+    Core/Tests/Audit/FieldRemediationBacklogTests.cpp
+)
+target_link_libraries(EngineCoreFieldRemediationBacklogTests PRIVATE EngineCore)
+add_test(NAME EngineCoreFieldRemediationBacklogTests COMMAND EngineCoreFieldRemediationBacklogTests)
