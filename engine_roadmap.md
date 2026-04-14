@@ -446,11 +446,11 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 30.2.2: Implement `MigrateUIAndLocalizationFieldData()` to correct binding keys, locale schema drift, and modal/world-widget metadata. (v0.30.2.2)
   * [x] Sub-step 30.2.3: Implement `MigrateAddressableBundleAndBuildManifestFieldData()` for catalog/bundle/build profile parity. (v0.30.2.3)
   * [x] Sub-step 30.2.4: Implement `RepairPlayerSaveReplayAndAutomationFieldData()` to restore compatibility for persistence and deterministic test baselines. (v0.30.2.4)
-* [ ] Step 30.3: Fix runtime, networking, and deployment-time field integrity defects.
+* [x] Step 30.3: Fix runtime, networking, and deployment-time field integrity defects.
   * [x] Sub-step 30.3.1: Implement `FixRuntimeFieldBindingAndReflectionRoutes()` across ECS systems, UI binding, animation, and tool-facing APIs. (v0.30.3.1)
   * [x] Sub-step 30.3.2: Implement `FixReplicationRPCAndRollbackFieldParity()` to guarantee authoritative/client schema consistency and replay determinism. (v0.30.3.2)
   * [x] Sub-step 30.3.3: Implement `FixFieldUpdateOrderingForDeterminism()` across frame phases, job boundaries, and serialization checkpoints. (v0.30.3.3)
-  * [ ] Sub-step 30.3.4: Implement `FixStoreAndDedicatedServerFieldContracts()` for release metadata, artifact manifests, and deployment descriptors. (v0.30.3.4)
+  * [x] Sub-step 30.3.4: Implement `FixStoreAndDedicatedServerFieldContracts()` for release metadata, artifact manifests, and deployment descriptors. (v0.30.3.4)
 * [ ] Step 30.4: Add permanent guardrails to prevent future field regressions.
   * [ ] Sub-step 30.4.1: Implement `AddFieldInvariantAssertions()` in runtime/editor/build pipelines with explicit error taxonomies. (v0.30.4.1)
   * [ ] Sub-step 30.4.2: Implement `AddFieldContractRegressionSuites()` spanning profiling, automation, packaging, networking, persistence, and tooling flows. (v0.30.4.2)

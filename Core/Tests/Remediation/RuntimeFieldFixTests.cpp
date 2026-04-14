@@ -63,6 +63,13 @@ int main() {
     }
 
     {
+        RuntimeFieldFixRequest invalidRequest{};
+        const Result<RuntimeFieldFixResult> result = FixStoreAndDedicatedServerFieldContracts(invalidRequest);
+        REQUIRE_OR_FAIL(!result.Ok);
+        REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
         RuntimeFieldFixRequest unsupportedScopeRequest{};
         unsupportedScopeRequest.Scope = "runtime-field-routes-v2";
         unsupportedScopeRequest.OutputDirectory = root / "unsupported";
@@ -449,6 +456,113 @@ int main() {
         REQUIRE_OR_FAIL(sawCheckpointFix);
 
         const Result<RuntimeFieldFixResult> second = FixFieldUpdateOrderingForDeterminism(request);
+        REQUIRE_OR_FAIL(second.Ok);
+        REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
+        REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        REQUIRE_OR_FAIL(second.Value.FixRecords.size() == first.Value.FixRecords.size());
+        for (std::size_t index = 0; index < first.Value.FixRecords.size(); ++index) {
+            REQUIRE_OR_FAIL(second.Value.FixRecords[index].FixId == first.Value.FixRecords[index].FixId);
+            REQUIRE_OR_FAIL(second.Value.FixRecords[index].DeterministicDigest ==
+                            first.Value.FixRecords[index].DeterministicDigest);
+            REQUIRE_OR_FAIL(second.Value.FixRecords[index].Rollback.RollbackCheckpointId ==
+                            first.Value.FixRecords[index].Rollback.RollbackCheckpointId);
+        }
+    }
+
+    {
+        RuntimeFieldFixRequest request{};
+        request.Scope = "runtime-store-server-contracts";
+        request.OutputDirectory = root / "store-server-success";
+        request.RemediationBatchId = "batch-030304";
+        request.RollbackManifestPath = request.OutputDirectory / "rollback-runtime-store-server-contracts.json";
+
+        RuntimeFieldFixEntry storeEntry = BuildEntry(RuntimeFieldDomain::Store,
+                                                     "Store::Release::Win64::manifest",
+                                                     "store<->release-artifact",
+                                                     "store::release::win64::manifest",
+                                                     "runtime-finding-store",
+                                                     "release-runtime");
+        storeEntry.Provenance.RuleId = "FIELD_AUDIT_RULE_RELEASE_ARTIFACT_CONTRACT_DRIFT";
+        storeEntry.StoreReleaseArtifactMetadataContract = "artifact=v2;sha=legacy;channel=beta";
+        storeEntry.ExpectedStoreReleaseArtifactMetadataContract = "artifact=v3;sha=stable;channel=release";
+
+        RuntimeFieldFixEntry dedicatedServerEntry = BuildEntry(RuntimeFieldDomain::DedicatedServer,
+                                                               "DedicatedServer::Deployment::Linux",
+                                                               "dedicated-server<->deployment",
+                                                               "dedicated-server::deployment::linux",
+                                                               "runtime-finding-dedicated-server",
+                                                               "server-runtime");
+        dedicatedServerEntry.Provenance.RuleId = "FIELD_AUDIT_RULE_DEDICATED_SERVER_CONTRACT_DRIFT";
+        dedicatedServerEntry.DedicatedServerDeploymentDescriptor = "image=aigs:1.0;region=westus;replicas=2";
+        dedicatedServerEntry.ExpectedDedicatedServerDeploymentDescriptor = "image=aigs:1.1;region=westus2;replicas=3";
+        dedicatedServerEntry.DedicatedServerArtifactManifest = "manifest=v4;map=desert;build=legacy";
+        dedicatedServerEntry.ExpectedDedicatedServerArtifactManifest = "manifest=v5;map=desert;build=stable";
+
+        RuntimeFieldFixEntry duplicateStoreEntry = storeEntry;
+        request.Entries = {dedicatedServerEntry, duplicateStoreEntry, storeEntry};
+
+        const Result<RuntimeFieldFixResult> first = FixStoreAndDedicatedServerFieldContracts(request);
+        REQUIRE_OR_FAIL(first.Ok);
+        REQUIRE_OR_FAIL(first.Value.Scope == request.Scope);
+        REQUIRE_OR_FAIL(first.Value.RemediationBatchId == request.RemediationBatchId);
+        REQUIRE_OR_FAIL(first.Value.RollbackManifestPath == request.RollbackManifestPath);
+        REQUIRE_OR_FAIL(first.Value.Summary.StoreFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.DedicatedServerFixCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.StoreReleaseArtifactMetadataContractFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.DedicatedServerDeploymentManifestContractFixCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.RollbackSafeFixCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.TotalFixCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.FixRecords.size() == 3u);
+        REQUIRE_OR_FAIL(!first.Value.RollbackManifestDigest.empty());
+        REQUIRE_OR_FAIL(!first.Value.DeterministicDigest.empty());
+
+        bool sawStoreMetadataFix = false;
+        bool sawDedicatedServerDescriptorFix = false;
+        bool sawDedicatedServerManifestFix = false;
+        for (const RuntimeFieldFixRecord& record : first.Value.FixRecords) {
+            REQUIRE_OR_FAIL(!record.FixId.empty());
+            REQUIRE_OR_FAIL(!record.StableFieldKey.empty());
+            REQUIRE_OR_FAIL(!record.TargetFieldId.empty());
+            REQUIRE_OR_FAIL(!record.PropertyPath.empty());
+            REQUIRE_OR_FAIL(!record.ExistingValue.empty());
+            REQUIRE_OR_FAIL(!record.ReplacementValue.empty());
+            REQUIRE_OR_FAIL(!record.Rationale.empty());
+            REQUIRE_OR_FAIL(!record.DeterministicDigest.empty());
+            REQUIRE_OR_FAIL(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+            REQUIRE_OR_FAIL(record.Rollback.RollbackRequired);
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackCheckpointId.empty());
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackPropertyPath.empty());
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackManifestPath.empty());
+
+            if (record.TargetFieldId == "store::release::win64::manifest" &&
+                record.FixKind == RuntimeFieldFixKind::StoreReleaseArtifactMetadataContractCorrection) {
+                sawStoreMetadataFix = true;
+                REQUIRE_OR_FAIL(record.PropertyPath == "store.releaseArtifactMetadataContract");
+                REQUIRE_OR_FAIL(record.ExistingValue == "artifact=v2;sha=legacy;channel=beta");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "artifact=v3;sha=stable;channel=release");
+            }
+
+            if (record.TargetFieldId == "dedicated-server::deployment::linux" &&
+                record.FixKind == RuntimeFieldFixKind::DedicatedServerDeploymentManifestContractCorrection &&
+                record.PropertyPath == "dedicatedServer.deploymentDescriptor") {
+                sawDedicatedServerDescriptorFix = true;
+                REQUIRE_OR_FAIL(record.ExistingValue == "image=aigs:1.0;region=westus;replicas=2");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "image=aigs:1.1;region=westus2;replicas=3");
+            }
+
+            if (record.TargetFieldId == "dedicated-server::deployment::linux" &&
+                record.FixKind == RuntimeFieldFixKind::DedicatedServerDeploymentManifestContractCorrection &&
+                record.PropertyPath == "dedicatedServer.artifactManifest") {
+                sawDedicatedServerManifestFix = true;
+                REQUIRE_OR_FAIL(record.ExistingValue == "manifest=v4;map=desert;build=legacy");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "manifest=v5;map=desert;build=stable");
+            }
+        }
+        REQUIRE_OR_FAIL(sawStoreMetadataFix);
+        REQUIRE_OR_FAIL(sawDedicatedServerDescriptorFix);
+        REQUIRE_OR_FAIL(sawDedicatedServerManifestFix);
+
+        const Result<RuntimeFieldFixResult> second = FixStoreAndDedicatedServerFieldContracts(request);
         REQUIRE_OR_FAIL(second.Ok);
         REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
         REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);

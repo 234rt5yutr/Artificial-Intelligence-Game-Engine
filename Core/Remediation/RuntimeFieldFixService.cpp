@@ -136,6 +136,30 @@ namespace {
     return hasFramePhaseSignal || hasJobBoundarySignal || hasCheckpointSignal;
 }
 
+[[nodiscard]] bool IsValidStoreAndDedicatedServerEntry(const RuntimeFieldFixEntry& entry) {
+    if (entry.StableFieldKey.empty() || entry.DomainPair.empty() || entry.TargetFieldId.empty()) {
+        return false;
+    }
+    if (entry.Provenance.FindingId.empty() || entry.Provenance.RuleId.empty() || entry.Provenance.Owner.empty()) {
+        return false;
+    }
+
+    if (entry.Domain == RuntimeFieldDomain::Store) {
+        return !entry.StoreReleaseArtifactMetadataContract.empty() &&
+               !entry.ExpectedStoreReleaseArtifactMetadataContract.empty();
+    }
+
+    if (entry.Domain == RuntimeFieldDomain::DedicatedServer) {
+        const bool hasDescriptorSignal = !entry.DedicatedServerDeploymentDescriptor.empty() &&
+                                         !entry.ExpectedDedicatedServerDeploymentDescriptor.empty();
+        const bool hasManifestSignal =
+            !entry.DedicatedServerArtifactManifest.empty() && !entry.ExpectedDedicatedServerArtifactManifest.empty();
+        return hasDescriptorSignal || hasManifestSignal;
+    }
+
+    return false;
+}
+
 [[nodiscard]] std::string BuildFixId(const RuntimeFieldFixRecord& record) {
     std::string idMaterial;
     idMaterial.reserve(320u);
@@ -253,6 +277,10 @@ namespace {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.ToolingFixCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.StoreFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.DedicatedServerFixCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.BindingPathFixCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.ReflectionRouteFixCount));
@@ -277,6 +305,10 @@ namespace {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.SerializationCheckpointOrderingFixCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.StoreReleaseArtifactMetadataContractFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.DedicatedServerDeploymentManifestContractFixCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RollbackSafeFixCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.TotalFixCount));
@@ -293,6 +325,54 @@ namespace {
         digestMaterial.push_back('\n');
     }
     return HashToHex(HashString(digestMaterial));
+}
+
+void AddSummaryDomainCount(RuntimeFieldFixSummary& summary, const RuntimeFieldDomain domain) {
+    if (domain == RuntimeFieldDomain::ECS) {
+        ++summary.ECSFixCount;
+    } else if (domain == RuntimeFieldDomain::UIBinding) {
+        ++summary.UIBindingFixCount;
+    } else if (domain == RuntimeFieldDomain::Animation) {
+        ++summary.AnimationFixCount;
+    } else if (domain == RuntimeFieldDomain::Tooling) {
+        ++summary.ToolingFixCount;
+    } else if (domain == RuntimeFieldDomain::Replication) {
+        ++summary.ReplicationFixCount;
+    } else if (domain == RuntimeFieldDomain::RPC) {
+        ++summary.RPCFixCount;
+    } else if (domain == RuntimeFieldDomain::ReplayRollback) {
+        ++summary.ReplayRollbackFixCount;
+    } else if (domain == RuntimeFieldDomain::Store) {
+        ++summary.StoreFixCount;
+    } else if (domain == RuntimeFieldDomain::DedicatedServer) {
+        ++summary.DedicatedServerFixCount;
+    }
+}
+
+void AddSummaryFixKindCount(RuntimeFieldFixSummary& summary, const RuntimeFieldFixKind fixKind) {
+    if (fixKind == RuntimeFieldFixKind::BindingPathCorrection) {
+        ++summary.BindingPathFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::ReflectionRouteCorrection) {
+        ++summary.ReflectionRouteFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::ReflectionInterfaceAliasCorrection) {
+        ++summary.ReflectionInterfaceAliasFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::ReplicationSchemaParityCorrection) {
+        ++summary.ReplicationSchemaParityFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::RPCPayloadParityCorrection) {
+        ++summary.RPCPayloadParityFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
+        ++summary.ReplayRollbackSchemaParityFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
+        ++summary.FramePhaseOrderingFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
+        ++summary.JobBoundaryOrderingFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
+        ++summary.SerializationCheckpointOrderingFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::StoreReleaseArtifactMetadataContractCorrection) {
+        ++summary.StoreReleaseArtifactMetadataContractFixCount;
+    } else if (fixKind == RuntimeFieldFixKind::DedicatedServerDeploymentManifestContractCorrection) {
+        ++summary.DedicatedServerDeploymentManifestContractFixCount;
+    }
 }
 
 void SortFixRecords(std::vector<RuntimeFieldFixRecord>& records) {
@@ -426,41 +506,8 @@ Result<RuntimeFieldFixResult> FixRuntimeFieldBindingAndReflectionRoutes(const Ru
     result.FixRecords = std::move(fixRecords);
 
     for (const RuntimeFieldFixRecord& record : result.FixRecords) {
-        if (record.Domain == RuntimeFieldDomain::ECS) {
-            ++result.Summary.ECSFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::UIBinding) {
-            ++result.Summary.UIBindingFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Animation) {
-            ++result.Summary.AnimationFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Tooling) {
-            ++result.Summary.ToolingFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Replication) {
-            ++result.Summary.ReplicationFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::RPC) {
-            ++result.Summary.RPCFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::ReplayRollback) {
-            ++result.Summary.ReplayRollbackFixCount;
-        }
-
-        if (record.FixKind == RuntimeFieldFixKind::BindingPathCorrection) {
-            ++result.Summary.BindingPathFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionRouteCorrection) {
-            ++result.Summary.ReflectionRouteFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionInterfaceAliasCorrection) {
-            ++result.Summary.ReflectionInterfaceAliasFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReplicationSchemaParityCorrection) {
-            ++result.Summary.ReplicationSchemaParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::RPCPayloadParityCorrection) {
-            ++result.Summary.RPCPayloadParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
-            ++result.Summary.ReplayRollbackSchemaParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
-            ++result.Summary.FramePhaseOrderingFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
-            ++result.Summary.JobBoundaryOrderingFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
-            ++result.Summary.SerializationCheckpointOrderingFixCount;
-        }
+        AddSummaryDomainCount(result.Summary, record.Domain);
+        AddSummaryFixKindCount(result.Summary, record.FixKind);
 
         if (record.Rollback.RollbackRequired) {
             ++result.Summary.RollbackSafeFixCount;
@@ -585,41 +632,8 @@ Result<RuntimeFieldFixResult> FixReplicationRPCAndRollbackFieldParity(const Runt
     result.FixRecords = std::move(fixRecords);
 
     for (const RuntimeFieldFixRecord& record : result.FixRecords) {
-        if (record.Domain == RuntimeFieldDomain::ECS) {
-            ++result.Summary.ECSFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::UIBinding) {
-            ++result.Summary.UIBindingFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Animation) {
-            ++result.Summary.AnimationFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Tooling) {
-            ++result.Summary.ToolingFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Replication) {
-            ++result.Summary.ReplicationFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::RPC) {
-            ++result.Summary.RPCFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::ReplayRollback) {
-            ++result.Summary.ReplayRollbackFixCount;
-        }
-
-        if (record.FixKind == RuntimeFieldFixKind::BindingPathCorrection) {
-            ++result.Summary.BindingPathFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionRouteCorrection) {
-            ++result.Summary.ReflectionRouteFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionInterfaceAliasCorrection) {
-            ++result.Summary.ReflectionInterfaceAliasFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReplicationSchemaParityCorrection) {
-            ++result.Summary.ReplicationSchemaParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::RPCPayloadParityCorrection) {
-            ++result.Summary.RPCPayloadParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
-            ++result.Summary.ReplayRollbackSchemaParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
-            ++result.Summary.FramePhaseOrderingFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
-            ++result.Summary.JobBoundaryOrderingFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
-            ++result.Summary.SerializationCheckpointOrderingFixCount;
-        }
+        AddSummaryDomainCount(result.Summary, record.Domain);
+        AddSummaryFixKindCount(result.Summary, record.FixKind);
 
         if (record.Rollback.RollbackRequired) {
             ++result.Summary.RollbackSafeFixCount;
@@ -733,41 +747,126 @@ Result<RuntimeFieldFixResult> FixFieldUpdateOrderingForDeterminism(const Runtime
     result.FixRecords = std::move(fixRecords);
 
     for (const RuntimeFieldFixRecord& record : result.FixRecords) {
-        if (record.Domain == RuntimeFieldDomain::ECS) {
-            ++result.Summary.ECSFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::UIBinding) {
-            ++result.Summary.UIBindingFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Animation) {
-            ++result.Summary.AnimationFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Tooling) {
-            ++result.Summary.ToolingFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::Replication) {
-            ++result.Summary.ReplicationFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::RPC) {
-            ++result.Summary.RPCFixCount;
-        } else if (record.Domain == RuntimeFieldDomain::ReplayRollback) {
-            ++result.Summary.ReplayRollbackFixCount;
+        AddSummaryDomainCount(result.Summary, record.Domain);
+        AddSummaryFixKindCount(result.Summary, record.FixKind);
+
+        if (record.Rollback.RollbackRequired) {
+            ++result.Summary.RollbackSafeFixCount;
+        }
+    }
+
+    result.Summary.TotalFixCount = static_cast<uint32_t>(result.FixRecords.size());
+    result.RollbackManifestDigest = ComputeRollbackManifestDigest(result);
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<RuntimeFieldFixResult>::Success(std::move(result));
+}
+
+Result<RuntimeFieldFixResult> FixStoreAndDedicatedServerFieldContracts(const RuntimeFieldFixRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.RollbackManifestPath.empty() || request.Entries.empty()) {
+        return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "runtime-store-server-contracts") {
+        return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const RuntimeFieldFixEntry& entry : request.Entries) {
+        if (!IsValidStoreAndDedicatedServerEntry(entry)) {
+            return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<RuntimeFieldFixRecord> fixRecords;
+    std::map<std::string, bool> seenFixKeys;
+
+    for (const RuntimeFieldFixEntry& entry : request.Entries) {
+        auto emitFix = [&](const RuntimeFieldFixKind fixKind,
+                           const std::string& propertyPath,
+                           const std::string& existingValue,
+                           const std::string& replacementValue,
+                           const std::string& rationale) {
+            std::string dedupeKey;
+            dedupeKey.reserve(288u);
+            dedupeKey.append(entry.Provenance.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.TargetFieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(fixKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenFixKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenFixKeys.emplace(dedupeKey, true);
+
+            RuntimeFieldFixRecord record{};
+            record.Domain = entry.Domain;
+            record.FixKind = fixKind;
+            record.StableFieldKey = entry.StableFieldKey;
+            record.DomainPair = entry.DomainPair;
+            record.TargetFieldId = entry.TargetFieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.Rationale = rationale;
+            record.Provenance = entry.Provenance;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.Rollback.RollbackPropertyPath = propertyPath;
+            record.Rollback.RollbackValue = existingValue;
+            record.Rollback.RollbackManifestPath = request.RollbackManifestPath.generic_string();
+            record.FixId = BuildFixId(record);
+            record.Rollback.RollbackCheckpointId = BuildRollbackCheckpointId(record);
+            record.DeterministicDigest = ComputeFixRecordDigest(record);
+            fixRecords.push_back(std::move(record));
+        };
+
+        if (entry.Domain == RuntimeFieldDomain::Store &&
+            entry.StoreReleaseArtifactMetadataContract != entry.ExpectedStoreReleaseArtifactMetadataContract) {
+            emitFix(RuntimeFieldFixKind::StoreReleaseArtifactMetadataContractCorrection,
+                    "store.releaseArtifactMetadataContract",
+                    AsExistingValue(entry.StoreReleaseArtifactMetadataContract),
+                    AsExistingValue(entry.ExpectedStoreReleaseArtifactMetadataContract),
+                    "align-store-release-artifact-metadata-contract-with-canonical-release-manifest");
         }
 
-        if (record.FixKind == RuntimeFieldFixKind::BindingPathCorrection) {
-            ++result.Summary.BindingPathFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionRouteCorrection) {
-            ++result.Summary.ReflectionRouteFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionInterfaceAliasCorrection) {
-            ++result.Summary.ReflectionInterfaceAliasFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReplicationSchemaParityCorrection) {
-            ++result.Summary.ReplicationSchemaParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::RPCPayloadParityCorrection) {
-            ++result.Summary.RPCPayloadParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
-            ++result.Summary.ReplayRollbackSchemaParityFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
-            ++result.Summary.FramePhaseOrderingFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
-            ++result.Summary.JobBoundaryOrderingFixCount;
-        } else if (record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
-            ++result.Summary.SerializationCheckpointOrderingFixCount;
+        if (entry.Domain == RuntimeFieldDomain::DedicatedServer) {
+            if (entry.DedicatedServerDeploymentDescriptor != entry.ExpectedDedicatedServerDeploymentDescriptor) {
+                emitFix(RuntimeFieldFixKind::DedicatedServerDeploymentManifestContractCorrection,
+                        "dedicatedServer.deploymentDescriptor",
+                        AsExistingValue(entry.DedicatedServerDeploymentDescriptor),
+                        AsExistingValue(entry.ExpectedDedicatedServerDeploymentDescriptor),
+                        "align-dedicated-server-deployment-descriptor-with-canonical-contract");
+            }
+
+            if (entry.DedicatedServerArtifactManifest != entry.ExpectedDedicatedServerArtifactManifest) {
+                emitFix(RuntimeFieldFixKind::DedicatedServerDeploymentManifestContractCorrection,
+                        "dedicatedServer.artifactManifest",
+                        AsExistingValue(entry.DedicatedServerArtifactManifest),
+                        AsExistingValue(entry.ExpectedDedicatedServerArtifactManifest),
+                        "align-dedicated-server-artifact-manifest-with-canonical-contract");
+            }
         }
+    }
+
+    SortFixRecords(fixRecords);
+
+    RuntimeFieldFixResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.RollbackManifestPath = request.RollbackManifestPath;
+    result.FixRecords = std::move(fixRecords);
+
+    for (const RuntimeFieldFixRecord& record : result.FixRecords) {
+        AddSummaryDomainCount(result.Summary, record.Domain);
+        AddSummaryFixKindCount(result.Summary, record.FixKind);
 
         if (record.Rollback.RollbackRequired) {
             ++result.Summary.RollbackSafeFixCount;

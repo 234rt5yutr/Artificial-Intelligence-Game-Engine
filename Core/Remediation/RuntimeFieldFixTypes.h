@@ -19,7 +19,9 @@ enum class RuntimeFieldDomain : uint8_t {
     Tooling = 3,
     Replication = 4,
     RPC = 5,
-    ReplayRollback = 6
+    ReplayRollback = 6,
+    Store = 7,
+    DedicatedServer = 8
 };
 
 enum class RuntimeFieldFixKind : uint8_t {
@@ -31,7 +33,9 @@ enum class RuntimeFieldFixKind : uint8_t {
     ReplayRollbackSchemaParityCorrection = 5,
     FramePhaseOrderingCorrection = 6,
     JobBoundaryOrderingCorrection = 7,
-    SerializationCheckpointOrderingCorrection = 8
+    SerializationCheckpointOrderingCorrection = 8,
+    StoreReleaseArtifactMetadataContractCorrection = 9,
+    DedicatedServerDeploymentManifestContractCorrection = 10
 };
 
 struct RuntimeFieldFixProvenanceMetadata {
@@ -73,6 +77,12 @@ struct RuntimeFieldFixEntry {
     std::string ExpectedJobBoundaryOrdering;
     std::string SerializationCheckpointOrdering;
     std::string ExpectedSerializationCheckpointOrdering;
+    std::string StoreReleaseArtifactMetadataContract;
+    std::string ExpectedStoreReleaseArtifactMetadataContract;
+    std::string DedicatedServerDeploymentDescriptor;
+    std::string ExpectedDedicatedServerDeploymentDescriptor;
+    std::string DedicatedServerArtifactManifest;
+    std::string ExpectedDedicatedServerArtifactManifest;
     RuntimeFieldFixProvenanceMetadata Provenance;
 };
 
@@ -105,6 +115,8 @@ struct RuntimeFieldFixSummary {
     uint32_t UIBindingFixCount = 0;
     uint32_t AnimationFixCount = 0;
     uint32_t ToolingFixCount = 0;
+    uint32_t StoreFixCount = 0;
+    uint32_t DedicatedServerFixCount = 0;
     uint32_t BindingPathFixCount = 0;
     uint32_t ReflectionRouteFixCount = 0;
     uint32_t ReflectionInterfaceAliasFixCount = 0;
@@ -117,6 +129,8 @@ struct RuntimeFieldFixSummary {
     uint32_t FramePhaseOrderingFixCount = 0;
     uint32_t JobBoundaryOrderingFixCount = 0;
     uint32_t SerializationCheckpointOrderingFixCount = 0;
+    uint32_t StoreReleaseArtifactMetadataContractFixCount = 0;
+    uint32_t DedicatedServerDeploymentManifestContractFixCount = 0;
     uint32_t RollbackSafeFixCount = 0;
     uint32_t TotalFixCount = 0;
 };

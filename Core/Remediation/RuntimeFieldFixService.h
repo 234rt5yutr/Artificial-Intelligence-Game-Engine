@@ -7,5 +7,6 @@ namespace Core::Remediation {
 Result<RuntimeFieldFixResult> FixRuntimeFieldBindingAndReflectionRoutes(const RuntimeFieldFixRequest& request);
 Result<RuntimeFieldFixResult> FixReplicationRPCAndRollbackFieldParity(const RuntimeFieldFixRequest& request);
 Result<RuntimeFieldFixResult> FixFieldUpdateOrderingForDeterminism(const RuntimeFieldFixRequest& request);
+Result<RuntimeFieldFixResult> FixStoreAndDedicatedServerFieldContracts(const RuntimeFieldFixRequest& request);
 
 } // namespace Core::Remediation
