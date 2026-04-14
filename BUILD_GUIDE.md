@@ -124,3 +124,17 @@ auto layout = Core::Asset::AssetLoader::LoadWidgetLayoutAsset("build/cooked/hud.
 auto locale = Core::Asset::AssetLoader::LoadLocalizationTableAsset("build/cooked/ui_en.uiloc.cooked");
 ```
 
+## 10. Stage 28 profiling, automation, and build pipeline quickstart
+
+After building `Release`, run the Stage 28 validation suites:
+
+```powershell
+ctest --test-dir build -C Release
+```
+
+To run only the build/packaging workflow tests:
+
+```powershell
+ctest --test-dir build -C Release -R "EngineCore(BuildPipeline|ArtifactPackaging|DedicatedServerArtifact)Tests"
+```
+

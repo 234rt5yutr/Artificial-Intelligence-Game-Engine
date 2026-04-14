@@ -100,4 +100,41 @@ struct StoreSubmissionResult {
     std::vector<StoreSubmissionPackageEntry> PackageEntries;
 };
 
+struct DedicatedServerBuildRequest {
+    std::string Platform;
+    std::string Configuration;
+    std::string BuildProfile;
+    bool IncludeSymbols = false;
+    std::filesystem::path OutputDirectory;
+};
+
+struct DedicatedServerArtifactMetadata {
+    std::filesystem::path BinaryPath;
+    std::filesystem::path ConfigTemplatePath;
+    std::filesystem::path SymbolsPath;
+    std::filesystem::path DeploymentManifestPath;
+    std::string BinaryChecksum;
+    std::string ConfigTemplateChecksum;
+    std::string SymbolsChecksum;
+    std::string DeploymentManifestChecksum;
+};
+
+struct DedicatedServerBuildResult {
+    std::string Platform;
+    std::string Configuration;
+    std::string BuildProfile;
+    bool IncludeSymbols = false;
+    bool ExcludesClientPayload = true;
+    bool ExcludesUiPayload = true;
+    std::string SymbolHandlingState;
+    std::filesystem::path OutputDirectory;
+    std::filesystem::path BinaryPath;
+    std::filesystem::path ConfigTemplatePath;
+    std::filesystem::path SymbolsPath;
+    std::filesystem::path DeploymentManifestPath;
+    std::string DeterministicDigest;
+    DedicatedServerArtifactMetadata Artifacts;
+    bool Succeeded = false;
+};
+
 } // namespace Core::Build

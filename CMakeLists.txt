@@ -236,6 +236,8 @@ add_library(EngineCore
     Core/Build/BuildOrchestrator.cpp
     Core/Build/StoreSubmissionPackager.h
     Core/Build/StoreSubmissionPackager.cpp
+    Core/Build/DedicatedServerBuildService.h
+    Core/Build/DedicatedServerBuildService.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -483,3 +485,9 @@ add_executable(EngineCoreArtifactPackagingTests
 )
 target_link_libraries(EngineCoreArtifactPackagingTests PRIVATE EngineCore)
 add_test(NAME EngineCoreArtifactPackagingTests COMMAND EngineCoreArtifactPackagingTests)
+
+add_executable(EngineCoreDedicatedServerArtifactTests
+    Core/Tests/Build/DedicatedServerArtifactTests.cpp
+)
+target_link_libraries(EngineCoreDedicatedServerArtifactTests PRIVATE EngineCore)
+add_test(NAME EngineCoreDedicatedServerArtifactTests COMMAND EngineCoreDedicatedServerArtifactTests)
