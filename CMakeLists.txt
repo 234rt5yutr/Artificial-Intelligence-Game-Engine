@@ -238,6 +238,9 @@ add_library(EngineCore
     Core/Build/StoreSubmissionPackager.cpp
     Core/Build/DedicatedServerBuildService.h
     Core/Build/DedicatedServerBuildService.cpp
+    Core/Audit/FieldAuditTypes.h
+    Core/Audit/FieldInventoryService.h
+    Core/Audit/FieldInventoryService.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -491,3 +494,9 @@ add_executable(EngineCoreDedicatedServerArtifactTests
 )
 target_link_libraries(EngineCoreDedicatedServerArtifactTests PRIVATE EngineCore)
 add_test(NAME EngineCoreDedicatedServerArtifactTests COMMAND EngineCoreDedicatedServerArtifactTests)
+
+add_executable(EngineCoreFieldInventoryTests
+    Core/Tests/Audit/FieldInventoryTests.cpp
+)
+target_link_libraries(EngineCoreFieldInventoryTests PRIVATE EngineCore)
+add_test(NAME EngineCoreFieldInventoryTests COMMAND EngineCoreFieldInventoryTests)
