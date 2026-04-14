@@ -5,5 +5,6 @@
 namespace Core::Audit {
 
 Result<FieldAuditRunReport> RunRuntimeStateFieldAudit(const FieldAuditRunRequest& request);
+Result<FieldAuditRunReport> RunCookedAndPackagedArtifactFieldAudit(const FieldAuditRunRequest& request);
 
 } // namespace Core::Audit

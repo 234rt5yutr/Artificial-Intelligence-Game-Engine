@@ -3,14 +3,17 @@
 #include "Core/Audit/FieldInventoryService.h"
 #include "Core/Audit/FieldValidationService.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Core::Audit {
@@ -107,6 +110,159 @@ namespace {
     return HashToHex(HashString(digestMaterial));
 }
 
+[[nodiscard]] std::string ComputeSnapshotDigest(const FieldInventorySnapshot& snapshot) {
+    std::string digestMaterial;
+    digestMaterial.reserve((snapshot.Entries.size() * 64u) + 32u);
+    digestMaterial.append(snapshot.Scope);
+    digestMaterial.push_back('|');
+    for (const FieldInventoryEntry& entry : snapshot.Entries) {
+        digestMaterial.append(entry.FieldId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(entry.OwnerSubsystem);
+        digestMaterial.push_back('|');
+        digestMaterial.push_back(entry.Required ? '1' : '0');
+        digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] FieldInventorySnapshot BuildDomainFilteredSnapshot(const FieldInventorySnapshot& sourceSnapshot,
+                                                                 const std::filesystem::path& outputDirectory,
+                                                                 const std::vector<std::string_view>& includedDomains) {
+    std::set<std::string_view> includedDomainSet(includedDomains.begin(), includedDomains.end());
+    std::vector<FieldInventoryEntry> filteredEntries;
+    filteredEntries.reserve(sourceSnapshot.Entries.size());
+    for (const FieldInventoryEntry& entry : sourceSnapshot.Entries) {
+        if (includedDomainSet.empty() || includedDomainSet.contains(entry.Domain)) {
+            filteredEntries.push_back(entry);
+        }
+    }
+
+    if (filteredEntries.empty()) {
+        filteredEntries = sourceSnapshot.Entries;
+    }
+
+    std::sort(filteredEntries.begin(), filteredEntries.end(), [](const FieldInventoryEntry& left, const FieldInventoryEntry& right) {
+        if (left.FieldId != right.FieldId) {
+            return left.FieldId < right.FieldId;
+        }
+        if (left.OwnerSubsystem != right.OwnerSubsystem) {
+            return left.OwnerSubsystem < right.OwnerSubsystem;
+        }
+        return left.SourceTrace.SourceFile < right.SourceTrace.SourceFile;
+    });
+
+    std::set<std::string> domainSet;
+    for (const FieldInventoryEntry& entry : filteredEntries) {
+        domainSet.insert(entry.Domain);
+    }
+
+    FieldInventorySnapshot filteredSnapshot{};
+    filteredSnapshot.Scope = sourceSnapshot.Scope;
+    filteredSnapshot.OutputDirectory = outputDirectory;
+    filteredSnapshot.Domains.assign(domainSet.begin(), domainSet.end());
+    filteredSnapshot.Entries = std::move(filteredEntries);
+    filteredSnapshot.DeterministicDigest = ComputeSnapshotDigest(filteredSnapshot);
+    return filteredSnapshot;
+}
+
+[[nodiscard]] Result<FieldValidationReport> RunValidationStage(const std::string_view validationScope,
+                                                               const std::filesystem::path& outputDirectory,
+                                                               const FieldInventorySnapshot& runtimeSnapshot,
+                                                               const FieldInventorySnapshot& serializedSnapshot,
+                                                               const FieldInventorySnapshot& protocolSnapshot) {
+    FieldValidationRequest validationRequest{};
+    validationRequest.Scope = std::string(validationScope);
+    validationRequest.OutputDirectory = outputDirectory;
+    validationRequest.RuntimeSnapshot = runtimeSnapshot;
+    validationRequest.SerializedSnapshot = serializedSnapshot;
+    validationRequest.ProtocolSnapshot = protocolSnapshot;
+
+    if (validationScope == "type-nullability") {
+        return ValidateFieldTypeAndNullabilityContracts(validationRequest);
+    }
+    if (validationScope == "range-enum-pattern-domains") {
+        return ValidateFieldRangeEnumAndPatternDomains(validationRequest);
+    }
+    if (validationScope == "cross-field-invariant-rules") {
+        return ValidateCrossFieldInvariantRules(validationRequest);
+    }
+    if (validationScope == "evolution-compatibility") {
+        return ValidateFieldEvolutionCompatibility(validationRequest);
+    }
+    return Result<FieldValidationReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+}
+
+[[nodiscard]] Result<FieldAuditPhaseStamp> RunAuditPhase(const std::string_view phaseId,
+                                                         const std::string_view phaseLabel,
+                                                         const uint32_t phaseOrdinal,
+                                                         const std::filesystem::path& phaseRoot,
+                                                         const FieldInventorySnapshot& runtimeSnapshot,
+                                                         const FieldInventorySnapshot& serializedSnapshot,
+                                                         const FieldInventorySnapshot& protocolSnapshot) {
+    const std::array<std::pair<std::string_view, std::string_view>, 4> validationStages = {
+        std::pair<std::string_view, std::string_view>("type-nullability", "validation-type-nullability"),
+        std::pair<std::string_view, std::string_view>("range-enum-pattern-domains", "validation-range-enum-pattern"),
+        std::pair<std::string_view, std::string_view>("cross-field-invariant-rules", "validation-cross-field-invariants"),
+        std::pair<std::string_view, std::string_view>("evolution-compatibility", "validation-evolution")};
+
+    std::vector<FieldValidationReport> phaseValidationReports;
+    phaseValidationReports.reserve(validationStages.size());
+    uint32_t phaseFindingCount = 0;
+    for (const auto& [validationScope, directoryName] : validationStages) {
+        const Result<FieldValidationReport> validationReport = RunValidationStage(
+            validationScope, phaseRoot / std::string(directoryName), runtimeSnapshot, serializedSnapshot, protocolSnapshot);
+        if (!validationReport.Ok) {
+            return Result<FieldAuditPhaseStamp>::Failure(validationReport.Error);
+        }
+
+        phaseFindingCount += validationReport.Value.Summary.TotalFindingCount;
+        phaseValidationReports.push_back(validationReport.Value);
+    }
+
+    FieldAuditPhaseStamp phaseStamp{};
+    phaseStamp.PhaseId = std::string(phaseId);
+    phaseStamp.PhaseLabel = std::string(phaseLabel);
+    phaseStamp.PhaseOrdinal = phaseOrdinal;
+    phaseStamp.InventoryDigest = HashToHex(HashString(
+        runtimeSnapshot.DeterministicDigest + "|" + serializedSnapshot.DeterministicDigest + "|" + protocolSnapshot.DeterministicDigest));
+    phaseStamp.ValidationDigest = ComputeValidationDigest(phaseValidationReports);
+    phaseStamp.TotalFindingCount = phaseFindingCount;
+    phaseStamp.DeterministicPhaseDigest = ComputePhaseDigest(phaseStamp);
+    return Result<FieldAuditPhaseStamp>::Success(std::move(phaseStamp));
+}
+
+[[nodiscard]] FieldAuditRunReport BuildRunReport(const FieldAuditRunRequest& request,
+                                                 std::vector<FieldAuditPhaseStamp>&& phaseStamps) {
+    FieldAuditRunReport report{};
+    report.Scope = request.Scope;
+    report.OutputDirectory = request.OutputDirectory;
+    report.PhaseStamps = std::move(phaseStamps);
+    report.TotalPhases = static_cast<uint32_t>(report.PhaseStamps.size());
+    for (const FieldAuditPhaseStamp& phaseStamp : report.PhaseStamps) {
+        report.TotalFindingCount += phaseStamp.TotalFindingCount;
+    }
+    report.DeterministicDigest = ComputeRunDigest(report);
+    return report;
+}
+
+[[nodiscard]] Result<FieldInventorySnapshot> GenerateBaselineSnapshot(const std::string_view scope,
+                                                                      const std::filesystem::path& outputDirectory) {
+    FieldInventoryRequest request{};
+    request.Scope = std::string(scope);
+    request.OutputDirectory = outputDirectory;
+    if (scope == "runtime") {
+        return GenerateRuntimeFieldInventory(request);
+    }
+    if (scope == "serialized") {
+        return GenerateSerializedFieldInventory(request);
+    }
+    if (scope == "protocol") {
+        return GenerateProtocolFieldInventory(request);
+    }
+    return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+}
+
 } // namespace
 
 Result<FieldAuditRunReport> RunRuntimeStateFieldAudit(const FieldAuditRunRequest& request) {
@@ -122,18 +278,14 @@ Result<FieldAuditRunReport> RunRuntimeStateFieldAudit(const FieldAuditRunRequest
         return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
     }
 
-    FieldInventoryRequest serializedRequest{};
-    serializedRequest.Scope = "serialized";
-    serializedRequest.OutputDirectory = request.OutputDirectory / "baseline-serialized";
-    const Result<FieldInventorySnapshot> serializedInventory = GenerateSerializedFieldInventory(serializedRequest);
+    const Result<FieldInventorySnapshot> serializedInventory =
+        GenerateBaselineSnapshot("serialized", request.OutputDirectory / "baseline-serialized");
     if (!serializedInventory.Ok) {
         return Result<FieldAuditRunReport>::Failure(serializedInventory.Error);
     }
 
-    FieldInventoryRequest protocolRequest{};
-    protocolRequest.Scope = "protocol";
-    protocolRequest.OutputDirectory = request.OutputDirectory / "baseline-protocol";
-    const Result<FieldInventorySnapshot> protocolInventory = GenerateProtocolFieldInventory(protocolRequest);
+    const Result<FieldInventorySnapshot> protocolInventory =
+        GenerateBaselineSnapshot("protocol", request.OutputDirectory / "baseline-protocol");
     if (!protocolInventory.Ok) {
         return Result<FieldAuditRunReport>::Failure(protocolInventory.Error);
     }
@@ -145,85 +297,114 @@ Result<FieldAuditRunReport> RunRuntimeStateFieldAudit(const FieldAuditRunRequest
 
     std::vector<FieldAuditPhaseStamp> phaseStamps;
     phaseStamps.reserve(runtimePhases.size());
-    uint32_t totalFindingCount = 0;
     for (std::size_t phaseIndex = 0; phaseIndex < runtimePhases.size(); ++phaseIndex) {
         const auto [phaseId, phaseLabel] = runtimePhases[phaseIndex];
         const std::filesystem::path phaseRoot = request.OutputDirectory / ("runtime-phase-" + std::to_string(phaseIndex + 1u));
 
-        FieldInventoryRequest runtimeRequest{};
-        runtimeRequest.Scope = "runtime";
-        runtimeRequest.OutputDirectory = phaseRoot / "runtime";
-        const Result<FieldInventorySnapshot> runtimeInventory = GenerateRuntimeFieldInventory(runtimeRequest);
+        const Result<FieldInventorySnapshot> runtimeInventory =
+            GenerateBaselineSnapshot("runtime", phaseRoot / "runtime-inventory");
         if (!runtimeInventory.Ok) {
             return Result<FieldAuditRunReport>::Failure(runtimeInventory.Error);
         }
 
-        const auto runValidation = [&](const std::string_view validationScope, const std::filesystem::path& outputDirectory)
-            -> Result<FieldValidationReport> {
-            FieldValidationRequest validationRequest{};
-            validationRequest.Scope = std::string(validationScope);
-            validationRequest.OutputDirectory = outputDirectory;
-            validationRequest.RuntimeSnapshot = runtimeInventory.Value;
-            validationRequest.SerializedSnapshot = serializedInventory.Value;
-            validationRequest.ProtocolSnapshot = protocolInventory.Value;
-
-            if (validationScope == "type-nullability") {
-                return ValidateFieldTypeAndNullabilityContracts(validationRequest);
-            }
-            if (validationScope == "range-enum-pattern-domains") {
-                return ValidateFieldRangeEnumAndPatternDomains(validationRequest);
-            }
-            if (validationScope == "cross-field-invariant-rules") {
-                return ValidateCrossFieldInvariantRules(validationRequest);
-            }
-            if (validationScope == "evolution-compatibility") {
-                return ValidateFieldEvolutionCompatibility(validationRequest);
-            }
-            return Result<FieldValidationReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
-        };
-
-        const std::array<std::pair<std::string_view, std::string_view>, 4> validationStages = {
-            std::pair<std::string_view, std::string_view>("type-nullability", "validation-type-nullability"),
-            std::pair<std::string_view, std::string_view>("range-enum-pattern-domains", "validation-range-enum-pattern"),
-            std::pair<std::string_view, std::string_view>("cross-field-invariant-rules", "validation-cross-field-invariants"),
-            std::pair<std::string_view, std::string_view>("evolution-compatibility", "validation-evolution")};
-
-        std::vector<FieldValidationReport> phaseValidationReports;
-        phaseValidationReports.reserve(validationStages.size());
-        uint32_t phaseFindingCount = 0;
-        for (const auto& [validationScope, directoryName] : validationStages) {
-            const Result<FieldValidationReport> validationReport =
-                runValidation(validationScope, phaseRoot / std::string(directoryName));
-            if (!validationReport.Ok) {
-                return Result<FieldAuditRunReport>::Failure(validationReport.Error);
-            }
-
-            phaseFindingCount += validationReport.Value.Summary.TotalFindingCount;
-            phaseValidationReports.push_back(validationReport.Value);
+        const Result<FieldAuditPhaseStamp> phaseStamp = RunAuditPhase(phaseId,
+                                                                      phaseLabel,
+                                                                      static_cast<uint32_t>(phaseIndex + 1u),
+                                                                      phaseRoot,
+                                                                      runtimeInventory.Value,
+                                                                      serializedInventory.Value,
+                                                                      protocolInventory.Value);
+        if (!phaseStamp.Ok) {
+            return Result<FieldAuditRunReport>::Failure(phaseStamp.Error);
         }
-
-        FieldAuditPhaseStamp phaseStamp{};
-        phaseStamp.PhaseId = std::string(phaseId);
-        phaseStamp.PhaseLabel = std::string(phaseLabel);
-        phaseStamp.PhaseOrdinal = static_cast<uint32_t>(phaseIndex + 1u);
-        phaseStamp.InventoryDigest = runtimeInventory.Value.DeterministicDigest;
-        phaseStamp.ValidationDigest = ComputeValidationDigest(phaseValidationReports);
-        phaseStamp.TotalFindingCount = phaseFindingCount;
-        phaseStamp.DeterministicPhaseDigest = ComputePhaseDigest(phaseStamp);
-        totalFindingCount += phaseFindingCount;
-
-        phaseStamps.push_back(std::move(phaseStamp));
+        phaseStamps.push_back(phaseStamp.Value);
     }
 
-    FieldAuditRunReport report{};
-    report.Scope = request.Scope;
-    report.OutputDirectory = request.OutputDirectory;
-    report.PhaseStamps = std::move(phaseStamps);
-    report.TotalPhases = static_cast<uint32_t>(report.PhaseStamps.size());
-    report.TotalFindingCount = totalFindingCount;
-    report.DeterministicDigest = ComputeRunDigest(report);
+    return Result<FieldAuditRunReport>::Success(BuildRunReport(request, std::move(phaseStamps)));
+}
 
-    return Result<FieldAuditRunReport>::Success(std::move(report));
+Result<FieldAuditRunReport> RunCookedAndPackagedArtifactFieldAudit(const FieldAuditRunRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "cooked-packaged-artifacts") {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    const Result<FieldInventorySnapshot> runtimeInventory =
+        GenerateBaselineSnapshot("runtime", request.OutputDirectory / "baseline-runtime");
+    if (!runtimeInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(runtimeInventory.Error);
+    }
+
+    const Result<FieldInventorySnapshot> serializedInventory =
+        GenerateBaselineSnapshot("serialized", request.OutputDirectory / "baseline-serialized");
+    if (!serializedInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(serializedInventory.Error);
+    }
+
+    const Result<FieldInventorySnapshot> protocolInventory =
+        GenerateBaselineSnapshot("protocol", request.OutputDirectory / "baseline-protocol");
+    if (!protocolInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(protocolInventory.Error);
+    }
+
+    std::vector<FieldAuditPhaseStamp> phaseStamps;
+    phaseStamps.reserve(4u);
+
+    const auto runArtifactPhase = [&](const std::string_view phaseId,
+                                      const std::string_view phaseLabel,
+                                      const uint32_t phaseOrdinal,
+                                      const std::vector<std::string_view>& serializedDomains) -> Result<FieldAuditPhaseStamp> {
+        const std::filesystem::path phaseRoot = request.OutputDirectory / ("artifact-phase-" + std::to_string(phaseOrdinal));
+        const FieldInventorySnapshot filteredSerialized = BuildDomainFilteredSnapshot(
+            serializedInventory.Value, phaseRoot / "serialized-artifact-snapshot", serializedDomains);
+        return RunAuditPhase(phaseId,
+                             phaseLabel,
+                             phaseOrdinal,
+                             phaseRoot,
+                             runtimeInventory.Value,
+                             filteredSerialized,
+                             protocolInventory.Value);
+    };
+
+    const Result<FieldAuditPhaseStamp> cookedPhase = runArtifactPhase(
+        "cooked-assets",
+        "CookedAssets",
+        1u,
+        {"scene", "prefab", "addressable", "bundle", "widget", "localization"});
+    if (!cookedPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(cookedPhase.Error);
+    }
+    phaseStamps.push_back(cookedPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> manifestPhase =
+        runArtifactPhase("build-manifests", "BuildManifests", 2u, {"build-manifest"});
+    if (!manifestPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(manifestPhase.Error);
+    }
+    phaseStamps.push_back(manifestPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> storePhase =
+        runArtifactPhase("store-bundles", "StoreBundles", 3u, {"bundle", "addressable", "build-manifest"});
+    if (!storePhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(storePhase.Error);
+    }
+    phaseStamps.push_back(storePhase.Value);
+
+    const Result<FieldAuditPhaseStamp> dedicatedServerPhase =
+        runArtifactPhase("dedicated-server-artifacts", "DedicatedServerArtifacts", 4u, {"build-manifest", "save"});
+    if (!dedicatedServerPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(dedicatedServerPhase.Error);
+    }
+    phaseStamps.push_back(dedicatedServerPhase.Value);
+
+    return Result<FieldAuditRunReport>::Success(BuildRunReport(request, std::move(phaseStamps)));
 }
 
 } // namespace Core::Audit
