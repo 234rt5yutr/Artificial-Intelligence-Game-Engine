@@ -26,6 +26,13 @@ struct FieldInventoryEntry {
     std::string TypeName;
     std::string FieldPath;
     bool Required = true;
+    bool HasNumericMinimum = false;
+    double NumericMinimumInclusive = 0.0;
+    bool HasNumericMaximum = false;
+    double NumericMaximumInclusive = 0.0;
+    std::vector<std::string> EnumDomainValues;
+    std::string StringPattern;
+    std::string NormalizedIdentifier;
     std::vector<std::string> AliasFieldIds;
     std::vector<std::string> VersionLineage;
     FieldSourceTraceMetadata SourceTrace;
@@ -54,7 +61,11 @@ struct MergeFieldInventoryRequest {
 
 enum class FieldValidationMismatchKind : uint8_t {
     TypeMismatch = 0,
-    NullabilityMismatch = 1
+    NullabilityMismatch = 1,
+    RangeDomainMismatch = 2,
+    EnumDomainMismatch = 3,
+    PatternDomainMismatch = 4,
+    IdentifierNormalizationMismatch = 5
 };
 
 struct FieldValidationRequest {
@@ -72,6 +83,13 @@ struct FieldValidationEvidence {
     std::string TypeName;
     std::string FieldPath;
     bool Required = true;
+    bool HasNumericMinimum = false;
+    double NumericMinimumInclusive = 0.0;
+    bool HasNumericMaximum = false;
+    double NumericMaximumInclusive = 0.0;
+    std::vector<std::string> EnumDomainValues;
+    std::string StringPattern;
+    std::string NormalizedIdentifier;
     FieldSourceTraceMetadata SourceTrace;
 };
 
@@ -88,6 +106,10 @@ struct FieldValidationSummary {
     uint32_t ComparedFieldCount = 0;
     uint32_t TypeMismatchCount = 0;
     uint32_t NullabilityMismatchCount = 0;
+    uint32_t RangeDomainMismatchCount = 0;
+    uint32_t EnumDomainMismatchCount = 0;
+    uint32_t PatternDomainMismatchCount = 0;
+    uint32_t IdentifierNormalizationMismatchCount = 0;
     uint32_t TotalFindingCount = 0;
 };
 

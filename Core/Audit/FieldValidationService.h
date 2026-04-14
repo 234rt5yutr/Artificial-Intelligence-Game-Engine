@@ -5,5 +5,6 @@
 namespace Core::Audit {
 
 Result<FieldValidationReport> ValidateFieldTypeAndNullabilityContracts(const FieldValidationRequest& request);
+Result<FieldValidationReport> ValidateFieldRangeEnumAndPatternDomains(const FieldValidationRequest& request);
 
 } // namespace Core::Audit
