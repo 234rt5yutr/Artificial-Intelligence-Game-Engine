@@ -1,14 +1,17 @@
 #include "Core/Audit/FieldIssueLedger.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace Core::Audit {
 namespace {
@@ -102,6 +105,19 @@ void SortAndDeduplicateEvidenceReferences(std::vector<FieldIssueEvidenceReferenc
     digestMaterial.append(issue.FirstSeenRevision);
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(issue.OccurrenceCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(issue.Severity)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(issue.BlastRadiusScore));
+    digestMaterial.push_back('|');
+    for (std::size_t index = 0; index < issue.ImpactedDomains.size(); ++index) {
+        if (index > 0u) {
+            digestMaterial.push_back(',');
+        }
+        digestMaterial.append(issue.ImpactedDomains[index]);
+    }
+    digestMaterial.push_back('|');
+    digestMaterial.append(issue.SeverityRationale);
     digestMaterial.push_back('\n');
 
     for (const FieldIssueEvidenceReference& evidence : issue.EvidenceReferences) {
@@ -143,9 +159,136 @@ void SortAndDeduplicateEvidenceReferences(std::vector<FieldIssueEvidenceReferenc
         digestMaterial.append(issue.DeterministicDigest);
         digestMaterial.push_back('|');
         digestMaterial.append(std::to_string(issue.OccurrenceCount));
+        digestMaterial.push_back('|');
+        digestMaterial.append(std::to_string(static_cast<uint32_t>(issue.Severity)));
+        digestMaterial.push_back('|');
+        digestMaterial.append(std::to_string(issue.BlastRadiusScore));
         digestMaterial.push_back('\n');
     }
     return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::string ToLowerCopy(const std::string_view value) {
+    std::string lowered;
+    lowered.reserve(value.size());
+    for (const unsigned char symbol : value) {
+        lowered.push_back(static_cast<char>(std::tolower(symbol)));
+    }
+    return lowered;
+}
+
+void ApplySignalFromText(const std::string& normalizedText,
+                         uint32_t& runtimeImpact,
+                         uint32_t& persistenceImpact,
+                         uint32_t& networkImpact,
+                         uint32_t& buildImpact,
+                         uint32_t& toolingImpact,
+                         std::set<std::string>& impactedDomains) {
+    auto containsToken = [&normalizedText](const std::string_view token) {
+        return normalizedText.find(token) != std::string::npos;
+    };
+
+    if (containsToken("runtime") || containsToken("ecs") || containsToken("gameplay")) {
+        runtimeImpact = std::max(runtimeImpact, 3u);
+        impactedDomains.insert("runtime");
+    }
+    if (containsToken("serialized") || containsToken("save") || containsToken("scene") || containsToken("prefab") ||
+        containsToken("widget") || containsToken("localization")) {
+        persistenceImpact = std::max(persistenceImpact, 2u);
+        impactedDomains.insert("persistence");
+    }
+    if (containsToken("network") || containsToken("protocol") || containsToken("rpc") || containsToken("replay") ||
+        containsToken("rollback") || containsToken("packets")) {
+        networkImpact = std::max(networkImpact, 3u);
+        impactedDomains.insert("network");
+    }
+    if (containsToken("build") || containsToken("bundle") || containsToken("artifact") || containsToken("store") ||
+        containsToken("manifest") || containsToken("dedicated-server")) {
+        buildImpact = std::max(buildImpact, 2u);
+        impactedDomains.insert("build");
+    }
+    if (containsToken("tool") || containsToken("mcp") || containsToken("authoring") || containsToken("editor") ||
+        containsToken("automation")) {
+        toolingImpact = std::max(toolingImpact, 1u);
+        impactedDomains.insert("tooling");
+    }
+}
+
+void ComputeSeverityAndBlastRadius(FieldAuditIssueRecord& issue) {
+    uint32_t runtimeImpact = 0;
+    uint32_t persistenceImpact = 0;
+    uint32_t networkImpact = 0;
+    uint32_t buildImpact = 0;
+    uint32_t toolingImpact = 0;
+    std::set<std::string> impactedDomains;
+
+    ApplySignalFromText(ToLowerCopy(issue.RuleId),
+                        runtimeImpact,
+                        persistenceImpact,
+                        networkImpact,
+                        buildImpact,
+                        toolingImpact,
+                        impactedDomains);
+    ApplySignalFromText(ToLowerCopy(issue.StableFieldKey),
+                        runtimeImpact,
+                        persistenceImpact,
+                        networkImpact,
+                        buildImpact,
+                        toolingImpact,
+                        impactedDomains);
+    ApplySignalFromText(ToLowerCopy(issue.DomainPair),
+                        runtimeImpact,
+                        persistenceImpact,
+                        networkImpact,
+                        buildImpact,
+                        toolingImpact,
+                        impactedDomains);
+
+    for (const FieldIssueEvidenceReference& evidence : issue.EvidenceReferences) {
+        ApplySignalFromText(ToLowerCopy(evidence.RunScope),
+                            runtimeImpact,
+                            persistenceImpact,
+                            networkImpact,
+                            buildImpact,
+                            toolingImpact,
+                            impactedDomains);
+        ApplySignalFromText(ToLowerCopy(evidence.PhaseId),
+                            runtimeImpact,
+                            persistenceImpact,
+                            networkImpact,
+                            buildImpact,
+                            toolingImpact,
+                            impactedDomains);
+        ApplySignalFromText(ToLowerCopy(evidence.DomainPair),
+                            runtimeImpact,
+                            persistenceImpact,
+                            networkImpact,
+                            buildImpact,
+                            toolingImpact,
+                            impactedDomains);
+    }
+
+    const uint32_t occurrenceBoost = issue.OccurrenceCount > 1u ? std::min(issue.OccurrenceCount - 1u, 3u) : 0u;
+    issue.BlastRadiusScore =
+        runtimeImpact + persistenceImpact + networkImpact + buildImpact + toolingImpact + occurrenceBoost;
+
+    if (issue.BlastRadiusScore >= 9u) {
+        issue.Severity = FieldIssueSeverityLevel::Critical;
+    } else if (issue.BlastRadiusScore >= 7u) {
+        issue.Severity = FieldIssueSeverityLevel::High;
+    } else if (issue.BlastRadiusScore >= 5u) {
+        issue.Severity = FieldIssueSeverityLevel::Medium;
+    } else if (issue.BlastRadiusScore >= 2u) {
+        issue.Severity = FieldIssueSeverityLevel::Low;
+    } else {
+        issue.Severity = FieldIssueSeverityLevel::Info;
+    }
+
+    issue.ImpactedDomains.assign(impactedDomains.begin(), impactedDomains.end());
+    issue.SeverityRationale = "runtime=" + std::to_string(runtimeImpact) + ";persistence=" +
+                              std::to_string(persistenceImpact) + ";network=" + std::to_string(networkImpact) +
+                              ";build=" + std::to_string(buildImpact) + ";tooling=" +
+                              std::to_string(toolingImpact) + ";occurrence_boost=" + std::to_string(occurrenceBoost);
 }
 
 } // namespace
@@ -224,6 +367,32 @@ Result<FieldIssueLedgerReport> GenerateFieldAuditIssueLedger(const FieldIssueLed
     report.Issues = std::move(issues);
     report.Summary.RawFindingCount = rawFindingCount;
     report.Summary.DeduplicatedIssueCount = static_cast<uint32_t>(report.Issues.size());
+    report.DeterministicDigest = ComputeLedgerDigest(report);
+    return Result<FieldIssueLedgerReport>::Success(std::move(report));
+}
+
+Result<FieldIssueLedgerReport> ComputeFieldIssueSeverityAndBlastRadius(const FieldIssueLedgerRequest& request) {
+    const Result<FieldIssueLedgerReport> ledgerResult = GenerateFieldAuditIssueLedger(request);
+    if (!ledgerResult.Ok) {
+        return Result<FieldIssueLedgerReport>::Failure(ledgerResult.Error);
+    }
+
+    FieldIssueLedgerReport report = ledgerResult.Value;
+    for (FieldAuditIssueRecord& issue : report.Issues) {
+        ComputeSeverityAndBlastRadius(issue);
+        issue.DeterministicDigest = ComputeIssueDigest(issue);
+    }
+
+    std::sort(report.Issues.begin(), report.Issues.end(), [](const FieldAuditIssueRecord& left, const FieldAuditIssueRecord& right) {
+        if (left.Severity != right.Severity) {
+            return static_cast<uint32_t>(left.Severity) > static_cast<uint32_t>(right.Severity);
+        }
+        if (left.BlastRadiusScore != right.BlastRadiusScore) {
+            return left.BlastRadiusScore > right.BlastRadiusScore;
+        }
+        return left.IssueId < right.IssueId;
+    });
+
     report.DeterministicDigest = ComputeLedgerDigest(report);
     return Result<FieldIssueLedgerReport>::Success(std::move(report));
 }

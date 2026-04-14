@@ -430,7 +430,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 29.3.4: Implement `RunToolingAndAuthoringFieldAudit()` for editor pipelines, MCP tool payloads, and automation report schemas. (v0.29.3.4)
 * [ ] Step 29.4: Generate actionable findings with severity, ownership, and traceable evidence.
   * [x] Sub-step 29.4.1: Implement `GenerateFieldAuditIssueLedger()` with deduplicated issue IDs, first-seen revision, and reproducible evidence pointers. (v0.29.4.1)
-  * [ ] Sub-step 29.4.2: Implement `ComputeFieldIssueSeverityAndBlastRadius()` with gameplay/runtime/build/release impact scoring heuristics. (v0.29.4.2)
+  * [x] Sub-step 29.4.2: Implement `ComputeFieldIssueSeverityAndBlastRadius()` with gameplay/runtime/build/release impact scoring heuristics. (v0.29.4.2)
   * [ ] Sub-step 29.4.3: Implement `ExportFieldAuditComplianceReport()` with machine-readable summaries and human triage views. (v0.29.4.3)
   * [ ] Sub-step 29.4.4: Implement `CreateFieldRemediationBacklogFromAudit()` that emits prioritized fix tasks grouped by subsystem ownership. (v0.29.4.4)
 

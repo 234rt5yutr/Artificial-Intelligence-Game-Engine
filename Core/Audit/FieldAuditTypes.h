@@ -170,6 +170,14 @@ struct FieldIssueEvidenceReference {
     std::string MigrationRecommendationPlaceholder;
 };
 
+enum class FieldIssueSeverityLevel : uint8_t {
+    Info = 0,
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4
+};
+
 struct FieldAuditIssueRecord {
     std::string IssueId;
     std::string RuleId;
@@ -177,6 +185,10 @@ struct FieldAuditIssueRecord {
     std::string DomainPair;
     std::string FirstSeenRevision;
     uint32_t OccurrenceCount = 0;
+    FieldIssueSeverityLevel Severity = FieldIssueSeverityLevel::Info;
+    uint32_t BlastRadiusScore = 0;
+    std::vector<std::string> ImpactedDomains;
+    std::string SeverityRationale;
     std::vector<FieldIssueEvidenceReference> EvidenceReferences;
     std::string DeterministicDigest;
 };
