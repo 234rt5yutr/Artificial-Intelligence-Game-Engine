@@ -423,11 +423,11 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 29.2.2: Implement `ValidateFieldRangeEnumAndPatternDomains()` for numeric bounds, enum domains, string formats, and identifier normalization. (v0.29.2.2)
   * [x] Sub-step 29.2.3: Implement `ValidateCrossFieldInvariantRules()` for dependency ordering, conditional required fields, and subsystem coupling assumptions. (v0.29.2.3)
   * [x] Sub-step 29.2.4: Implement `ValidateFieldEvolutionCompatibility()` for forward/backward schema evolution and migration safety checks. (v0.29.2.4)
-* [ ] Step 29.3: Execute full-surface audit runs over live runtime and offline artifacts.
+* [x] Step 29.3: Execute full-surface audit runs over live runtime and offline artifacts.
   * [x] Sub-step 29.3.1: Implement `RunRuntimeStateFieldAudit()` with deterministic snapshots during gameplay/editor/runtime service transitions. (v0.29.3.1)
   * [x] Sub-step 29.3.2: Implement `RunCookedAndPackagedArtifactFieldAudit()` for cooked assets, build manifests, store bundles, and dedicated-server outputs. (v0.29.3.2)
   * [x] Sub-step 29.3.3: Implement `RunNetworkAndReplayFieldAudit()` to verify replication payload parity, rollback/replay schema fidelity, and host-migration continuity fields. (v0.29.3.3)
-  * [ ] Sub-step 29.3.4: Implement `RunToolingAndAuthoringFieldAudit()` for editor pipelines, MCP tool payloads, and automation report schemas. (v0.29.3.4)
+  * [x] Sub-step 29.3.4: Implement `RunToolingAndAuthoringFieldAudit()` for editor pipelines, MCP tool payloads, and automation report schemas. (v0.29.3.4)
 * [ ] Step 29.4: Generate actionable findings with severity, ownership, and traceable evidence.
   * [ ] Sub-step 29.4.1: Implement `GenerateFieldAuditIssueLedger()` with deduplicated issue IDs, first-seen revision, and reproducible evidence pointers. (v0.29.4.1)
   * [ ] Sub-step 29.4.2: Implement `ComputeFieldIssueSeverityAndBlastRadius()` with gameplay/runtime/build/release impact scoring heuristics. (v0.29.4.2)

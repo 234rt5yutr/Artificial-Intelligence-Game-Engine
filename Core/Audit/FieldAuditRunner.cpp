@@ -486,4 +486,91 @@ Result<FieldAuditRunReport> RunNetworkAndReplayFieldAudit(const FieldAuditRunReq
     return Result<FieldAuditRunReport>::Success(BuildRunReport(request, std::move(phaseStamps)));
 }
 
+Result<FieldAuditRunReport> RunToolingAndAuthoringFieldAudit(const FieldAuditRunRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "tooling-authoring") {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldAuditRunReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    const Result<FieldInventorySnapshot> runtimeInventory =
+        GenerateBaselineSnapshot("runtime", request.OutputDirectory / "baseline-runtime");
+    if (!runtimeInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(runtimeInventory.Error);
+    }
+
+    const Result<FieldInventorySnapshot> serializedInventory =
+        GenerateBaselineSnapshot("serialized", request.OutputDirectory / "baseline-serialized");
+    if (!serializedInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(serializedInventory.Error);
+    }
+
+    const Result<FieldInventorySnapshot> protocolInventory =
+        GenerateBaselineSnapshot("protocol", request.OutputDirectory / "baseline-protocol");
+    if (!protocolInventory.Ok) {
+        return Result<FieldAuditRunReport>::Failure(protocolInventory.Error);
+    }
+
+    std::vector<FieldAuditPhaseStamp> phaseStamps;
+    phaseStamps.reserve(3u);
+
+    const auto runToolingPhase = [&](const std::string_view phaseId,
+                                     const std::string_view phaseLabel,
+                                     const uint32_t phaseOrdinal,
+                                     const std::vector<std::string_view>& serializedDomains,
+                                     const std::vector<std::string_view>& protocolDomains) -> Result<FieldAuditPhaseStamp> {
+        const std::filesystem::path phaseRoot = request.OutputDirectory / ("tooling-phase-" + std::to_string(phaseOrdinal));
+        const FieldInventorySnapshot filteredSerialized = BuildDomainFilteredSnapshot(
+            serializedInventory.Value, phaseRoot / "serialized-tooling-snapshot", serializedDomains);
+        const FieldInventorySnapshot filteredProtocol =
+            BuildDomainFilteredSnapshot(protocolInventory.Value, phaseRoot / "protocol-tooling-snapshot", protocolDomains);
+        return RunAuditPhase(phaseId,
+                             phaseLabel,
+                             phaseOrdinal,
+                             phaseRoot,
+                             runtimeInventory.Value,
+                             filteredSerialized,
+                             filteredProtocol);
+    };
+
+    const Result<FieldAuditPhaseStamp> editorAuthoringPhase = runToolingPhase(
+        "editor-authoring-schemas",
+        "EditorAuthoringSchemas",
+        1u,
+        {"scene", "prefab", "widget", "localization"},
+        {"mcp-request", "mcp-response"});
+    if (!editorAuthoringPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(editorAuthoringPhase.Error);
+    }
+    phaseStamps.push_back(editorAuthoringPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> mcpToolPhase = runToolingPhase("mcp-tool-payloads",
+                                                                       "McpToolPayloads",
+                                                                       2u,
+                                                                       {"widget", "build-manifest"},
+                                                                       {"mcp-request", "mcp-response"});
+    if (!mcpToolPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(mcpToolPhase.Error);
+    }
+    phaseStamps.push_back(mcpToolPhase.Value);
+
+    const Result<FieldAuditPhaseStamp> automationReportPhase = runToolingPhase("automation-report-schemas",
+                                                                                "AutomationReportSchemas",
+                                                                                3u,
+                                                                                {"build-manifest", "save", "addressable"},
+                                                                                {"packets", "rpc", "replay"});
+    if (!automationReportPhase.Ok) {
+        return Result<FieldAuditRunReport>::Failure(automationReportPhase.Error);
+    }
+    phaseStamps.push_back(automationReportPhase.Value);
+
+    return Result<FieldAuditRunReport>::Success(BuildRunReport(request, std::move(phaseStamps)));
+}
+
 } // namespace Core::Audit
