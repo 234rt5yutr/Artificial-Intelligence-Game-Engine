@@ -70,6 +70,16 @@ namespace {
     return {normalized.begin(), normalized.end()};
 }
 
+[[nodiscard]] std::vector<std::string> NormalizeDriftHunks(const std::vector<std::string>& diffHunks) {
+    std::set<std::string> normalized;
+    for (const std::string& diffHunk : diffHunks) {
+        if (!diffHunk.empty()) {
+            normalized.emplace(diffHunk);
+        }
+    }
+    return {normalized.begin(), normalized.end()};
+}
+
 [[nodiscard]] bool IsValidRegressionEntry(const FieldGuardrailEntry& entry) {
     if (entry.RegressionSuite.SuiteId.empty()) {
         return false;
@@ -81,6 +91,18 @@ namespace {
 
 [[nodiscard]] bool IsValidAuditGateEntry(const FieldGuardrailEntry& entry) {
     return !entry.AuditPolicy.PolicyId.empty();
+}
+
+[[nodiscard]] bool IsValidDriftEntry(const FieldGuardrailEntry& entry) {
+    if (entry.Drift.BaselineCommitId.empty() || entry.Drift.CurrentCommitId.empty() ||
+        entry.Drift.BaselineCommitId == entry.Drift.CurrentCommitId || entry.Drift.ArtifactId.empty() ||
+        entry.Drift.ArtifactPath.empty() || entry.Drift.DiffSummary.empty() || entry.Drift.OwningSubsystem.empty() ||
+        entry.Drift.AlertChannel.empty() || entry.Drift.AlertRoute.empty()) {
+        return false;
+    }
+
+    const std::vector<std::string> normalizedDiffHunks = NormalizeDriftHunks(entry.Drift.DiffHunks);
+    return !normalizedDiffHunks.empty();
 }
 
 [[nodiscard]] bool IsBlockingReleaseGateFinding(const FieldGuardrailAuditPolicyMetadata& auditPolicy) {
@@ -122,6 +144,29 @@ namespace {
     idMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.Severity)));
     idMaterial.push_back('|');
     idMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.FindingStatus)));
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.BaselineCommitId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.CurrentCommitId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.ArtifactId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.ArtifactPath);
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.DiffSummary);
+    idMaterial.push_back('|');
+    for (const std::string& diffHunk : record.Drift.DiffHunks) {
+        idMaterial.append(diffHunk);
+        idMaterial.push_back(',');
+    }
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.OwningSubsystem);
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.AlertChannel);
+    idMaterial.push_back('|');
+    idMaterial.append(record.Drift.AlertRoute);
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.Drift.AlertSeverity)));
     idMaterial.push_back('|');
     idMaterial.append(std::to_string(static_cast<uint32_t>(record.GateDecision)));
     return HashToHex(HashString(idMaterial));
@@ -177,6 +222,29 @@ namespace {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.FindingStatus)));
     digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.BaselineCommitId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.CurrentCommitId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.ArtifactId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.ArtifactPath);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.DiffSummary);
+    digestMaterial.push_back('|');
+    for (const std::string& diffHunk : record.Drift.DiffHunks) {
+        digestMaterial.append(diffHunk);
+        digestMaterial.push_back(',');
+    }
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.OwningSubsystem);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.AlertChannel);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Drift.AlertRoute);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.Drift.AlertSeverity)));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(static_cast<uint32_t>(record.GateDecision)));
     return HashToHex(HashString(digestMaterial));
 }
@@ -201,6 +269,12 @@ namespace {
     digestMaterial.append(std::to_string(result.Summary.RegressionCoverageSignalCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RegressionCoverageCorrectionCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.DriftEventCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.DriftAlertCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.DriftOwningSubsystemCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.UnresolvedHighFindingCount));
     digestMaterial.push_back('|');
@@ -264,6 +338,40 @@ void SortAssertionRecords(std::vector<FieldGuardrailRecord>& records) {
             return static_cast<uint32_t>(left.AuditPolicy.FindingStatus) <
                    static_cast<uint32_t>(right.AuditPolicy.FindingStatus);
         }
+        if (left.Drift.BaselineCommitId != right.Drift.BaselineCommitId) {
+            return left.Drift.BaselineCommitId < right.Drift.BaselineCommitId;
+        }
+        if (left.Drift.CurrentCommitId != right.Drift.CurrentCommitId) {
+            return left.Drift.CurrentCommitId < right.Drift.CurrentCommitId;
+        }
+        if (left.Drift.ArtifactId != right.Drift.ArtifactId) {
+            return left.Drift.ArtifactId < right.Drift.ArtifactId;
+        }
+        if (left.Drift.ArtifactPath != right.Drift.ArtifactPath) {
+            return left.Drift.ArtifactPath < right.Drift.ArtifactPath;
+        }
+        if (left.Drift.DiffSummary != right.Drift.DiffSummary) {
+            return left.Drift.DiffSummary < right.Drift.DiffSummary;
+        }
+        if (left.Drift.DiffHunks != right.Drift.DiffHunks) {
+            return std::lexicographical_compare(left.Drift.DiffHunks.begin(),
+                                                left.Drift.DiffHunks.end(),
+                                                right.Drift.DiffHunks.begin(),
+                                                right.Drift.DiffHunks.end());
+        }
+        if (left.Drift.OwningSubsystem != right.Drift.OwningSubsystem) {
+            return left.Drift.OwningSubsystem < right.Drift.OwningSubsystem;
+        }
+        if (left.Drift.AlertChannel != right.Drift.AlertChannel) {
+            return left.Drift.AlertChannel < right.Drift.AlertChannel;
+        }
+        if (left.Drift.AlertRoute != right.Drift.AlertRoute) {
+            return left.Drift.AlertRoute < right.Drift.AlertRoute;
+        }
+        if (left.Drift.AlertSeverity != right.Drift.AlertSeverity) {
+            return static_cast<uint32_t>(left.Drift.AlertSeverity) <
+                   static_cast<uint32_t>(right.Drift.AlertSeverity);
+        }
         if (left.GateDecision != right.GateDecision) {
             return static_cast<uint32_t>(left.GateDecision) < static_cast<uint32_t>(right.GateDecision);
         }
@@ -291,7 +399,8 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
 [[nodiscard]] std::string BuildDedupeKey(const FieldGuardrailEntry& entry,
                                          const std::vector<std::string>& normalizedCoverageMap,
                                          const bool includeRegressionSuite,
-                                         const bool includeAuditPolicy) {
+                                         const bool includeAuditPolicy,
+                                         const bool includeDriftMetadata) {
     std::string dedupeKey;
     dedupeKey.reserve(640u);
     dedupeKey.append(entry.Taxonomy.Lineage.FindingId);
@@ -328,13 +437,39 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
         dedupeKey.push_back('|');
         dedupeKey.append(std::to_string(static_cast<uint32_t>(entry.AuditPolicy.FindingStatus)));
     }
+    if (includeDriftMetadata) {
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.BaselineCommitId);
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.CurrentCommitId);
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.ArtifactId);
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.ArtifactPath);
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.DiffSummary);
+        dedupeKey.push_back('|');
+        for (const std::string& diffHunk : NormalizeDriftHunks(entry.Drift.DiffHunks)) {
+            dedupeKey.append(diffHunk);
+            dedupeKey.push_back(',');
+        }
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.OwningSubsystem);
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.AlertChannel);
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.Drift.AlertRoute);
+        dedupeKey.push_back('|');
+        dedupeKey.append(std::to_string(static_cast<uint32_t>(entry.Drift.AlertSeverity)));
+    }
     return dedupeKey;
 }
 
 [[nodiscard]] Result<FieldGuardrailResult> BuildGuardrailResult(const FieldGuardrailRequest& request,
                                                                 const std::string_view expectedScope,
                                                                 const bool requireRegressionSuite,
-                                                                const bool evaluateAuditGate) {
+                                                                const bool evaluateAuditGate,
+                                                                const bool requireDriftMetadata) {
     if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
         request.Entries.empty()) {
         return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
@@ -354,6 +489,9 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
         if (evaluateAuditGate && !IsValidAuditGateEntry(entry)) {
             return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
         }
+        if (requireDriftMetadata && !IsValidDriftEntry(entry)) {
+            return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
     }
 
     if (!EnsureOutputDirectory(request.OutputDirectory)) {
@@ -364,7 +502,9 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
     std::set<std::string> seenAssertionKeys;
     for (const FieldGuardrailEntry& entry : request.Entries) {
         const std::vector<std::string> normalizedCoverageMap = NormalizeCoverageMap(entry.RegressionSuite.Stage30CoverageMap);
-        const std::string dedupeKey = BuildDedupeKey(entry, normalizedCoverageMap, requireRegressionSuite, evaluateAuditGate);
+        const std::vector<std::string> normalizedDiffHunks = NormalizeDriftHunks(entry.Drift.DiffHunks);
+        const std::string dedupeKey =
+            BuildDedupeKey(entry, normalizedCoverageMap, requireRegressionSuite, evaluateAuditGate, requireDriftMetadata);
         if (seenAssertionKeys.contains(dedupeKey)) {
             continue;
         }
@@ -378,15 +518,27 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
         record.PropertyPath = entry.PropertyPath;
         record.ExistingAssertionExpression = ExistingAssertionOrUnset(entry.AssertionExpression);
         record.AssertionExpression = entry.ExpectedAssertionExpression;
-        record.Rationale = entry.Rationale.empty()
-                               ? (requireRegressionSuite ? "register-field-contract-regression-suite"
-                                                         : "register-field-invariant-assertion")
-                               : entry.Rationale;
+        record.Rationale = entry.Rationale.empty() ? (requireDriftMetadata
+                                                          ? "record-field-drift-event"
+                                                          : (requireRegressionSuite
+                                                                 ? "register-field-contract-regression-suite"
+                                                                 : "register-field-invariant-assertion"))
+                                                   : entry.Rationale;
         record.Taxonomy = entry.Taxonomy;
         record.Taxonomy.Lineage.RemediationBatchId = request.RemediationBatchId;
         record.RegressionSuite.SuiteId = entry.RegressionSuite.SuiteId;
         record.RegressionSuite.Stage30CoverageMap = normalizedCoverageMap;
         record.AuditPolicy = entry.AuditPolicy;
+        record.Drift.BaselineCommitId = entry.Drift.BaselineCommitId;
+        record.Drift.CurrentCommitId = entry.Drift.CurrentCommitId;
+        record.Drift.ArtifactId = entry.Drift.ArtifactId;
+        record.Drift.ArtifactPath = entry.Drift.ArtifactPath;
+        record.Drift.DiffSummary = entry.Drift.DiffSummary;
+        record.Drift.DiffHunks = normalizedDiffHunks;
+        record.Drift.OwningSubsystem = entry.Drift.OwningSubsystem;
+        record.Drift.AlertChannel = entry.Drift.AlertChannel;
+        record.Drift.AlertRoute = entry.Drift.AlertRoute;
+        record.Drift.AlertSeverity = entry.Drift.AlertSeverity;
         if (evaluateAuditGate) {
             record.GateDecision = IsBlockingReleaseGateFinding(record.AuditPolicy) ? FieldAuditGateDecision::Block
                                                                                    : FieldAuditGateDecision::Pass;
@@ -405,6 +557,8 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
     result.AssertionRecords = std::move(assertionRecords);
 
     std::set<std::string> uniqueSuites;
+    std::set<std::string> uniqueDriftAlerts;
+    std::set<std::string> uniqueDriftOwningSubsystems;
     for (const FieldGuardrailRecord& record : result.AssertionRecords) {
         AddDomainCount(result.Summary, record.Domain);
         ++result.Summary.TotalAssertionCount;
@@ -423,8 +577,17 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
                 ++result.Summary.UnresolvedHighFindingCount;
             }
         }
+        if (requireDriftMetadata) {
+            ++result.Summary.DriftEventCount;
+            uniqueDriftAlerts.emplace(record.Drift.AlertChannel + "|" + record.Drift.AlertRoute);
+            uniqueDriftOwningSubsystems.emplace(record.Drift.OwningSubsystem);
+        }
     }
     result.Summary.RegressionSuiteCount = static_cast<uint32_t>(uniqueSuites.size());
+    if (requireDriftMetadata) {
+        result.Summary.DriftAlertCount = static_cast<uint32_t>(uniqueDriftAlerts.size());
+        result.Summary.DriftOwningSubsystemCount = static_cast<uint32_t>(uniqueDriftOwningSubsystems.size());
+    }
     if (evaluateAuditGate) {
         result.Summary.ReleaseGateBlocked =
             result.Summary.UnresolvedCriticalFindingCount > 0u || result.Summary.UnresolvedHighFindingCount > 0u;
@@ -438,15 +601,19 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
 } // namespace
 
 Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailRequest& request) {
-    return BuildGuardrailResult(request, "field-invariant-assertions", false, false);
+    return BuildGuardrailResult(request, "field-invariant-assertions", false, false, false);
 }
 
 Result<FieldGuardrailResult> AddFieldContractRegressionSuites(const FieldGuardrailRequest& request) {
-    return BuildGuardrailResult(request, "field-contract-regression-suites", true, false);
+    return BuildGuardrailResult(request, "field-contract-regression-suites", true, false, false);
 }
 
 Result<FieldGuardrailResult> AddFieldAuditGateToBuildPipeline(const FieldGuardrailRequest& request) {
-    return BuildGuardrailResult(request, "field-audit-gate-build-pipeline", false, true);
+    return BuildGuardrailResult(request, "field-audit-gate-build-pipeline", false, true, false);
+}
+
+Result<FieldGuardrailResult> AddFieldDriftMonitoringAndAlerting(const FieldGuardrailRequest& request) {
+    return BuildGuardrailResult(request, "field-drift-monitoring-alerting", false, false, true);
 }
 
 } // namespace Core::Remediation

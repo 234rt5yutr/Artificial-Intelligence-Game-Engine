@@ -68,6 +68,38 @@ Core::Remediation::FieldGuardrailEntry BuildAuditGateEntry(const Core::Remediati
     return entry;
 }
 
+Core::Remediation::FieldGuardrailEntry BuildDriftEntry(const Core::Remediation::FieldGuardrailDomain domain,
+                                                       const std::string& stableFieldKey,
+                                                       const std::string& domainPair,
+                                                       const std::string& targetFieldId,
+                                                       const std::string& findingId,
+                                                       const std::string& ruleId,
+                                                       const std::string& owner,
+                                                       const std::string& baselineCommitId,
+                                                       const std::string& currentCommitId,
+                                                       const std::string& artifactId,
+                                                       const std::string& artifactPath,
+                                                       const std::string& diffSummary,
+                                                       const std::vector<std::string>& diffHunks,
+                                                       const std::string& owningSubsystem,
+                                                       const std::string& alertChannel,
+                                                       const std::string& alertRoute,
+                                                       const Core::Remediation::FieldAuditSeverity alertSeverity) {
+    Core::Remediation::FieldGuardrailEntry entry =
+        BuildEntry(domain, stableFieldKey, domainPair, targetFieldId, findingId, ruleId, owner);
+    entry.Drift.BaselineCommitId = baselineCommitId;
+    entry.Drift.CurrentCommitId = currentCommitId;
+    entry.Drift.ArtifactId = artifactId;
+    entry.Drift.ArtifactPath = artifactPath;
+    entry.Drift.DiffSummary = diffSummary;
+    entry.Drift.DiffHunks = diffHunks;
+    entry.Drift.OwningSubsystem = owningSubsystem;
+    entry.Drift.AlertChannel = alertChannel;
+    entry.Drift.AlertRoute = alertRoute;
+    entry.Drift.AlertSeverity = alertSeverity;
+    return entry;
+}
+
 } // namespace
 
 int main() {
@@ -467,6 +499,163 @@ int main() {
                    first.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId);
             assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.Owner ==
                    first.Value.AssertionRecords[index].Taxonomy.Lineage.Owner);
+        }
+    }
+
+    {
+        FieldGuardrailRequest invalidRequest{};
+        const Result<FieldGuardrailResult> result = AddFieldDriftMonitoringAndAlerting(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldGuardrailRequest unsupportedScope{};
+        unsupportedScope.Scope = "field-drift-monitoring-alerting-v2";
+        unsupportedScope.OutputDirectory = root / "drift-unsupported";
+        unsupportedScope.RemediationBatchId = "batch-030404";
+        unsupportedScope.Entries = {BuildDriftEntry(FieldGuardrailDomain::Build,
+                                                    "Build::Manifest::ContractHash",
+                                                    "build<->commit",
+                                                    "build::Manifest::ContractHash",
+                                                    "guardrail-finding-drift-build-unsupported",
+                                                    "FIELD_AUDIT_RULE_BUILD_DRIFT_MONITORING",
+                                                    "build-release",
+                                                    "4cb6f11",
+                                                    "8a2d443",
+                                                    "artifact.windows.manifest",
+                                                    "artifacts/windows/manifest.json",
+                                                    "Contract hash drift detected between commits.",
+                                                    {"- contractHash: 8f92c1", "+ contractHash: 9a11de"},
+                                                    "build-release",
+                                                    "alert://field-drift-monitor",
+                                                    "field-drift/build-release",
+                                                    FieldAuditSeverity::High)};
+        const Result<FieldGuardrailResult> result = AddFieldDriftMonitoringAndAlerting(unsupportedScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldGuardrailRequest request{};
+        request.Scope = "field-drift-monitoring-alerting";
+        request.OutputDirectory = root / "drift-success";
+        request.RemediationBatchId = "batch-030404";
+
+        FieldGuardrailEntry buildDriftEntry = BuildDriftEntry(FieldGuardrailDomain::Build,
+                                                              "Build::Manifest::ContractHash",
+                                                              "build<->commit",
+                                                              "build::Manifest::ContractHash",
+                                                              "guardrail-finding-drift-build",
+                                                              "FIELD_AUDIT_RULE_BUILD_DRIFT_MONITORING",
+                                                              "build-release",
+                                                              "4cb6f11",
+                                                              "8a2d443",
+                                                              "artifact.windows.manifest",
+                                                              "artifacts/windows/manifest.json",
+                                                              "Contract hash drift detected between commits.",
+                                                              {"- contractHash: 8f92c1", "+ contractHash: 9a11de"},
+                                                              "build-release",
+                                                              "alert://field-drift-monitor",
+                                                              "field-drift/build-release",
+                                                              FieldAuditSeverity::Critical);
+        buildDriftEntry.PropertyPath = "guardrail.drift.build";
+        buildDriftEntry.AssertionExpression = "assert(manifest.contractHash == 8f92c1)";
+        buildDriftEntry.ExpectedAssertionExpression = "assert(manifest.contractHash == 9a11de)";
+        buildDriftEntry.Rationale = "emit-build-drift-alert";
+
+        FieldGuardrailEntry runtimeDriftEntry = BuildDriftEntry(FieldGuardrailDomain::Runtime,
+                                                                "Runtime::Inventory::SchemaVersion",
+                                                                "runtime<->artifact",
+                                                                "runtime::Inventory::SchemaVersion",
+                                                                "guardrail-finding-drift-runtime",
+                                                                "FIELD_AUDIT_RULE_RUNTIME_DRIFT_MONITORING",
+                                                                "runtime-systems",
+                                                                "4cb6f11",
+                                                                "8a2d443",
+                                                                "artifact.runtime.inventory",
+                                                                "artifacts/runtime/inventory.schema.json",
+                                                                "Runtime schema version drift detected.",
+                                                                {"- schemaVersion: 6", "+ schemaVersion: 7"},
+                                                                "runtime-systems",
+                                                                "alert://field-drift-monitor",
+                                                                "field-drift/runtime-systems",
+                                                                FieldAuditSeverity::High);
+        runtimeDriftEntry.PropertyPath = "guardrail.drift.runtime";
+        runtimeDriftEntry.AssertionExpression = "assert(runtime.inventory.schemaVersion == 6)";
+        runtimeDriftEntry.ExpectedAssertionExpression = "assert(runtime.inventory.schemaVersion == 7)";
+        runtimeDriftEntry.Rationale = "emit-runtime-drift-alert";
+
+        request.Entries = {runtimeDriftEntry, buildDriftEntry, runtimeDriftEntry};
+
+        const Result<FieldGuardrailResult> first = AddFieldDriftMonitoringAndAlerting(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.RemediationBatchId == request.RemediationBatchId);
+        assert(first.Value.Summary.TotalAssertionCount == 2u);
+        assert(first.Value.Summary.DriftEventCount == 2u);
+        assert(first.Value.Summary.DriftAlertCount == 2u);
+        assert(first.Value.Summary.DriftOwningSubsystemCount == 2u);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        bool sawBuildDrift = false;
+        bool sawRuntimeDrift = false;
+        for (const FieldGuardrailRecord& record : first.Value.AssertionRecords) {
+            assert(record.Taxonomy.Lineage.RemediationBatchId == request.RemediationBatchId);
+            assert(!record.DeterministicDigest.empty());
+            assert(!record.Drift.BaselineCommitId.empty());
+            assert(!record.Drift.CurrentCommitId.empty());
+            assert(record.Drift.BaselineCommitId != record.Drift.CurrentCommitId);
+            assert(!record.Drift.ArtifactId.empty());
+            assert(!record.Drift.ArtifactPath.empty());
+            assert(!record.Drift.DiffSummary.empty());
+            assert(record.Drift.DiffHunks.size() == 2u);
+            assert(!record.Drift.OwningSubsystem.empty());
+            assert(record.Drift.AlertChannel == "alert://field-drift-monitor");
+            assert(!record.Drift.AlertRoute.empty());
+            if (record.Taxonomy.Lineage.FindingId == "guardrail-finding-drift-build") {
+                sawBuildDrift = true;
+                assert(record.Drift.OwningSubsystem == "build-release");
+                assert(record.Drift.AlertRoute == "field-drift/build-release");
+                assert(record.Drift.AlertSeverity == FieldAuditSeverity::Critical);
+            } else if (record.Taxonomy.Lineage.FindingId == "guardrail-finding-drift-runtime") {
+                sawRuntimeDrift = true;
+                assert(record.Drift.OwningSubsystem == "runtime-systems");
+                assert(record.Drift.AlertRoute == "field-drift/runtime-systems");
+                assert(record.Drift.AlertSeverity == FieldAuditSeverity::High);
+            }
+        }
+        assert(sawBuildDrift);
+        assert(sawRuntimeDrift);
+
+        const Result<FieldGuardrailResult> second = AddFieldDriftMonitoringAndAlerting(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.AssertionRecords.size() == first.Value.AssertionRecords.size());
+        for (std::size_t index = 0; index < first.Value.AssertionRecords.size(); ++index) {
+            assert(second.Value.AssertionRecords[index].AssertionId == first.Value.AssertionRecords[index].AssertionId);
+            assert(second.Value.AssertionRecords[index].DeterministicDigest ==
+                   first.Value.AssertionRecords[index].DeterministicDigest);
+            assert(second.Value.AssertionRecords[index].Drift.BaselineCommitId ==
+                   first.Value.AssertionRecords[index].Drift.BaselineCommitId);
+            assert(second.Value.AssertionRecords[index].Drift.CurrentCommitId ==
+                   first.Value.AssertionRecords[index].Drift.CurrentCommitId);
+            assert(second.Value.AssertionRecords[index].Drift.ArtifactId ==
+                   first.Value.AssertionRecords[index].Drift.ArtifactId);
+            assert(second.Value.AssertionRecords[index].Drift.ArtifactPath ==
+                   first.Value.AssertionRecords[index].Drift.ArtifactPath);
+            assert(second.Value.AssertionRecords[index].Drift.DiffSummary ==
+                   first.Value.AssertionRecords[index].Drift.DiffSummary);
+            assert(second.Value.AssertionRecords[index].Drift.DiffHunks ==
+                   first.Value.AssertionRecords[index].Drift.DiffHunks);
+            assert(second.Value.AssertionRecords[index].Drift.OwningSubsystem ==
+                   first.Value.AssertionRecords[index].Drift.OwningSubsystem);
+            assert(second.Value.AssertionRecords[index].Drift.AlertChannel ==
+                   first.Value.AssertionRecords[index].Drift.AlertChannel);
+            assert(second.Value.AssertionRecords[index].Drift.AlertRoute ==
+                   first.Value.AssertionRecords[index].Drift.AlertRoute);
+            assert(second.Value.AssertionRecords[index].Drift.AlertSeverity ==
+                   first.Value.AssertionRecords[index].Drift.AlertSeverity);
         }
     }
 

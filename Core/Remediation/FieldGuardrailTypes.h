@@ -62,6 +62,19 @@ struct FieldGuardrailRegressionSuiteMetadata {
     std::vector<std::string> Stage30CoverageMap;
 };
 
+struct FieldGuardrailDriftMetadata {
+    std::string BaselineCommitId;
+    std::string CurrentCommitId;
+    std::string ArtifactId;
+    std::string ArtifactPath;
+    std::string DiffSummary;
+    std::vector<std::string> DiffHunks;
+    std::string OwningSubsystem;
+    std::string AlertChannel;
+    std::string AlertRoute;
+    FieldAuditSeverity AlertSeverity = FieldAuditSeverity::Medium;
+};
+
 struct FieldGuardrailEntry {
     FieldGuardrailDomain Domain = FieldGuardrailDomain::Runtime;
     std::string StableFieldKey;
@@ -74,6 +87,7 @@ struct FieldGuardrailEntry {
     FieldGuardrailTaxonomyMetadata Taxonomy;
     FieldGuardrailRegressionSuiteMetadata RegressionSuite;
     FieldGuardrailAuditPolicyMetadata AuditPolicy;
+    FieldGuardrailDriftMetadata Drift;
 };
 
 struct FieldGuardrailRequest {
@@ -96,6 +110,7 @@ struct FieldGuardrailRecord {
     FieldGuardrailTaxonomyMetadata Taxonomy;
     FieldGuardrailRegressionSuiteMetadata RegressionSuite;
     FieldGuardrailAuditPolicyMetadata AuditPolicy;
+    FieldGuardrailDriftMetadata Drift;
     FieldAuditGateDecision GateDecision = FieldAuditGateDecision::NotEvaluated;
     std::string DeterministicDigest;
 };
@@ -108,6 +123,9 @@ struct FieldGuardrailSummary {
     uint32_t RegressionSuiteCount = 0;
     uint32_t RegressionCoverageSignalCount = 0;
     uint32_t RegressionCoverageCorrectionCount = 0;
+    uint32_t DriftEventCount = 0;
+    uint32_t DriftAlertCount = 0;
+    uint32_t DriftOwningSubsystemCount = 0;
     uint32_t UnresolvedHighFindingCount = 0;
     uint32_t UnresolvedCriticalFindingCount = 0;
     bool ReleaseGateBlocked = false;
