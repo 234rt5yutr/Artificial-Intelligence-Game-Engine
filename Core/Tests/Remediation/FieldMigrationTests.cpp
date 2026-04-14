@@ -37,6 +37,25 @@ Core::Remediation::FieldMigrationEntry BuildEntry(const std::string& assetId,
     return entry;
 }
 
+Core::Remediation::FieldMigrationEntry BuildUIEntry(
+    const std::string& assetId,
+    const Core::Remediation::FieldMigrationAssetKind assetKind,
+    const std::string& fieldId,
+    const std::string& findingId,
+    const std::string& owner) {
+    Core::Remediation::FieldMigrationEntry entry{};
+    entry.AssetId = assetId;
+    entry.AssetKind = assetKind;
+    entry.StableFieldKey = "UI::Binding";
+    entry.DomainPair = "ui<->runtime";
+    entry.FieldId = fieldId;
+    entry.FieldValue = "configured";
+    entry.Provenance.FindingId = findingId;
+    entry.Provenance.RuleId = "FIELD_AUDIT_RULE_UI_LOCALIZATION_DRIFT";
+    entry.Provenance.Owner = owner;
+    return entry;
+}
+
 } // namespace
 
 #define REQUIRE_OR_FAIL(condition) \
@@ -56,6 +75,13 @@ int main() {
     {
         FieldMigrationRequest invalidRequest{};
         const Result<FieldMigrationResult> result = MigrateSceneAndPrefabFieldData(invalidRequest);
+        REQUIRE_OR_FAIL(!result.Ok);
+        REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldMigrationRequest invalidRequest{};
+        const Result<FieldMigrationResult> result = MigrateUIAndLocalizationFieldData(invalidRequest);
         REQUIRE_OR_FAIL(!result.Ok);
         REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
     }
@@ -168,6 +194,117 @@ int main() {
                    first.Value.MigrationRecords[index].DeterministicDigest);
             REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].Rollback.RollbackCheckpointId ==
                    first.Value.MigrationRecords[index].Rollback.RollbackCheckpointId);
+        }
+    }
+
+    {
+        FieldMigrationRequest request{};
+        request.Scope = "ui-localization-data";
+        request.OutputDirectory = root / "ui-localization-success";
+        request.RemediationBatchId = "batch-030202";
+        request.RollbackManifestPath = request.OutputDirectory / "rollback-ui-localization.json";
+
+        FieldMigrationEntry widgetEntry =
+            BuildUIEntry("widget://hud/main", FieldMigrationAssetKind::UIWidget, "ui::hud::title", "finding-ui-a", "ui-authoring");
+        widgetEntry.BindingKey = "hud.title.old";
+        widgetEntry.ExpectedBindingKey = "hud.title";
+        widgetEntry.BindingPath = "vm.old.title";
+        widgetEntry.ExpectedBindingPath = "vm.hud.title";
+        widgetEntry.LocalizationKey = "loc.hud.title.legacy";
+        widgetEntry.ExpectedLocalizationKey = "loc.hud.title";
+        widgetEntry.LocalizationReference = "table://legacy/hud";
+        widgetEntry.ExpectedLocalizationReference = "table://ui/hud";
+        widgetEntry.WidgetPresentationMode = "World";
+        widgetEntry.WidgetMetadataSpace = "Modal";
+
+        FieldMigrationEntry localeEntry = BuildUIEntry("loc://ui/hud",
+                                                       FieldMigrationAssetKind::LocalizationTable,
+                                                       "loc::hud::table",
+                                                       "finding-ui-b",
+                                                       "localization-authoring");
+        localeEntry.LocaleCode = "en-US";
+        localeEntry.LocaleSchemaVersion = "v1";
+        localeEntry.ExpectedLocaleSchemaVersion = "v2";
+
+        request.Entries = {widgetEntry, widgetEntry, localeEntry};
+
+        const Result<FieldMigrationResult> first = MigrateUIAndLocalizationFieldData(request);
+        REQUIRE_OR_FAIL(first.Ok);
+        REQUIRE_OR_FAIL(first.Value.Scope == request.Scope);
+        REQUIRE_OR_FAIL(first.Value.Summary.UIWidgetMigrationCount == 5u);
+        REQUIRE_OR_FAIL(first.Value.Summary.LocalizationTableMigrationCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.BindingNormalizationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.LocalizationNormalizationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.LocaleSchemaNormalizationCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.WidgetMetadataNormalizationCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.TotalMigrationCount == 6u);
+        REQUIRE_OR_FAIL(first.Value.Summary.RollbackSafeMigrationCount == first.Value.Summary.TotalMigrationCount);
+        REQUIRE_OR_FAIL(first.Value.MigrationRecords.size() == 6u);
+        REQUIRE_OR_FAIL(!first.Value.RollbackManifestDigest.empty());
+        REQUIRE_OR_FAIL(!first.Value.DeterministicDigest.empty());
+
+        bool sawBindingKey = false;
+        bool sawBindingPath = false;
+        bool sawLocalizationKey = false;
+        bool sawLocalizationReference = false;
+        bool sawLocaleSchema = false;
+        bool sawWidgetMetadata = false;
+        for (const FieldMigrationRecord& record : first.Value.MigrationRecords) {
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackCheckpointId.empty());
+            REQUIRE_OR_FAIL(!record.DeterministicDigest.empty());
+            REQUIRE_OR_FAIL(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+
+            if (record.PropertyPath == "ui.binding.key") {
+                sawBindingKey = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BindingKeyPathNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "hud.title.old");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "hud.title");
+            } else if (record.PropertyPath == "ui.binding.path") {
+                sawBindingPath = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BindingKeyPathNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "vm.old.title");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "vm.hud.title");
+            } else if (record.PropertyPath == "ui.localization.key") {
+                sawLocalizationKey = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::LocalizationReferenceNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "loc.hud.title.legacy");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "loc.hud.title");
+            } else if (record.PropertyPath == "ui.localization.reference") {
+                sawLocalizationReference = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::LocalizationReferenceNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "table://legacy/hud");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "table://ui/hud");
+            } else if (record.PropertyPath == "localization.locale-schema.version[en-US]") {
+                sawLocaleSchema = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::LocaleSchemaNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "v1");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "v2");
+            } else if (record.PropertyPath == "ui.widget.metadata.space") {
+                sawWidgetMetadata = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::WidgetMetadataNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "Modal");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "World");
+            }
+        }
+
+        REQUIRE_OR_FAIL(sawBindingKey);
+        REQUIRE_OR_FAIL(sawBindingPath);
+        REQUIRE_OR_FAIL(sawLocalizationKey);
+        REQUIRE_OR_FAIL(sawLocalizationReference);
+        REQUIRE_OR_FAIL(sawLocaleSchema);
+        REQUIRE_OR_FAIL(sawWidgetMetadata);
+
+        const Result<FieldMigrationResult> second = MigrateUIAndLocalizationFieldData(request);
+        REQUIRE_OR_FAIL(second.Ok);
+        REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
+        REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        REQUIRE_OR_FAIL(second.Value.MigrationRecords.size() == first.Value.MigrationRecords.size());
+        for (std::size_t index = 0; index < first.Value.MigrationRecords.size(); ++index) {
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].MigrationId == first.Value.MigrationRecords[index].MigrationId);
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].DeterministicDigest ==
+                            first.Value.MigrationRecords[index].DeterministicDigest);
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].Rollback.RollbackCheckpointId ==
+                            first.Value.MigrationRecords[index].Rollback.RollbackCheckpointId);
         }
     }
 

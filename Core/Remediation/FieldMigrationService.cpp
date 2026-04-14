@@ -1,6 +1,7 @@
 #include "Core/Remediation/FieldMigrationService.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -69,6 +70,24 @@ namespace {
         }
     }
     return true;
+}
+
+[[nodiscard]] std::string AsExistingValue(const std::string& value) {
+    if (value.empty()) {
+        return "<unset>";
+    }
+    return value;
+}
+
+[[nodiscard]] std::string NormalizeToken(const std::string_view value) {
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const unsigned char symbol : value) {
+        if (!std::isspace(symbol)) {
+            normalized.push_back(static_cast<char>(std::tolower(symbol)));
+        }
+    }
+    return normalized;
 }
 
 [[nodiscard]] std::vector<std::string> SortUniqueValues(const std::vector<std::string>& values) {
@@ -187,7 +206,7 @@ namespace {
 
 [[nodiscard]] std::string ComputeResultDigest(const FieldMigrationResult& result) {
     std::string digestMaterial;
-    digestMaterial.reserve((result.MigrationRecords.size() * 80u) + 256u);
+    digestMaterial.reserve((result.MigrationRecords.size() * 80u) + 352u);
     digestMaterial.append(result.Scope);
     digestMaterial.push_back('|');
     digestMaterial.append(result.RemediationBatchId);
@@ -198,9 +217,21 @@ namespace {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.PrefabMigrationCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.UIWidgetMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.LocalizationTableMigrationCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RequiredBackfillCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.GraphNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.BindingNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.LocalizationNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.LocaleSchemaNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.WidgetMetadataNormalizationCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RollbackSafeMigrationCount));
     digestMaterial.push_back('|');
@@ -368,6 +399,171 @@ Result<FieldMigrationResult> MigrateSceneAndPrefabFieldData(const FieldMigration
         } else if (record.TransformKind == FieldMigrationTransformKind::StaleGraphNormalization) {
             ++result.Summary.GraphNormalizationCount;
         }
+        if (record.Rollback.RollbackRequired) {
+            ++result.Summary.RollbackSafeMigrationCount;
+        }
+    }
+    result.Summary.TotalMigrationCount = static_cast<uint32_t>(result.MigrationRecords.size());
+    result.RollbackManifestDigest = ComputeRollbackManifestDigest(result);
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<FieldMigrationResult>::Success(std::move(result));
+}
+
+Result<FieldMigrationResult> MigrateUIAndLocalizationFieldData(const FieldMigrationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.RollbackManifestPath.empty() || request.Entries.empty()) {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "ui-localization-data") {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const FieldMigrationEntry& entry : request.Entries) {
+        if (!IsValidEntry(entry)) {
+            return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldMigrationRecord> migrationRecords;
+    std::set<std::string> seenMigrationKeys;
+    for (const FieldMigrationEntry& entry : request.Entries) {
+        auto emitMigration = [&](const FieldMigrationTransformKind transformKind,
+                                 const std::string& propertyPath,
+                                 const std::string& existingValue,
+                                 const std::string& replacementValue,
+                                 const std::string& graphNormalizationAction) {
+            std::string dedupeKey;
+            dedupeKey.reserve(384u);
+            dedupeKey.append(entry.Provenance.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.AssetId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.FieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(transformKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenMigrationKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenMigrationKeys.emplace(std::move(dedupeKey));
+
+            FieldMigrationRecord record{};
+            record.AssetKind = entry.AssetKind;
+            record.TransformKind = transformKind;
+            record.AssetId = entry.AssetId;
+            record.StableFieldKey = entry.StableFieldKey;
+            record.DomainPair = entry.DomainPair;
+            record.TargetFieldId = entry.FieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.GraphNormalizationAction = graphNormalizationAction;
+            record.Provenance = entry.Provenance;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.Rollback.RollbackRequired = true;
+            record.Rollback.RollbackPropertyPath = propertyPath;
+            record.Rollback.RollbackValue = existingValue;
+            record.Rollback.RollbackManifestPath = request.RollbackManifestPath.generic_string();
+            record.Rollback.RollbackCheckpointId =
+                HashToHex(HashString(request.RemediationBatchId + "|" + entry.AssetId + "|" + entry.FieldId + "|" +
+                                     propertyPath + "|" + existingValue + "|" + replacementValue));
+            record.MigrationId = BuildMigrationId(record);
+            record.DeterministicDigest = ComputeMigrationRecordDigest(record);
+            migrationRecords.push_back(std::move(record));
+        };
+
+        if (!entry.ExpectedBindingKey.empty() && entry.BindingKey != entry.ExpectedBindingKey) {
+            emitMigration(FieldMigrationTransformKind::BindingKeyPathNormalization,
+                          "ui.binding.key",
+                          AsExistingValue(entry.BindingKey),
+                          entry.ExpectedBindingKey,
+                          "repair-binding-key-drift");
+        }
+
+        if (!entry.ExpectedBindingPath.empty() && entry.BindingPath != entry.ExpectedBindingPath) {
+            emitMigration(FieldMigrationTransformKind::BindingKeyPathNormalization,
+                          "ui.binding.path",
+                          AsExistingValue(entry.BindingPath),
+                          entry.ExpectedBindingPath,
+                          "repair-binding-path-drift");
+        }
+
+        if (!entry.ExpectedLocalizationKey.empty() && entry.LocalizationKey != entry.ExpectedLocalizationKey) {
+            emitMigration(FieldMigrationTransformKind::LocalizationReferenceNormalization,
+                          "ui.localization.key",
+                          AsExistingValue(entry.LocalizationKey),
+                          entry.ExpectedLocalizationKey,
+                          "repair-localization-key-drift");
+        }
+
+        if (!entry.ExpectedLocalizationReference.empty() &&
+            entry.LocalizationReference != entry.ExpectedLocalizationReference) {
+            emitMigration(FieldMigrationTransformKind::LocalizationReferenceNormalization,
+                          "ui.localization.reference",
+                          AsExistingValue(entry.LocalizationReference),
+                          entry.ExpectedLocalizationReference,
+                          "repair-localization-reference-drift");
+        }
+
+        if (!entry.ExpectedLocaleSchemaVersion.empty() &&
+            entry.LocaleSchemaVersion != entry.ExpectedLocaleSchemaVersion) {
+            std::string propertyPath = "localization.locale-schema.version";
+            if (!entry.LocaleCode.empty()) {
+                propertyPath.append("[");
+                propertyPath.append(entry.LocaleCode);
+                propertyPath.append("]");
+            }
+
+            emitMigration(FieldMigrationTransformKind::LocaleSchemaNormalization,
+                          propertyPath,
+                          AsExistingValue(entry.LocaleSchemaVersion),
+                          entry.ExpectedLocaleSchemaVersion,
+                          "repair-locale-schema-drift");
+        }
+
+        if (!entry.WidgetPresentationMode.empty() && !entry.WidgetMetadataSpace.empty() &&
+            NormalizeToken(entry.WidgetPresentationMode) != NormalizeToken(entry.WidgetMetadataSpace)) {
+            emitMigration(FieldMigrationTransformKind::WidgetMetadataNormalization,
+                          "ui.widget.metadata.space",
+                          entry.WidgetMetadataSpace,
+                          entry.WidgetPresentationMode,
+                          "repair-modal-world-widget-metadata-drift");
+        }
+    }
+
+    SortMigrationRecords(migrationRecords);
+
+    FieldMigrationResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.RollbackManifestPath = request.RollbackManifestPath;
+    result.MigrationRecords = std::move(migrationRecords);
+    for (const FieldMigrationRecord& record : result.MigrationRecords) {
+        if (record.AssetKind == FieldMigrationAssetKind::UIWidget) {
+            ++result.Summary.UIWidgetMigrationCount;
+        } else if (record.AssetKind == FieldMigrationAssetKind::LocalizationTable) {
+            ++result.Summary.LocalizationTableMigrationCount;
+        }
+
+        if (record.TransformKind == FieldMigrationTransformKind::BindingKeyPathNormalization) {
+            ++result.Summary.BindingNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::LocalizationReferenceNormalization) {
+            ++result.Summary.LocalizationNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::LocaleSchemaNormalization) {
+            ++result.Summary.LocaleSchemaNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::WidgetMetadataNormalization) {
+            ++result.Summary.WidgetMetadataNormalizationCount;
+        }
+
         if (record.Rollback.RollbackRequired) {
             ++result.Summary.RollbackSafeMigrationCount;
         }

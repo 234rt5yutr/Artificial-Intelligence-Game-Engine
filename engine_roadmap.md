@@ -443,7 +443,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 30.1.4: Implement `VersionAndApplyFieldSchemaMigrations()` with explicit compatibility windows and rollback-safe transforms. (v0.30.1.4)
 * [ ] Step 30.2: Repair data-at-rest integrity across authored and generated content.
   * [x] Sub-step 30.2.1: Implement `MigrateSceneAndPrefabFieldData()` to backfill required values and normalize stale object graphs. (v0.30.2.1)
-  * [ ] Sub-step 30.2.2: Implement `MigrateUIAndLocalizationFieldData()` to correct binding keys, locale schema drift, and modal/world-widget metadata. (v0.30.2.2)
+  * [x] Sub-step 30.2.2: Implement `MigrateUIAndLocalizationFieldData()` to correct binding keys, locale schema drift, and modal/world-widget metadata. (v0.30.2.2)
   * [ ] Sub-step 30.2.3: Implement `MigrateAddressableBundleAndBuildManifestFieldData()` for catalog/bundle/build profile parity. (v0.30.2.3)
   * [ ] Sub-step 30.2.4: Implement `RepairPlayerSaveReplayAndAutomationFieldData()` to restore compatibility for persistence and deterministic test baselines. (v0.30.2.4)
 * [ ] Step 30.3: Fix runtime, networking, and deployment-time field integrity defects.
