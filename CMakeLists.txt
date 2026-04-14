@@ -222,6 +222,8 @@ add_library(EngineCore
     Core/Diagnostics/ProfilerCaptureTypes.h
     Core/Diagnostics/CPUProfilerCapture.h
     Core/Diagnostics/CPUProfilerCapture.cpp
+    Core/Diagnostics/GPUProfilerCapture.h
+    Core/Diagnostics/GPUProfilerCapture.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -431,3 +433,11 @@ endif()
 # Sandbox / Test Executable
 add_executable(AIGameEngine src/main.cpp)
 target_link_libraries(AIGameEngine PRIVATE EngineCore)
+
+enable_testing()
+
+add_executable(EngineCoreTests
+    Core/Tests/Diagnostics/ProfilerCaptureTests.cpp
+)
+target_link_libraries(EngineCoreTests PRIVATE EngineCore)
+add_test(NAME EngineCoreTests COMMAND EngineCoreTests)

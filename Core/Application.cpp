@@ -5,6 +5,7 @@
 #include "Core/Assert.h"
 #include "Core/Input.h"
 #include "Core/Renderer/Diagnostics/GPUFrameTraceService.h"
+#include "Core/Diagnostics/GPUProfilerCapture.h"
 #include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
 #include "Core/UI/UIManager.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
@@ -184,6 +185,7 @@ namespace Core {
         }
 
         Renderer::GetGPUFrameTraceService().SetVulkanContext(m_VulkanContext.get());
+        Diagnostics::GetGPUProfilerCaptureService().SetVulkanContext(m_VulkanContext.get());
 
         if (s_RuntimeOptions.EnableStartupWarmupMode) {
             m_VulkanContext->SetFrameMarkerEnabled(true);

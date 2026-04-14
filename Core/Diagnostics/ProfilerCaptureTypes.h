@@ -33,6 +33,22 @@ struct ProfilerCaptureRequest {
     bool IncludeGpu = false;
 };
 
+struct GPUProfilerPassTiming {
+    std::string PassName;
+    std::string QueueLabel;
+    uint32_t QueueFamilyIndex = 0;
+    double StartMs = 0.0;
+    double EndMs = 0.0;
+    double DurationMs = 0.0;
+};
+
+struct GPUProfilerQueueBreakdown {
+    std::string QueueLabel;
+    uint32_t QueueFamilyIndex = 0;
+    double TotalDurationMs = 0.0;
+    uint32_t PassCount = 0;
+};
+
 struct ProfilerCaptureSession {
     std::string SessionId;
     std::string ProfileName;
@@ -44,6 +60,8 @@ struct ProfilerCaptureSession {
     bool IncludeGpu = false;
     bool Completed = false;
     std::string CaptureType = "cpu";
+    std::vector<GPUProfilerPassTiming> GpuPassTimings;
+    std::vector<GPUProfilerQueueBreakdown> GpuQueueBreakdown;
 };
 
 constexpr std::array<ProfilerMarkerChannel, PROFILER_MARKER_CHANNEL_COUNT> GetAllProfilerMarkerChannels() {
