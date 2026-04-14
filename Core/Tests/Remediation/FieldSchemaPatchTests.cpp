@@ -47,6 +47,41 @@ Core::Remediation::FieldSchemaPatchSourceFinding BuildSourceFinding(const std::s
     return sourceFinding;
 }
 
+Core::Remediation::FieldDefaultFallbackPolicyEvidence BuildDefaultFallbackEvidence(const std::string& scope,
+                                                                                    const std::string& fieldId,
+                                                                                    const bool hasDefaultValue,
+                                                                                    const std::string& defaultValue,
+                                                                                    const bool hasFallbackPath,
+                                                                                    const std::string& fallbackPath) {
+    Core::Remediation::FieldDefaultFallbackPolicyEvidence evidence{};
+    evidence.SnapshotScope = scope;
+    evidence.FieldId = fieldId;
+    evidence.HasDefaultValue = hasDefaultValue;
+    evidence.DefaultValue = defaultValue;
+    evidence.HasFallbackPath = hasFallbackPath;
+    evidence.FallbackPath = fallbackPath;
+    return evidence;
+}
+
+Core::Remediation::FieldDefaultFallbackPolicyFinding BuildDefaultFallbackFinding(
+    const std::string& findingId,
+    const std::string& owner,
+    const std::string& ruleId,
+    const std::string& stableFieldKey,
+    const std::string& domainPair,
+    const Core::Remediation::FieldDefaultFallbackPolicyEvidence& left,
+    const Core::Remediation::FieldDefaultFallbackPolicyEvidence& right) {
+    Core::Remediation::FieldDefaultFallbackPolicyFinding finding{};
+    finding.FindingId = findingId;
+    finding.Owner = owner;
+    finding.RuleId = ruleId;
+    finding.StableFieldKey = stableFieldKey;
+    finding.DomainPair = domainPair;
+    finding.LeftEvidence = left;
+    finding.RightEvidence = right;
+    return finding;
+}
+
 } // namespace
 
 int main() {
@@ -226,6 +261,126 @@ int main() {
             assert(second.Value.PatchRecords[index].Provenance.Owner == first.Value.PatchRecords[index].Provenance.Owner);
             assert(second.Value.PatchRecords[index].Provenance.RemediationBatchId ==
                    first.Value.PatchRecords[index].Provenance.RemediationBatchId);
+        }
+    }
+
+    {
+        FieldDefaultFallbackNormalizationRequest invalidRequest{};
+        const Result<FieldDefaultFallbackNormalizationResult> result =
+            NormalizeFieldDefaultAndFallbackPolicies(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldDefaultFallbackNormalizationRequest request{};
+        request.Scope = "schema-definitions";
+        request.OutputDirectory = root / "default-fallback-success";
+        request.RemediationBatchId = "batch-004";
+        request.Findings = {
+            BuildDefaultFallbackFinding(
+                "finding-b",
+                "save-systems",
+                "FIELD_AUDIT_RULE_DEFAULT_FALLBACK_POLICY_MISMATCH",
+                "PlayerState::DisplayName",
+                "runtime:ecs<->serialized:save",
+                BuildDefaultFallbackEvidence("runtime",
+                                             "runtime::PlayerState::DisplayName",
+                                             true,
+                                             "Unknown",
+                                             true,
+                                             "/ui/defaults/player-display-name"),
+                BuildDefaultFallbackEvidence("serialized",
+                                             "serialized::PlayerState::DisplayName",
+                                             false,
+                                             "",
+                                             true,
+                                             "/ui/defaults/player-name")),
+            BuildDefaultFallbackFinding(
+                "finding-a",
+                "network-systems",
+                "FIELD_AUDIT_RULE_DEFAULT_FALLBACK_POLICY_MISMATCH",
+                "WeaponState::DamageType",
+                "serialized:save<->protocol:replication",
+                BuildDefaultFallbackEvidence("serialized",
+                                             "serialized::WeaponState::DamageType",
+                                             true,
+                                             "Physical",
+                                             true,
+                                             "/combat/defaults/damage-type"),
+                BuildDefaultFallbackEvidence("protocol",
+                                             "protocol::WeaponState::DamageType",
+                                             true,
+                                             "Arcane",
+                                             true,
+                                             "/combat/defaults/weapon-damage"))};
+
+        const Result<FieldDefaultFallbackNormalizationResult> first =
+            NormalizeFieldDefaultAndFallbackPolicies(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.RemediationBatchId == request.RemediationBatchId);
+        assert(first.Value.Summary.DefaultPolicyNormalizationCount == 2u);
+        assert(first.Value.Summary.FallbackPolicyNormalizationCount == 2u);
+        assert(first.Value.Summary.TotalNormalizationCount == 4u);
+        assert(first.Value.NormalizationRecords.size() == 4u);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        std::string previousNormalizationId;
+        bool sawDefaultToUnsetRepair = false;
+        bool sawFallbackRepair = false;
+        for (const FieldDefaultFallbackNormalizationRecord& record : first.Value.NormalizationRecords) {
+            assert(!record.NormalizationId.empty());
+            assert(!record.StableFieldKey.empty());
+            assert(!record.TargetFieldId.empty());
+            assert(!record.PropertyPath.empty());
+            assert(!record.NormalizedValue.empty());
+            assert(!record.Rationale.empty());
+            assert(!record.DeterministicDigest.empty());
+            assert(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+            if (!previousNormalizationId.empty()) {
+                assert(previousNormalizationId <= record.NormalizationId || record.Provenance.FindingId >= "finding-a");
+            }
+            previousNormalizationId = record.NormalizationId;
+
+            if (record.PropertyPath == "defaultValue" &&
+                record.TargetFieldId == "serialized::PlayerState::DisplayName") {
+                sawDefaultToUnsetRepair = true;
+                assert(record.ExistingValue == "<unset>");
+                assert(record.NormalizedValue == "Unknown");
+                assert(record.NormalizationKind == FieldDefaultFallbackNormalizationKind::DefaultValuePolicy);
+            }
+
+            if (record.PropertyPath == "fallbackPath" &&
+                record.TargetFieldId == "protocol::WeaponState::DamageType") {
+                sawFallbackRepair = true;
+                assert(record.ExistingValue == "/combat/defaults/weapon-damage");
+                assert(record.NormalizedValue == "/combat/defaults/damage-type");
+                assert(record.NormalizationKind == FieldDefaultFallbackNormalizationKind::FallbackPathPolicy);
+            }
+        }
+        assert(sawDefaultToUnsetRepair);
+        assert(sawFallbackRepair);
+
+        const Result<FieldDefaultFallbackNormalizationResult> second =
+            NormalizeFieldDefaultAndFallbackPolicies(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.Summary.TotalNormalizationCount == first.Value.Summary.TotalNormalizationCount);
+        assert(second.Value.NormalizationRecords.size() == first.Value.NormalizationRecords.size());
+        for (std::size_t index = 0; index < first.Value.NormalizationRecords.size(); ++index) {
+            assert(second.Value.NormalizationRecords[index].NormalizationId ==
+                   first.Value.NormalizationRecords[index].NormalizationId);
+            assert(second.Value.NormalizationRecords[index].DeterministicDigest ==
+                   first.Value.NormalizationRecords[index].DeterministicDigest);
+            assert(second.Value.NormalizationRecords[index].Provenance.FindingId ==
+                   first.Value.NormalizationRecords[index].Provenance.FindingId);
+            assert(second.Value.NormalizationRecords[index].Provenance.RuleId ==
+                   first.Value.NormalizationRecords[index].Provenance.RuleId);
+            assert(second.Value.NormalizationRecords[index].Provenance.Owner ==
+                   first.Value.NormalizationRecords[index].Provenance.Owner);
+            assert(second.Value.NormalizationRecords[index].Provenance.RemediationBatchId ==
+                   first.Value.NormalizationRecords[index].Provenance.RemediationBatchId);
         }
     }
 

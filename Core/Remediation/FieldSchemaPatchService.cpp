@@ -170,6 +170,164 @@ namespace {
            !finding.LeftEvidence.FieldId.empty() && !finding.RightEvidence.FieldId.empty();
 }
 
+[[nodiscard]] bool IsValidDefaultFallbackFinding(const FieldDefaultFallbackPolicyFinding& finding) {
+    if (finding.FindingId.empty() || finding.Owner.empty() || finding.RuleId.empty() || finding.StableFieldKey.empty() ||
+        finding.DomainPair.empty()) {
+        return false;
+    }
+
+    if (finding.LeftEvidence.SnapshotScope.empty() || finding.RightEvidence.SnapshotScope.empty() ||
+        finding.LeftEvidence.FieldId.empty() || finding.RightEvidence.FieldId.empty()) {
+        return false;
+    }
+
+    if (!finding.LeftEvidence.HasDefaultValue && !finding.LeftEvidence.DefaultValue.empty()) {
+        return false;
+    }
+    if (!finding.RightEvidence.HasDefaultValue && !finding.RightEvidence.DefaultValue.empty()) {
+        return false;
+    }
+    if (!finding.LeftEvidence.HasFallbackPath && !finding.LeftEvidence.FallbackPath.empty()) {
+        return false;
+    }
+    if (!finding.RightEvidence.HasFallbackPath && !finding.RightEvidence.FallbackPath.empty()) {
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] const FieldDefaultFallbackPolicyEvidence& SelectCanonicalDefaultFallbackEvidence(
+    const FieldDefaultFallbackPolicyEvidence& left,
+    const FieldDefaultFallbackPolicyEvidence& right) {
+    const std::optional<uint32_t> leftRank = GetScopeRank(left.SnapshotScope);
+    const std::optional<uint32_t> rightRank = GetScopeRank(right.SnapshotScope);
+    if (leftRank.has_value() && rightRank.has_value() && *leftRank != *rightRank) {
+        return *leftRank < *rightRank ? left : right;
+    }
+    if (leftRank.has_value() != rightRank.has_value()) {
+        return leftRank.has_value() ? left : right;
+    }
+    if (left.FieldId != right.FieldId) {
+        return left.FieldId < right.FieldId ? left : right;
+    }
+    if (left.HasDefaultValue != right.HasDefaultValue) {
+        return left.HasDefaultValue ? left : right;
+    }
+    if (left.DefaultValue != right.DefaultValue) {
+        return left.DefaultValue < right.DefaultValue ? left : right;
+    }
+    if (left.HasFallbackPath != right.HasFallbackPath) {
+        return left.HasFallbackPath ? left : right;
+    }
+    if (left.FallbackPath != right.FallbackPath) {
+        return left.FallbackPath < right.FallbackPath ? left : right;
+    }
+    return left.SnapshotScope <= right.SnapshotScope ? left : right;
+}
+
+[[nodiscard]] std::string OptionalValueToString(const bool hasValue, const std::string& value) {
+    return hasValue ? value : "<unset>";
+}
+
+[[nodiscard]] std::string BuildNormalizationId(const FieldDefaultFallbackNormalizationRecord& record) {
+    std::string idMaterial;
+    idMaterial.reserve(224u);
+    idMaterial.append("normalize|");
+    idMaterial.append(record.Provenance.FindingId);
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.NormalizationKind)));
+    idMaterial.push_back('|');
+    idMaterial.append(record.StableFieldKey);
+    idMaterial.push_back('|');
+    idMaterial.append(record.TargetFieldId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.PropertyPath);
+    idMaterial.push_back('|');
+    idMaterial.append(record.NormalizedValue);
+    return HashToHex(HashString(idMaterial));
+}
+
+[[nodiscard]] std::string ComputeNormalizationRecordDigest(const FieldDefaultFallbackNormalizationRecord& record) {
+    std::string digestMaterial;
+    digestMaterial.reserve(352u);
+    digestMaterial.append(record.NormalizationId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.NormalizationKind)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.StableFieldKey);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.DomainPair);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.TargetFieldId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.PropertyPath);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.ExistingValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.NormalizedValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Rationale);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.FindingId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.RuleId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.Owner);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.RemediationBatchId);
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::string ComputeNormalizationResultDigest(const FieldDefaultFallbackNormalizationResult& result) {
+    std::string digestMaterial;
+    digestMaterial.reserve((result.NormalizationRecords.size() * 72u) + 160u);
+    digestMaterial.append(result.Scope);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.DefaultPolicyNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.FallbackPolicyNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.TotalNormalizationCount));
+    digestMaterial.push_back('\n');
+
+    for (const FieldDefaultFallbackNormalizationRecord& record : result.NormalizationRecords) {
+        digestMaterial.append(record.NormalizationId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.DeterministicDigest);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.TargetFieldId);
+        digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
+void SortNormalizationRecords(std::vector<FieldDefaultFallbackNormalizationRecord>& normalizationRecords) {
+    std::sort(normalizationRecords.begin(),
+              normalizationRecords.end(),
+              [](const FieldDefaultFallbackNormalizationRecord& left,
+                 const FieldDefaultFallbackNormalizationRecord& right) {
+                  if (left.Provenance.FindingId != right.Provenance.FindingId) {
+                      return left.Provenance.FindingId < right.Provenance.FindingId;
+                  }
+                  if (left.StableFieldKey != right.StableFieldKey) {
+                      return left.StableFieldKey < right.StableFieldKey;
+                  }
+                  if (left.TargetFieldId != right.TargetFieldId) {
+                      return left.TargetFieldId < right.TargetFieldId;
+                  }
+                  if (left.NormalizationKind != right.NormalizationKind) {
+                      return static_cast<uint32_t>(left.NormalizationKind) <
+                             static_cast<uint32_t>(right.NormalizationKind);
+                  }
+                  if (left.PropertyPath != right.PropertyPath) {
+                      return left.PropertyPath < right.PropertyPath;
+                  }
+                  return left.NormalizationId < right.NormalizationId;
+              });
+}
+
 void SortPatchRecords(std::vector<FieldSchemaPatchRecord>& patchRecords) {
     std::sort(patchRecords.begin(),
               patchRecords.end(),
@@ -309,6 +467,125 @@ Result<FieldSchemaPatchResult> PatchFieldSchemaDefinitions(const FieldSchemaPatc
     result.Summary.TotalPatchCount = static_cast<uint32_t>(result.PatchRecords.size());
     result.DeterministicDigest = ComputePatchResultDigest(result);
     return Result<FieldSchemaPatchResult>::Success(std::move(result));
+}
+
+Result<FieldDefaultFallbackNormalizationResult> NormalizeFieldDefaultAndFallbackPolicies(
+    const FieldDefaultFallbackNormalizationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.Findings.empty()) {
+        return Result<FieldDefaultFallbackNormalizationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "schema-definitions") {
+        return Result<FieldDefaultFallbackNormalizationResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const FieldDefaultFallbackPolicyFinding& finding : request.Findings) {
+        if (!IsValidDefaultFallbackFinding(finding)) {
+            return Result<FieldDefaultFallbackNormalizationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldDefaultFallbackNormalizationResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldDefaultFallbackNormalizationRecord> normalizationRecords;
+    std::map<std::string, bool> seenNormalizationKey;
+    for (const FieldDefaultFallbackPolicyFinding& finding : request.Findings) {
+        const FieldDefaultFallbackPolicyEvidence& canonical =
+            SelectCanonicalDefaultFallbackEvidence(finding.LeftEvidence, finding.RightEvidence);
+        const std::vector<const FieldDefaultFallbackPolicyEvidence*> evidences = {&finding.LeftEvidence,
+                                                                                   &finding.RightEvidence};
+
+        auto emitNormalization = [&](const FieldDefaultFallbackNormalizationKind normalizationKind,
+                                     const FieldDefaultFallbackPolicyEvidence& evidence,
+                                     const std::string& propertyPath,
+                                     const std::string& existingValue,
+                                     const std::string& normalizedValue,
+                                     const std::string& rationale) {
+            std::string dedupeKey;
+            dedupeKey.reserve(224u);
+            dedupeKey.append(finding.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(evidence.FieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(normalizationKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(normalizedValue);
+            if (seenNormalizationKey.contains(dedupeKey)) {
+                return;
+            }
+            seenNormalizationKey.emplace(dedupeKey, true);
+
+            FieldDefaultFallbackNormalizationRecord record{};
+            record.NormalizationKind = normalizationKind;
+            record.StableFieldKey = finding.StableFieldKey;
+            record.DomainPair = finding.DomainPair;
+            record.TargetFieldId = evidence.FieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.NormalizedValue = normalizedValue;
+            record.Rationale = rationale;
+            record.Provenance.FindingId = finding.FindingId;
+            record.Provenance.RuleId = finding.RuleId;
+            record.Provenance.Owner = finding.Owner;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.NormalizationId = BuildNormalizationId(record);
+            record.DeterministicDigest = ComputeNormalizationRecordDigest(record);
+            normalizationRecords.push_back(std::move(record));
+        };
+
+        for (const FieldDefaultFallbackPolicyEvidence* evidence : evidences) {
+            if (evidence->FieldId == canonical.FieldId) {
+                continue;
+            }
+
+            const bool defaultMismatch = (evidence->HasDefaultValue != canonical.HasDefaultValue) ||
+                                         (evidence->HasDefaultValue && canonical.HasDefaultValue &&
+                                          evidence->DefaultValue != canonical.DefaultValue);
+            if (defaultMismatch) {
+                emitNormalization(FieldDefaultFallbackNormalizationKind::DefaultValuePolicy,
+                                  *evidence,
+                                  "defaultValue",
+                                  OptionalValueToString(evidence->HasDefaultValue, evidence->DefaultValue),
+                                  OptionalValueToString(canonical.HasDefaultValue, canonical.DefaultValue),
+                                  "resolve-ambiguous-default-using-canonical-scope-order");
+            }
+
+            const bool fallbackMismatch = (evidence->HasFallbackPath != canonical.HasFallbackPath) ||
+                                          (evidence->HasFallbackPath && canonical.HasFallbackPath &&
+                                           evidence->FallbackPath != canonical.FallbackPath);
+            if (fallbackMismatch) {
+                emitNormalization(FieldDefaultFallbackNormalizationKind::FallbackPathPolicy,
+                                  *evidence,
+                                  "fallbackPath",
+                                  OptionalValueToString(evidence->HasFallbackPath, evidence->FallbackPath),
+                                  OptionalValueToString(canonical.HasFallbackPath, canonical.FallbackPath),
+                                  "resolve-ambiguous-fallback-using-canonical-scope-order");
+            }
+        }
+    }
+
+    SortNormalizationRecords(normalizationRecords);
+
+    FieldDefaultFallbackNormalizationResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.NormalizationRecords = std::move(normalizationRecords);
+    for (const FieldDefaultFallbackNormalizationRecord& record : result.NormalizationRecords) {
+        if (record.NormalizationKind == FieldDefaultFallbackNormalizationKind::DefaultValuePolicy) {
+            ++result.Summary.DefaultPolicyNormalizationCount;
+        } else if (record.NormalizationKind == FieldDefaultFallbackNormalizationKind::FallbackPathPolicy) {
+            ++result.Summary.FallbackPolicyNormalizationCount;
+        }
+    }
+    result.Summary.TotalNormalizationCount = static_cast<uint32_t>(result.NormalizationRecords.size());
+    result.DeterministicDigest = ComputeNormalizationResultDigest(result);
+    return Result<FieldDefaultFallbackNormalizationResult>::Success(std::move(result));
 }
 
 } // namespace Core::Remediation
