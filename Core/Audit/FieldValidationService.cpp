@@ -1,0 +1,311 @@
+#include "Core/Audit/FieldValidationService.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <filesystem>
+#include <iomanip>
+#include <map>
+#include <set>
+#include <sstream>
+#include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+namespace Core::Audit {
+namespace {
+
+struct FieldObservation {
+    std::string SnapshotScope;
+    const FieldInventoryEntry* Entry = nullptr;
+};
+
+[[nodiscard]] uint64_t HashString(const std::string_view value) {
+    constexpr uint64_t kFnvOffset = 14695981039346656037ull;
+    constexpr uint64_t kFnvPrime = 1099511628211ull;
+
+    uint64_t hash = kFnvOffset;
+    for (const unsigned char symbol : value) {
+        hash ^= static_cast<uint64_t>(symbol);
+        hash *= kFnvPrime;
+    }
+    return hash;
+}
+
+[[nodiscard]] std::string HashToHex(const uint64_t value) {
+    std::ostringstream stream;
+    stream << std::hex << std::setw(16) << std::setfill('0') << value;
+    return stream.str();
+}
+
+[[nodiscard]] std::string BuildStableMergeKey(const FieldInventoryEntry& entry) {
+    return entry.TypeName + "::" + entry.FieldPath;
+}
+
+[[nodiscard]] std::string BuildEquivalentFieldKey(const FieldInventoryEntry& entry) {
+    return entry.FieldPath;
+}
+
+[[nodiscard]] bool EnsureOutputDirectory(const std::filesystem::path& outputDirectory) {
+    std::error_code errorCode;
+    const bool outputExists = std::filesystem::exists(outputDirectory, errorCode);
+    if (errorCode) {
+        return false;
+    }
+
+    if (outputExists) {
+        const bool isDirectory = std::filesystem::is_directory(outputDirectory, errorCode);
+        return !errorCode && isDirectory;
+    }
+
+    std::filesystem::create_directories(outputDirectory, errorCode);
+    return !errorCode;
+}
+
+[[nodiscard]] bool ValidateEntry(const FieldInventoryEntry& entry) {
+    const std::string canonicalFieldId = entry.Domain + "::" + entry.TypeName + "::" + entry.FieldPath;
+    return !entry.Domain.empty() && !entry.OwnerSubsystem.empty() && !entry.TypeName.empty() && !entry.FieldPath.empty() &&
+           !entry.FieldId.empty() && entry.FieldId == canonicalFieldId && !entry.SourceTrace.SourceFile.empty() &&
+           !entry.SourceTrace.SourceSymbol.empty() && !entry.SourceTrace.CollectorId.empty() &&
+           entry.SourceTrace.SourceLine > 0u;
+}
+
+[[nodiscard]] bool ValidateSnapshot(const FieldInventorySnapshot& snapshot, const std::string_view expectedScope) {
+    if (snapshot.Scope != expectedScope || snapshot.Entries.empty()) {
+        return false;
+    }
+
+    for (const FieldInventoryEntry& entry : snapshot.Entries) {
+        if (!ValidateEntry(entry)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] std::string BuildDomainPair(const FieldObservation& left, const FieldObservation& right) {
+    const std::string leftDomain = left.SnapshotScope + ":" + left.Entry->Domain;
+    const std::string rightDomain = right.SnapshotScope + ":" + right.Entry->Domain;
+    if (leftDomain <= rightDomain) {
+        return leftDomain + "<->" + rightDomain;
+    }
+    return rightDomain + "<->" + leftDomain;
+}
+
+[[nodiscard]] FieldValidationEvidence BuildEvidence(const FieldObservation& observation) {
+    FieldValidationEvidence evidence{};
+    evidence.SnapshotScope = observation.SnapshotScope;
+    evidence.Domain = observation.Entry->Domain;
+    evidence.FieldId = observation.Entry->FieldId;
+    evidence.TypeName = observation.Entry->TypeName;
+    evidence.FieldPath = observation.Entry->FieldPath;
+    evidence.Required = observation.Entry->Required;
+    evidence.SourceTrace = observation.Entry->SourceTrace;
+    return evidence;
+}
+
+[[nodiscard]] FieldValidationFinding BuildTypeMismatchFinding(const std::string& stableFieldKey,
+                                                              const FieldObservation& left,
+                                                              const FieldObservation& right) {
+    FieldValidationFinding finding{};
+    finding.RuleId = "FIELD_AUDIT_RULE_TYPE_CONTRACT_MISMATCH";
+    finding.MismatchKind = FieldValidationMismatchKind::TypeMismatch;
+    finding.StableFieldKey = stableFieldKey;
+    finding.DomainPair = BuildDomainPair(left, right);
+    finding.LeftEvidence = BuildEvidence(left);
+    finding.RightEvidence = BuildEvidence(right);
+    return finding;
+}
+
+[[nodiscard]] FieldValidationFinding BuildNullabilityMismatchFinding(const std::string& stableFieldKey,
+                                                                     const FieldObservation& left,
+                                                                     const FieldObservation& right) {
+    FieldValidationFinding finding{};
+    finding.RuleId = "FIELD_AUDIT_RULE_NULLABILITY_CONTRACT_MISMATCH";
+    finding.MismatchKind = FieldValidationMismatchKind::NullabilityMismatch;
+    finding.StableFieldKey = stableFieldKey;
+    finding.DomainPair = BuildDomainPair(left, right);
+    finding.LeftEvidence = BuildEvidence(left);
+    finding.RightEvidence = BuildEvidence(right);
+    return finding;
+}
+
+void SortFindings(std::vector<FieldValidationFinding>& findings) {
+    std::sort(findings.begin(), findings.end(), [](const FieldValidationFinding& left, const FieldValidationFinding& right) {
+        if (left.StableFieldKey != right.StableFieldKey) {
+            return left.StableFieldKey < right.StableFieldKey;
+        }
+        if (left.RuleId != right.RuleId) {
+            return left.RuleId < right.RuleId;
+        }
+        if (left.DomainPair != right.DomainPair) {
+            return left.DomainPair < right.DomainPair;
+        }
+        if (left.LeftEvidence.FieldId != right.LeftEvidence.FieldId) {
+            return left.LeftEvidence.FieldId < right.LeftEvidence.FieldId;
+        }
+        return left.RightEvidence.FieldId < right.RightEvidence.FieldId;
+    });
+}
+
+[[nodiscard]] std::string ComputeValidationDigest(const FieldValidationReport& report) {
+    std::string digestMaterial;
+    digestMaterial.reserve((report.Findings.size() * 160u) + 128u);
+    digestMaterial.append(report.Scope);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.ComparedFieldCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.TypeMismatchCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.NullabilityMismatchCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.TotalFindingCount));
+    digestMaterial.push_back('\n');
+
+    for (const FieldValidationFinding& finding : report.Findings) {
+        digestMaterial.append(finding.RuleId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.StableFieldKey);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.DomainPair);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.LeftEvidence.FieldId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.LeftEvidence.TypeName);
+        digestMaterial.push_back('|');
+        digestMaterial.push_back(finding.LeftEvidence.Required ? '1' : '0');
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.RightEvidence.FieldId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.RightEvidence.TypeName);
+        digestMaterial.push_back('|');
+        digestMaterial.push_back(finding.RightEvidence.Required ? '1' : '0');
+        digestMaterial.push_back('\n');
+    }
+
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::vector<FieldObservation> BuildObservations(const FieldValidationRequest& request) {
+    std::vector<FieldObservation> observations;
+    observations.reserve(request.RuntimeSnapshot.Entries.size() + request.SerializedSnapshot.Entries.size() +
+                         request.ProtocolSnapshot.Entries.size());
+
+    const std::array<std::pair<std::string_view, const FieldInventorySnapshot*>, 3> snapshots = {
+        std::pair<std::string_view, const FieldInventorySnapshot*>("runtime", &request.RuntimeSnapshot),
+        std::pair<std::string_view, const FieldInventorySnapshot*>("serialized", &request.SerializedSnapshot),
+        std::pair<std::string_view, const FieldInventorySnapshot*>("protocol", &request.ProtocolSnapshot)};
+
+    for (const auto& [scope, snapshot] : snapshots) {
+        for (const FieldInventoryEntry& entry : snapshot->Entries) {
+            FieldObservation observation{};
+            observation.SnapshotScope = std::string(scope);
+            observation.Entry = &entry;
+            observations.push_back(observation);
+        }
+    }
+
+    std::sort(observations.begin(),
+              observations.end(),
+              [](const FieldObservation& left, const FieldObservation& right) {
+                  const std::string leftEquivalent = BuildEquivalentFieldKey(*left.Entry);
+                  const std::string rightEquivalent = BuildEquivalentFieldKey(*right.Entry);
+                  if (leftEquivalent != rightEquivalent) {
+                      return leftEquivalent < rightEquivalent;
+                  }
+                  if (left.Entry->TypeName != right.Entry->TypeName) {
+                      return left.Entry->TypeName < right.Entry->TypeName;
+                  }
+                  if (left.SnapshotScope != right.SnapshotScope) {
+                      return left.SnapshotScope < right.SnapshotScope;
+                  }
+                  if (left.Entry->Domain != right.Entry->Domain) {
+                      return left.Entry->Domain < right.Entry->Domain;
+                  }
+                  return left.Entry->FieldId < right.Entry->FieldId;
+              });
+
+    return observations;
+}
+
+} // namespace
+
+Result<FieldValidationReport> ValidateFieldTypeAndNullabilityContracts(const FieldValidationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "type-nullability") {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!ValidateSnapshot(request.RuntimeSnapshot, "runtime") || !ValidateSnapshot(request.SerializedSnapshot, "serialized") ||
+        !ValidateSnapshot(request.ProtocolSnapshot, "protocol")) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    const std::vector<FieldObservation> observations = BuildObservations(request);
+    std::map<std::string, std::vector<std::size_t>> equivalentKeyToIndices;
+    for (std::size_t index = 0; index < observations.size(); ++index) {
+        equivalentKeyToIndices[BuildEquivalentFieldKey(*observations[index].Entry)].push_back(index);
+    }
+
+    std::vector<FieldValidationFinding> findings;
+    std::set<std::string> comparedFields;
+    for (const auto& [equivalentFieldKey, indices] : equivalentKeyToIndices) {
+        if (indices.size() < 2u) {
+            comparedFields.insert(equivalentFieldKey);
+            continue;
+        }
+
+        comparedFields.insert(equivalentFieldKey);
+        for (std::size_t leftIndex = 0; leftIndex < indices.size(); ++leftIndex) {
+            for (std::size_t rightIndex = leftIndex + 1u; rightIndex < indices.size(); ++rightIndex) {
+                const FieldObservation& leftObservation = observations[indices[leftIndex]];
+                const FieldObservation& rightObservation = observations[indices[rightIndex]];
+                if (leftObservation.SnapshotScope == rightObservation.SnapshotScope) {
+                    continue;
+                }
+
+                if (leftObservation.Entry->TypeName != rightObservation.Entry->TypeName) {
+                    findings.push_back(BuildTypeMismatchFinding("field-path::" + equivalentFieldKey,
+                                                                leftObservation,
+                                                                rightObservation));
+                    continue;
+                }
+
+                if (leftObservation.Entry->Required != rightObservation.Entry->Required) {
+                    findings.push_back(BuildNullabilityMismatchFinding(BuildStableMergeKey(*leftObservation.Entry),
+                                                                       leftObservation,
+                                                                       rightObservation));
+                }
+            }
+        }
+    }
+
+    SortFindings(findings);
+
+    FieldValidationReport report{};
+    report.Scope = request.Scope;
+    report.OutputDirectory = request.OutputDirectory;
+    report.Findings = std::move(findings);
+    report.Summary.ComparedFieldCount = static_cast<uint32_t>(comparedFields.size());
+    for (const FieldValidationFinding& finding : report.Findings) {
+        if (finding.MismatchKind == FieldValidationMismatchKind::TypeMismatch) {
+            ++report.Summary.TypeMismatchCount;
+        } else if (finding.MismatchKind == FieldValidationMismatchKind::NullabilityMismatch) {
+            ++report.Summary.NullabilityMismatchCount;
+        }
+    }
+    report.Summary.TotalFindingCount = static_cast<uint32_t>(report.Findings.size());
+    report.DeterministicDigest = ComputeValidationDigest(report);
+
+    return Result<FieldValidationReport>::Success(std::move(report));
+}
+
+} // namespace Core::Audit

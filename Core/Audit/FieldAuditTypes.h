@@ -52,4 +52,51 @@ struct MergeFieldInventoryRequest {
     FieldInventorySnapshot ProtocolSnapshot;
 };
 
+enum class FieldValidationMismatchKind : uint8_t {
+    TypeMismatch = 0,
+    NullabilityMismatch = 1
+};
+
+struct FieldValidationRequest {
+    std::string Scope = "type-nullability";
+    std::filesystem::path OutputDirectory;
+    FieldInventorySnapshot RuntimeSnapshot;
+    FieldInventorySnapshot SerializedSnapshot;
+    FieldInventorySnapshot ProtocolSnapshot;
+};
+
+struct FieldValidationEvidence {
+    std::string SnapshotScope;
+    std::string Domain;
+    std::string FieldId;
+    std::string TypeName;
+    std::string FieldPath;
+    bool Required = true;
+    FieldSourceTraceMetadata SourceTrace;
+};
+
+struct FieldValidationFinding {
+    std::string RuleId;
+    FieldValidationMismatchKind MismatchKind = FieldValidationMismatchKind::TypeMismatch;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    FieldValidationEvidence LeftEvidence;
+    FieldValidationEvidence RightEvidence;
+};
+
+struct FieldValidationSummary {
+    uint32_t ComparedFieldCount = 0;
+    uint32_t TypeMismatchCount = 0;
+    uint32_t NullabilityMismatchCount = 0;
+    uint32_t TotalFindingCount = 0;
+};
+
+struct FieldValidationReport {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::vector<FieldValidationFinding> Findings;
+    FieldValidationSummary Summary;
+    std::string DeterministicDigest;
+};
+
 } // namespace Core::Audit

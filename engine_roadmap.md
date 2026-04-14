@@ -419,7 +419,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 29.1.3: Implement `GenerateProtocolFieldInventory()` for packet/RPC/replay/MCP payload fields and transport-level metadata constraints. (v0.29.1.3)
   * [x] Sub-step 29.1.4: Implement `MergeFieldInventorySnapshots()` with stable field IDs, ownership tags, source traces, and version lineage metadata. (v0.29.1.4)
 * [ ] Step 29.2: Add strict field-level validation rules and invariant analysis.
-  * [ ] Sub-step 29.2.1: Implement `ValidateFieldTypeAndNullabilityContracts()` across runtime reflection, serializers, and generated manifests. (v0.29.2.1)
+  * [x] Sub-step 29.2.1: Implement `ValidateFieldTypeAndNullabilityContracts()` across runtime reflection, serializers, and generated manifests. (v0.29.2.1)
   * [ ] Sub-step 29.2.2: Implement `ValidateFieldRangeEnumAndPatternDomains()` for numeric bounds, enum domains, string formats, and identifier normalization. (v0.29.2.2)
   * [ ] Sub-step 29.2.3: Implement `ValidateCrossFieldInvariantRules()` for dependency ordering, conditional required fields, and subsystem coupling assumptions. (v0.29.2.3)
   * [ ] Sub-step 29.2.4: Implement `ValidateFieldEvolutionCompatibility()` for forward/backward schema evolution and migration safety checks. (v0.29.2.4)
