@@ -24,6 +24,12 @@ enum class FieldDefaultFallbackNormalizationKind : uint8_t {
     FallbackPathPolicy = 1
 };
 
+enum class FieldSerializationMappingFixKind : uint8_t {
+    SerializedNameCorrection = 0,
+    AliasSetCorrection = 1,
+    SerializedPathCorrection = 2
+};
+
 struct FieldSchemaPatchSourceFinding {
     std::string FindingId;
     std::string Owner;
@@ -125,6 +131,62 @@ struct FieldDefaultFallbackNormalizationResult {
     std::string RemediationBatchId;
     std::vector<FieldDefaultFallbackNormalizationRecord> NormalizationRecords;
     FieldDefaultFallbackNormalizationSummary Summary;
+    std::string DeterministicDigest;
+};
+
+struct FieldSerializationMappingEvidence {
+    std::string SnapshotScope;
+    std::string FieldId;
+    std::string SerializedName;
+    std::vector<std::string> AliasNames;
+    std::string SerializedPath;
+};
+
+struct FieldSerializationMappingFinding {
+    std::string FindingId;
+    std::string Owner;
+    std::string RuleId;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    FieldSerializationMappingEvidence RuntimeEvidence;
+    FieldSerializationMappingEvidence EditorEvidence;
+    FieldSerializationMappingEvidence CookedEvidence;
+};
+
+struct FieldSerializationMappingFixRequest {
+    std::string Scope = "schema-definitions";
+    std::filesystem::path OutputDirectory;
+    std::string RemediationBatchId;
+    std::vector<FieldSerializationMappingFinding> Findings;
+};
+
+struct FieldSerializationMappingFixRecord {
+    std::string FixId;
+    FieldSerializationMappingFixKind FixKind = FieldSerializationMappingFixKind::SerializedNameCorrection;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    std::string TargetFieldId;
+    std::string PropertyPath;
+    std::string ExistingValue;
+    std::string ReplacementValue;
+    std::string Rationale;
+    FieldSchemaPatchProvenanceMetadata Provenance;
+    std::string DeterministicDigest;
+};
+
+struct FieldSerializationMappingFixSummary {
+    uint32_t SerializedNameFixCount = 0;
+    uint32_t AliasSetFixCount = 0;
+    uint32_t SerializedPathFixCount = 0;
+    uint32_t TotalFixCount = 0;
+};
+
+struct FieldSerializationMappingFixResult {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::string RemediationBatchId;
+    std::vector<FieldSerializationMappingFixRecord> FixRecords;
+    FieldSerializationMappingFixSummary Summary;
     std::string DeterministicDigest;
 };
 

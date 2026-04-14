@@ -82,6 +82,42 @@ Core::Remediation::FieldDefaultFallbackPolicyFinding BuildDefaultFallbackFinding
     return finding;
 }
 
+Core::Remediation::FieldSerializationMappingEvidence BuildSerializationMappingEvidence(
+    const std::string& scope,
+    const std::string& fieldId,
+    const std::string& serializedName,
+    const std::vector<std::string>& aliasNames,
+    const std::string& serializedPath) {
+    Core::Remediation::FieldSerializationMappingEvidence evidence{};
+    evidence.SnapshotScope = scope;
+    evidence.FieldId = fieldId;
+    evidence.SerializedName = serializedName;
+    evidence.AliasNames = aliasNames;
+    evidence.SerializedPath = serializedPath;
+    return evidence;
+}
+
+Core::Remediation::FieldSerializationMappingFinding BuildSerializationMappingFinding(
+    const std::string& findingId,
+    const std::string& owner,
+    const std::string& ruleId,
+    const std::string& stableFieldKey,
+    const std::string& domainPair,
+    const Core::Remediation::FieldSerializationMappingEvidence& runtime,
+    const Core::Remediation::FieldSerializationMappingEvidence& editor,
+    const Core::Remediation::FieldSerializationMappingEvidence& cooked) {
+    Core::Remediation::FieldSerializationMappingFinding finding{};
+    finding.FindingId = findingId;
+    finding.Owner = owner;
+    finding.RuleId = ruleId;
+    finding.StableFieldKey = stableFieldKey;
+    finding.DomainPair = domainPair;
+    finding.RuntimeEvidence = runtime;
+    finding.EditorEvidence = editor;
+    finding.CookedEvidence = cooked;
+    return finding;
+}
+
 } // namespace
 
 int main() {
@@ -270,6 +306,137 @@ int main() {
             NormalizeFieldDefaultAndFallbackPolicies(invalidRequest);
         assert(!result.Ok);
         assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldSerializationMappingFixRequest invalidRequest{};
+        const Result<FieldSerializationMappingFixResult> result = FixFieldSerializationMappings(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldSerializationMappingFixRequest request{};
+        request.Scope = "schema-definitions";
+        request.OutputDirectory = root / "serialization-mapping-success";
+        request.RemediationBatchId = "batch-005";
+        request.Findings = {
+            BuildSerializationMappingFinding(
+                "finding-b",
+                "serialization-systems",
+                "FIELD_AUDIT_RULE_SERIALIZATION_MAPPING_MISMATCH",
+                "PlayerState::Health",
+                "runtime<->editor<->cooked",
+                BuildSerializationMappingEvidence("runtime",
+                                                  "runtime::PlayerState::Health",
+                                                  "playerHealth",
+                                                  {"health", "hp"},
+                                                  "/player/state/health"),
+                BuildSerializationMappingEvidence("editor",
+                                                  "editor::PlayerState::Health",
+                                                  "PlayerHealth",
+                                                  {"Health", "hp"},
+                                                  "/editor/player/state/health"),
+                BuildSerializationMappingEvidence("cooked",
+                                                  "cooked::PlayerState::Health",
+                                                  "health_h",
+                                                  {"hp"},
+                                                  "/cooked/ps/h")),
+            BuildSerializationMappingFinding(
+                "finding-a",
+                "serialization-systems",
+                "FIELD_AUDIT_RULE_SERIALIZATION_MAPPING_MISMATCH",
+                "WeaponState::DamageType",
+                "runtime<->editor<->cooked",
+                BuildSerializationMappingEvidence("runtime",
+                                                  "runtime::WeaponState::DamageType",
+                                                  "damageType",
+                                                  {"damage_type", "type"},
+                                                  "/weapon/state/damage-type"),
+                BuildSerializationMappingEvidence("editor",
+                                                  "editor::WeaponState::DamageType",
+                                                  "damageType",
+                                                  {"type", "damage_type"},
+                                                  "/editor/weapon/state/damage-type"),
+                BuildSerializationMappingEvidence("cooked",
+                                                  "cooked::WeaponState::DamageType",
+                                                  "dmg_type",
+                                                  {"type"},
+                                                  "/cooked/weapon/state/dmg"))};
+
+        const Result<FieldSerializationMappingFixResult> first = FixFieldSerializationMappings(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.RemediationBatchId == request.RemediationBatchId);
+        assert(first.Value.Summary.SerializedNameFixCount == 3u);
+        assert(first.Value.Summary.AliasSetFixCount == 3u);
+        assert(first.Value.Summary.SerializedPathFixCount == 4u);
+        assert(first.Value.Summary.TotalFixCount == 10u);
+        assert(first.Value.FixRecords.size() == first.Value.Summary.TotalFixCount);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        bool sawEditorNameFix = false;
+        bool sawCookedAliasFix = false;
+        bool sawCookedPathFix = false;
+        std::string previousFixId;
+        for (const FieldSerializationMappingFixRecord& record : first.Value.FixRecords) {
+            assert(!record.FixId.empty());
+            assert(!record.DeterministicDigest.empty());
+            assert(!record.StableFieldKey.empty());
+            assert(!record.TargetFieldId.empty());
+            assert(!record.PropertyPath.empty());
+            assert(!record.ExistingValue.empty());
+            assert(!record.ReplacementValue.empty());
+            assert(!record.Rationale.empty());
+            assert(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+            if (!previousFixId.empty()) {
+                assert(previousFixId <= record.FixId || record.Provenance.FindingId >= "finding-a");
+            }
+            previousFixId = record.FixId;
+
+            if (record.PropertyPath == "serialization.name" &&
+                record.TargetFieldId == "editor::PlayerState::Health") {
+                sawEditorNameFix = true;
+                assert(record.ExistingValue == "PlayerHealth");
+                assert(record.ReplacementValue == "playerHealth");
+                assert(record.FixKind == FieldSerializationMappingFixKind::SerializedNameCorrection);
+            }
+
+            if (record.PropertyPath == "serialization.aliases" &&
+                record.TargetFieldId == "cooked::WeaponState::DamageType") {
+                sawCookedAliasFix = true;
+                assert(record.ExistingValue == "type");
+                assert(record.ReplacementValue == "damage_type,type");
+                assert(record.FixKind == FieldSerializationMappingFixKind::AliasSetCorrection);
+            }
+
+            if (record.PropertyPath == "serialization.path" &&
+                record.TargetFieldId == "cooked::PlayerState::Health") {
+                sawCookedPathFix = true;
+                assert(record.ExistingValue == "/cooked/ps/h");
+                assert(record.ReplacementValue == "/player/state/health");
+                assert(record.FixKind == FieldSerializationMappingFixKind::SerializedPathCorrection);
+            }
+        }
+        assert(sawEditorNameFix);
+        assert(sawCookedAliasFix);
+        assert(sawCookedPathFix);
+
+        const Result<FieldSerializationMappingFixResult> second = FixFieldSerializationMappings(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.Summary.TotalFixCount == first.Value.Summary.TotalFixCount);
+        assert(second.Value.FixRecords.size() == first.Value.FixRecords.size());
+        for (std::size_t index = 0; index < first.Value.FixRecords.size(); ++index) {
+            assert(second.Value.FixRecords[index].FixId == first.Value.FixRecords[index].FixId);
+            assert(second.Value.FixRecords[index].DeterministicDigest == first.Value.FixRecords[index].DeterministicDigest);
+            assert(second.Value.FixRecords[index].Provenance.FindingId ==
+                   first.Value.FixRecords[index].Provenance.FindingId);
+            assert(second.Value.FixRecords[index].Provenance.RuleId == first.Value.FixRecords[index].Provenance.RuleId);
+            assert(second.Value.FixRecords[index].Provenance.Owner == first.Value.FixRecords[index].Provenance.Owner);
+            assert(second.Value.FixRecords[index].Provenance.RemediationBatchId ==
+                   first.Value.FixRecords[index].Provenance.RemediationBatchId);
+        }
     }
 
     {

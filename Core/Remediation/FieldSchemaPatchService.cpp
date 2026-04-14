@@ -1,6 +1,7 @@
 #include "Core/Remediation/FieldSchemaPatchService.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -53,11 +54,17 @@ namespace {
     if (scope == "runtime") {
         return 0u;
     }
-    if (scope == "serialized") {
+    if (scope == "editor") {
         return 1u;
     }
-    if (scope == "protocol") {
+    if (scope == "cooked") {
         return 2u;
+    }
+    if (scope == "serialized") {
+        return 3u;
+    }
+    if (scope == "protocol") {
+        return 4u;
     }
     return std::nullopt;
 }
@@ -229,6 +236,180 @@ namespace {
     return hasValue ? value : "<unset>";
 }
 
+[[nodiscard]] std::vector<std::string> NormalizeAliasNames(const std::vector<std::string>& aliasNames) {
+    std::vector<std::string> normalized = aliasNames;
+    normalized.erase(std::remove_if(normalized.begin(),
+                                    normalized.end(),
+                                    [](const std::string& alias) { return alias.empty(); }),
+                     normalized.end());
+    std::sort(normalized.begin(), normalized.end());
+    normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
+    return normalized;
+}
+
+[[nodiscard]] std::string JoinAliasNames(const std::vector<std::string>& aliasNames) {
+    if (aliasNames.empty()) {
+        return "<none>";
+    }
+
+    std::string joined;
+    for (std::size_t index = 0; index < aliasNames.size(); ++index) {
+        if (index > 0u) {
+            joined.push_back(',');
+        }
+        joined.append(aliasNames[index]);
+    }
+    return joined;
+}
+
+[[nodiscard]] bool IsValidSerializationMappingEvidence(const FieldSerializationMappingEvidence& evidence) {
+    if (evidence.SnapshotScope.empty() || evidence.FieldId.empty() || evidence.SerializedName.empty() ||
+        evidence.SerializedPath.empty()) {
+        return false;
+    }
+    for (const std::string& aliasName : evidence.AliasNames) {
+        if (aliasName.empty()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool IsValidSerializationMappingFinding(const FieldSerializationMappingFinding& finding) {
+    if (finding.FindingId.empty() || finding.Owner.empty() || finding.RuleId.empty() || finding.StableFieldKey.empty() ||
+        finding.DomainPair.empty()) {
+        return false;
+    }
+
+    if (!IsValidSerializationMappingEvidence(finding.RuntimeEvidence) ||
+        !IsValidSerializationMappingEvidence(finding.EditorEvidence) ||
+        !IsValidSerializationMappingEvidence(finding.CookedEvidence)) {
+        return false;
+    }
+
+    if (finding.RuntimeEvidence.SnapshotScope != "runtime" || finding.EditorEvidence.SnapshotScope != "editor" ||
+        finding.CookedEvidence.SnapshotScope != "cooked") {
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] const FieldSerializationMappingEvidence& SelectCanonicalSerializationMappingEvidence(
+    const std::vector<const FieldSerializationMappingEvidence*>& evidences) {
+    assert(!evidences.empty());
+
+    const FieldSerializationMappingEvidence* canonical = evidences.front();
+    for (std::size_t index = 1u; index < evidences.size(); ++index) {
+        const FieldSerializationMappingEvidence* candidate = evidences[index];
+        const std::optional<uint32_t> canonicalRank = GetScopeRank(canonical->SnapshotScope);
+        const std::optional<uint32_t> candidateRank = GetScopeRank(candidate->SnapshotScope);
+        if (canonicalRank.has_value() && candidateRank.has_value() && *canonicalRank != *candidateRank) {
+            canonical = *candidateRank < *canonicalRank ? candidate : canonical;
+            continue;
+        }
+        if (canonicalRank.has_value() != candidateRank.has_value()) {
+            canonical = candidateRank.has_value() ? candidate : canonical;
+            continue;
+        }
+        if (canonical->FieldId != candidate->FieldId) {
+            canonical = candidate->FieldId < canonical->FieldId ? candidate : canonical;
+            continue;
+        }
+        if (canonical->SerializedName != candidate->SerializedName) {
+            canonical = candidate->SerializedName < canonical->SerializedName ? candidate : canonical;
+            continue;
+        }
+        if (canonical->SerializedPath != candidate->SerializedPath) {
+            canonical = candidate->SerializedPath < canonical->SerializedPath ? candidate : canonical;
+            continue;
+        }
+        const std::string canonicalAliases = JoinAliasNames(NormalizeAliasNames(canonical->AliasNames));
+        const std::string candidateAliases = JoinAliasNames(NormalizeAliasNames(candidate->AliasNames));
+        if (canonicalAliases != candidateAliases) {
+            canonical = candidateAliases < canonicalAliases ? candidate : canonical;
+            continue;
+        }
+        canonical = candidate->SnapshotScope < canonical->SnapshotScope ? candidate : canonical;
+    }
+    return *canonical;
+}
+
+[[nodiscard]] std::string BuildSerializationMappingFixId(const FieldSerializationMappingFixRecord& record) {
+    std::string idMaterial;
+    idMaterial.reserve(224u);
+    idMaterial.append("serialization-fix|");
+    idMaterial.append(record.Provenance.FindingId);
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.FixKind)));
+    idMaterial.push_back('|');
+    idMaterial.append(record.StableFieldKey);
+    idMaterial.push_back('|');
+    idMaterial.append(record.TargetFieldId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.PropertyPath);
+    idMaterial.push_back('|');
+    idMaterial.append(record.ReplacementValue);
+    return HashToHex(HashString(idMaterial));
+}
+
+[[nodiscard]] std::string ComputeSerializationMappingFixRecordDigest(const FieldSerializationMappingFixRecord& record) {
+    std::string digestMaterial;
+    digestMaterial.reserve(448u);
+    digestMaterial.append(record.FixId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.FixKind)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.StableFieldKey);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.DomainPair);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.TargetFieldId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.PropertyPath);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.ExistingValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.ReplacementValue);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Rationale);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.FindingId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.RuleId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.Owner);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.Provenance.RemediationBatchId);
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::string ComputeSerializationMappingFixResultDigest(const FieldSerializationMappingFixResult& result) {
+    std::string digestMaterial;
+    digestMaterial.reserve((result.FixRecords.size() * 72u) + 176u);
+    digestMaterial.append(result.Scope);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.SerializedNameFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.AliasSetFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.SerializedPathFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.TotalFixCount));
+    digestMaterial.push_back('\n');
+
+    for (const FieldSerializationMappingFixRecord& record : result.FixRecords) {
+        digestMaterial.append(record.FixId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.DeterministicDigest);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.TargetFieldId);
+        digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
 [[nodiscard]] std::string BuildNormalizationId(const FieldDefaultFallbackNormalizationRecord& record) {
     std::string idMaterial;
     idMaterial.reserve(224u);
@@ -348,6 +529,30 @@ void SortPatchRecords(std::vector<FieldSchemaPatchRecord>& patchRecords) {
                       return left.PropertyPath < right.PropertyPath;
                   }
                   return left.PatchId < right.PatchId;
+               });
+}
+
+void SortSerializationMappingFixRecords(std::vector<FieldSerializationMappingFixRecord>& fixRecords) {
+    std::sort(fixRecords.begin(),
+              fixRecords.end(),
+              [](const FieldSerializationMappingFixRecord& left,
+                 const FieldSerializationMappingFixRecord& right) {
+                  if (left.Provenance.FindingId != right.Provenance.FindingId) {
+                      return left.Provenance.FindingId < right.Provenance.FindingId;
+                  }
+                  if (left.StableFieldKey != right.StableFieldKey) {
+                      return left.StableFieldKey < right.StableFieldKey;
+                  }
+                  if (left.TargetFieldId != right.TargetFieldId) {
+                      return left.TargetFieldId < right.TargetFieldId;
+                  }
+                  if (left.FixKind != right.FixKind) {
+                      return static_cast<uint32_t>(left.FixKind) < static_cast<uint32_t>(right.FixKind);
+                  }
+                  if (left.PropertyPath != right.PropertyPath) {
+                      return left.PropertyPath < right.PropertyPath;
+                  }
+                  return left.FixId < right.FixId;
               });
 }
 
@@ -586,6 +791,133 @@ Result<FieldDefaultFallbackNormalizationResult> NormalizeFieldDefaultAndFallback
     result.Summary.TotalNormalizationCount = static_cast<uint32_t>(result.NormalizationRecords.size());
     result.DeterministicDigest = ComputeNormalizationResultDigest(result);
     return Result<FieldDefaultFallbackNormalizationResult>::Success(std::move(result));
+}
+
+Result<FieldSerializationMappingFixResult> FixFieldSerializationMappings(
+    const FieldSerializationMappingFixRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.Findings.empty()) {
+        return Result<FieldSerializationMappingFixResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "schema-definitions") {
+        return Result<FieldSerializationMappingFixResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const FieldSerializationMappingFinding& finding : request.Findings) {
+        if (!IsValidSerializationMappingFinding(finding)) {
+            return Result<FieldSerializationMappingFixResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldSerializationMappingFixResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldSerializationMappingFixRecord> fixRecords;
+    std::map<std::string, bool> seenFixKeys;
+    for (const FieldSerializationMappingFinding& finding : request.Findings) {
+        const std::vector<const FieldSerializationMappingEvidence*> evidences = {
+            &finding.RuntimeEvidence, &finding.EditorEvidence, &finding.CookedEvidence};
+        const FieldSerializationMappingEvidence& canonical = SelectCanonicalSerializationMappingEvidence(evidences);
+        const std::vector<std::string> canonicalAliases = NormalizeAliasNames(canonical.AliasNames);
+        const std::string canonicalAliasText = JoinAliasNames(canonicalAliases);
+
+        auto emitFix = [&](const FieldSerializationMappingFixKind fixKind,
+                           const FieldSerializationMappingEvidence& evidence,
+                           const std::string& propertyPath,
+                           const std::string& existingValue,
+                           const std::string& replacementValue,
+                           const std::string& rationale) {
+            std::string dedupeKey;
+            dedupeKey.reserve(224u);
+            dedupeKey.append(finding.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(evidence.FieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(fixKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenFixKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenFixKeys.emplace(dedupeKey, true);
+
+            FieldSerializationMappingFixRecord record{};
+            record.FixKind = fixKind;
+            record.StableFieldKey = finding.StableFieldKey;
+            record.DomainPair = finding.DomainPair;
+            record.TargetFieldId = evidence.FieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.Rationale = rationale;
+            record.Provenance.FindingId = finding.FindingId;
+            record.Provenance.RuleId = finding.RuleId;
+            record.Provenance.Owner = finding.Owner;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.FixId = BuildSerializationMappingFixId(record);
+            record.DeterministicDigest = ComputeSerializationMappingFixRecordDigest(record);
+            fixRecords.push_back(std::move(record));
+        };
+
+        for (const FieldSerializationMappingEvidence* evidence : evidences) {
+            if (evidence->FieldId == canonical.FieldId) {
+                continue;
+            }
+
+            if (evidence->SerializedName != canonical.SerializedName) {
+                emitFix(FieldSerializationMappingFixKind::SerializedNameCorrection,
+                        *evidence,
+                        "serialization.name",
+                        evidence->SerializedName,
+                        canonical.SerializedName,
+                        "align-serialized-name-with-canonical-scope-order");
+            }
+
+            const std::vector<std::string> evidenceAliases = NormalizeAliasNames(evidence->AliasNames);
+            const std::string evidenceAliasText = JoinAliasNames(evidenceAliases);
+            if (evidenceAliasText != canonicalAliasText) {
+                emitFix(FieldSerializationMappingFixKind::AliasSetCorrection,
+                        *evidence,
+                        "serialization.aliases",
+                        evidenceAliasText,
+                        canonicalAliasText,
+                        "align-alias-set-with-canonical-scope-order");
+            }
+
+            if (evidence->SerializedPath != canonical.SerializedPath) {
+                emitFix(FieldSerializationMappingFixKind::SerializedPathCorrection,
+                        *evidence,
+                        "serialization.path",
+                        evidence->SerializedPath,
+                        canonical.SerializedPath,
+                        "align-serialized-path-with-canonical-scope-order");
+            }
+        }
+    }
+
+    SortSerializationMappingFixRecords(fixRecords);
+
+    FieldSerializationMappingFixResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.FixRecords = std::move(fixRecords);
+    for (const FieldSerializationMappingFixRecord& record : result.FixRecords) {
+        if (record.FixKind == FieldSerializationMappingFixKind::SerializedNameCorrection) {
+            ++result.Summary.SerializedNameFixCount;
+        } else if (record.FixKind == FieldSerializationMappingFixKind::AliasSetCorrection) {
+            ++result.Summary.AliasSetFixCount;
+        } else if (record.FixKind == FieldSerializationMappingFixKind::SerializedPathCorrection) {
+            ++result.Summary.SerializedPathFixCount;
+        }
+    }
+    result.Summary.TotalFixCount = static_cast<uint32_t>(result.FixRecords.size());
+    result.DeterministicDigest = ComputeSerializationMappingFixResultDigest(result);
+    return Result<FieldSerializationMappingFixResult>::Success(std::move(result));
 }
 
 } // namespace Core::Remediation
