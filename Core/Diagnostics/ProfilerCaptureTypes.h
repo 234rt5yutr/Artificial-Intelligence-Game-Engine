@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +32,17 @@ struct ProfilerCaptureRequest {
     uint32_t DurationMs = 0;
     bool IncludeCpu = true;
     bool IncludeGpu = false;
+};
+
+enum class TraceExportFormat : uint8_t {
+    Json = 0,
+    ChromeTrace = 1
+};
+
+struct TraceExportRequest {
+    std::string SessionId;
+    TraceExportFormat Format = TraceExportFormat::Json;
+    std::filesystem::path OutputPath;
 };
 
 struct GPUProfilerPassTiming {
@@ -62,6 +74,16 @@ struct ProfilerCaptureSession {
     std::string CaptureType = "cpu";
     std::vector<GPUProfilerPassTiming> GpuPassTimings;
     std::vector<GPUProfilerQueueBreakdown> GpuQueueBreakdown;
+};
+
+struct TraceExportResult {
+    std::string SessionId;
+    TraceExportFormat Format = TraceExportFormat::Json;
+    std::filesystem::path TraceArtifactPath;
+    std::filesystem::path ManifestArtifactPath;
+    std::string Checksum;
+    uint64_t ExportedAtEpochMs = 0;
+    uint64_t TraceByteSize = 0;
 };
 
 constexpr std::array<ProfilerMarkerChannel, PROFILER_MARKER_CHANNEL_COUNT> GetAllProfilerMarkerChannels() {

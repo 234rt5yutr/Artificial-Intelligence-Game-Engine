@@ -399,10 +399,10 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 ## Phase 28: Profiling, Automation & Production Build Pipeline (Weeks 80-83)
 
-* [ ] Step 28.1: Add first-class profiling capture APIs across CPU and GPU.
+* [x] Step 28.1: Add first-class profiling capture APIs across CPU and GPU.
   * [x] Sub-step 28.1.1: Implement `StartCPUProfilerCapture()` with scoped capture sessions and marker channels. (v0.28.1.1)
   * [x] Sub-step 28.1.2: Implement `StartGPUProfilerCapture()` with pass-level timing and queue breakdowns. (v0.28.1.2)
-  * [ ] Sub-step 28.1.3: Implement `ExportProfilerTrace()` to persistent trace formats for post-analysis. (v0.28.1.3)
+  * [x] Sub-step 28.1.3: Implement `ExportProfilerTrace()` to persistent trace formats for post-analysis. (v0.28.1.3)
 * [ ] Step 28.2: Integrate automated runtime validation suites.
   * [ ] Sub-step 28.2.1: Implement `RunAutomatedPlayModeTests()` for deterministic gameplay regression packs. (v0.28.2.1)
   * [ ] Sub-step 28.2.2: Implement `RunAutomatedPerformanceTests()` for budget regression gates by platform tier. (v0.28.2.2)

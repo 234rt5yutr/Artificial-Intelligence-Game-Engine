@@ -224,6 +224,8 @@ add_library(EngineCore
     Core/Diagnostics/CPUProfilerCapture.cpp
     Core/Diagnostics/GPUProfilerCapture.h
     Core/Diagnostics/GPUProfilerCapture.cpp
+    Core/Diagnostics/TraceExporter.h
+    Core/Diagnostics/TraceExporter.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -441,3 +443,9 @@ add_executable(EngineCoreTests
 )
 target_link_libraries(EngineCoreTests PRIVATE EngineCore)
 add_test(NAME EngineCoreTests COMMAND EngineCoreTests)
+
+add_executable(EngineCoreTraceExportTests
+    Core/Tests/Diagnostics/TraceExportTests.cpp
+)
+target_link_libraries(EngineCoreTraceExportTests PRIVATE EngineCore)
+add_test(NAME EngineCoreTraceExportTests COMMAND EngineCoreTraceExportTests)
