@@ -81,6 +81,21 @@ namespace {
     digestMaterial.append(phaseStamp.ValidationDigest);
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(phaseStamp.TotalFindingCount));
+    digestMaterial.push_back('\n');
+    for (const FieldValidationFinding& finding : phaseStamp.Findings) {
+        digestMaterial.append(finding.RuleId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.StableFieldKey);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.DomainPair);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.LeftEvidence.FieldId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.RightEvidence.FieldId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.MigrationRecommendationPlaceholder);
+        digestMaterial.push_back('\n');
+    }
     return HashToHex(HashString(digestMaterial));
 }
 
@@ -208,6 +223,7 @@ namespace {
 
     std::vector<FieldValidationReport> phaseValidationReports;
     phaseValidationReports.reserve(validationStages.size());
+    std::vector<FieldValidationFinding> phaseFindings;
     uint32_t phaseFindingCount = 0;
     for (const auto& [validationScope, directoryName] : validationStages) {
         const Result<FieldValidationReport> validationReport = RunValidationStage(
@@ -217,8 +233,29 @@ namespace {
         }
 
         phaseFindingCount += validationReport.Value.Summary.TotalFindingCount;
+        phaseFindings.insert(phaseFindings.end(),
+                             validationReport.Value.Findings.begin(),
+                             validationReport.Value.Findings.end());
         phaseValidationReports.push_back(validationReport.Value);
     }
+
+    std::sort(phaseFindings.begin(),
+              phaseFindings.end(),
+              [](const FieldValidationFinding& left, const FieldValidationFinding& right) {
+                  if (left.StableFieldKey != right.StableFieldKey) {
+                      return left.StableFieldKey < right.StableFieldKey;
+                  }
+                  if (left.RuleId != right.RuleId) {
+                      return left.RuleId < right.RuleId;
+                  }
+                  if (left.DomainPair != right.DomainPair) {
+                      return left.DomainPair < right.DomainPair;
+                  }
+                  if (left.LeftEvidence.FieldId != right.LeftEvidence.FieldId) {
+                      return left.LeftEvidence.FieldId < right.LeftEvidence.FieldId;
+                  }
+                  return left.RightEvidence.FieldId < right.RightEvidence.FieldId;
+              });
 
     FieldAuditPhaseStamp phaseStamp{};
     phaseStamp.PhaseId = std::string(phaseId);
@@ -228,6 +265,7 @@ namespace {
         runtimeSnapshot.DeterministicDigest + "|" + serializedSnapshot.DeterministicDigest + "|" + protocolSnapshot.DeterministicDigest));
     phaseStamp.ValidationDigest = ComputeValidationDigest(phaseValidationReports);
     phaseStamp.TotalFindingCount = phaseFindingCount;
+    phaseStamp.Findings = std::move(phaseFindings);
     phaseStamp.DeterministicPhaseDigest = ComputePhaseDigest(phaseStamp);
     return Result<FieldAuditPhaseStamp>::Success(std::move(phaseStamp));
 }

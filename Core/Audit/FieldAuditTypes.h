@@ -141,6 +141,7 @@ struct FieldAuditPhaseStamp {
     std::string InventoryDigest;
     std::string ValidationDigest;
     uint32_t TotalFindingCount = 0;
+    std::vector<FieldValidationFinding> Findings;
     std::string DeterministicPhaseDigest;
 };
 
@@ -155,6 +156,49 @@ struct FieldAuditRunReport {
     std::vector<FieldAuditPhaseStamp> PhaseStamps;
     uint32_t TotalPhases = 0;
     uint32_t TotalFindingCount = 0;
+    std::string DeterministicDigest;
+};
+
+struct FieldIssueEvidenceReference {
+    std::string RunScope;
+    std::string PhaseId;
+    std::string RuleId;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    std::string LeftFieldId;
+    std::string RightFieldId;
+    std::string MigrationRecommendationPlaceholder;
+};
+
+struct FieldAuditIssueRecord {
+    std::string IssueId;
+    std::string RuleId;
+    std::string StableFieldKey;
+    std::string DomainPair;
+    std::string FirstSeenRevision;
+    uint32_t OccurrenceCount = 0;
+    std::vector<FieldIssueEvidenceReference> EvidenceReferences;
+    std::string DeterministicDigest;
+};
+
+struct FieldIssueLedgerSummary {
+    uint32_t RawFindingCount = 0;
+    uint32_t DeduplicatedIssueCount = 0;
+};
+
+struct FieldIssueLedgerRequest {
+    std::string Scope = "issue-ledger";
+    std::filesystem::path OutputDirectory;
+    std::string Revision;
+    std::vector<FieldAuditRunReport> AuditRuns;
+};
+
+struct FieldIssueLedgerReport {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::string Revision;
+    std::vector<FieldAuditIssueRecord> Issues;
+    FieldIssueLedgerSummary Summary;
     std::string DeterministicDigest;
 };
 

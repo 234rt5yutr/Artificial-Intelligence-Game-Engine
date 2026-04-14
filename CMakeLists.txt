@@ -245,6 +245,8 @@ add_library(EngineCore
     Core/Audit/FieldValidationService.cpp
     Core/Audit/FieldAuditRunner.h
     Core/Audit/FieldAuditRunner.cpp
+    Core/Audit/FieldIssueLedger.h
+    Core/Audit/FieldIssueLedger.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -516,3 +518,9 @@ add_executable(EngineCoreFieldAuditRunnerTests
 )
 target_link_libraries(EngineCoreFieldAuditRunnerTests PRIVATE EngineCore)
 add_test(NAME EngineCoreFieldAuditRunnerTests COMMAND EngineCoreFieldAuditRunnerTests)
+
+add_executable(EngineCoreFieldIssueLedgerTests
+    Core/Tests/Audit/FieldIssueLedgerTests.cpp
+)
+target_link_libraries(EngineCoreFieldIssueLedgerTests PRIVATE EngineCore)
+add_test(NAME EngineCoreFieldIssueLedgerTests COMMAND EngineCoreFieldIssueLedgerTests)
