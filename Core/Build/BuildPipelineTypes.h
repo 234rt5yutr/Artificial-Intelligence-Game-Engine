@@ -57,4 +57,47 @@ struct PlatformBuildResult {
     bool Succeeded = false;
 };
 
+struct StoreSubmissionMetadata {
+    std::string ProductId;
+    std::string ProductName;
+    std::string Version;
+    std::string BuildId;
+};
+
+struct StoreSubmissionManifestEntry {
+    std::string ArtifactId;
+    std::string RelativePath;
+    std::string Checksum;
+};
+
+struct StoreSubmissionRequest {
+    std::string Storefront;
+    std::string Channel;
+    std::string SubmissionId;
+    std::filesystem::path SourceArtifactsRoot;
+    std::filesystem::path OutputDirectory;
+    StoreSubmissionMetadata Metadata;
+    std::vector<StoreSubmissionManifestEntry> ManifestEntries;
+};
+
+struct StoreSubmissionPackageEntry {
+    std::string ArtifactId;
+    std::string RelativePath;
+    uint64_t ByteSize = 0;
+    std::string Checksum;
+};
+
+struct StoreSubmissionResult {
+    std::string Storefront;
+    std::string Channel;
+    std::string SubmissionId;
+    std::filesystem::path BundleMetadataPath;
+    std::filesystem::path ChecksumManifestPath;
+    std::filesystem::path ManifestIndexPath;
+    std::string BundleMetadataChecksum;
+    std::string ChecksumManifestChecksum;
+    std::string DeterministicDigest;
+    std::vector<StoreSubmissionPackageEntry> PackageEntries;
+};
+
 } // namespace Core::Build

@@ -234,6 +234,8 @@ add_library(EngineCore
     Core/Build/BuildPipelineTypes.h
     Core/Build/BuildOrchestrator.h
     Core/Build/BuildOrchestrator.cpp
+    Core/Build/StoreSubmissionPackager.h
+    Core/Build/StoreSubmissionPackager.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -475,3 +477,9 @@ add_executable(EngineCoreBuildPipelineTests
 )
 target_link_libraries(EngineCoreBuildPipelineTests PRIVATE EngineCore)
 add_test(NAME EngineCoreBuildPipelineTests COMMAND EngineCoreBuildPipelineTests)
+
+add_executable(EngineCoreArtifactPackagingTests
+    Core/Tests/Build/ArtifactPackagingTests.cpp
+)
+target_link_libraries(EngineCoreArtifactPackagingTests PRIVATE EngineCore)
+add_test(NAME EngineCoreArtifactPackagingTests COMMAND EngineCoreArtifactPackagingTests)
