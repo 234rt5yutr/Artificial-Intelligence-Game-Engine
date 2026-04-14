@@ -16,13 +16,19 @@ enum class RuntimeFieldDomain : uint8_t {
     ECS = 0,
     UIBinding = 1,
     Animation = 2,
-    Tooling = 3
+    Tooling = 3,
+    Replication = 4,
+    RPC = 5,
+    ReplayRollback = 6
 };
 
 enum class RuntimeFieldFixKind : uint8_t {
     BindingPathCorrection = 0,
     ReflectionRouteCorrection = 1,
-    ReflectionInterfaceAliasCorrection = 2
+    ReflectionInterfaceAliasCorrection = 2,
+    ReplicationSchemaParityCorrection = 3,
+    RPCPayloadParityCorrection = 4,
+    ReplayRollbackSchemaParityCorrection = 5
 };
 
 struct RuntimeFieldFixProvenanceMetadata {
@@ -51,6 +57,13 @@ struct RuntimeFieldFixEntry {
     std::string ExpectedReflectionRoute;
     std::vector<std::string> InterfaceAliases;
     std::vector<std::string> ExpectedInterfaceAliases;
+    std::string ReplicationAuthoritativeSchema;
+    std::string ReplicationClientSchema;
+    std::string RPCCanonicalPayloadSchema;
+    std::string RPCRequestPayloadSchema;
+    std::string RPCResponsePayloadSchema;
+    std::string ReplaySchema;
+    std::string RollbackSchema;
     RuntimeFieldFixProvenanceMetadata Provenance;
 };
 
@@ -86,6 +99,12 @@ struct RuntimeFieldFixSummary {
     uint32_t BindingPathFixCount = 0;
     uint32_t ReflectionRouteFixCount = 0;
     uint32_t ReflectionInterfaceAliasFixCount = 0;
+    uint32_t ReplicationFixCount = 0;
+    uint32_t RPCFixCount = 0;
+    uint32_t ReplayRollbackFixCount = 0;
+    uint32_t ReplicationSchemaParityFixCount = 0;
+    uint32_t RPCPayloadParityFixCount = 0;
+    uint32_t ReplayRollbackSchemaParityFixCount = 0;
     uint32_t RollbackSafeFixCount = 0;
     uint32_t TotalFixCount = 0;
 };
