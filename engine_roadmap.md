@@ -437,7 +437,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 ## Phase 30: Field Integrity Remediation, Hardening & Closure (Weeks 88-92)
 
 * [ ] Step 30.1: Fix schema and contract defects discovered during Phase 29 audit.
-  * [ ] Sub-step 30.1.1: Implement `PatchFieldSchemaDefinitions()` for incorrect types, nullability flags, and required/optional mismatches. (v0.30.1.1)
+  * [x] Sub-step 30.1.1: Implement `PatchFieldSchemaDefinitions()` for incorrect types, nullability flags, and required/optional mismatches. (v0.30.1.1)
   * [ ] Sub-step 30.1.2: Implement `NormalizeFieldDefaultAndFallbackPolicies()` to remove ambiguous defaults and ensure deterministic initialization. (v0.30.1.2)
   * [ ] Sub-step 30.1.3: Implement `FixFieldSerializationMappings()` aligning runtime/editor/cooked naming, aliases, and path mappings. (v0.30.1.3)
   * [ ] Sub-step 30.1.4: Implement `VersionAndApplyFieldSchemaMigrations()` with explicit compatibility windows and rollback-safe transforms. (v0.30.1.4)
