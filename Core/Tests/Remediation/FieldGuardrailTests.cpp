@@ -32,6 +32,22 @@ Core::Remediation::FieldGuardrailEntry BuildEntry(const Core::Remediation::Field
     return entry;
 }
 
+Core::Remediation::FieldGuardrailEntry BuildRegressionEntry(const Core::Remediation::FieldGuardrailDomain domain,
+                                                            const std::string& stableFieldKey,
+                                                            const std::string& domainPair,
+                                                            const std::string& targetFieldId,
+                                                            const std::string& findingId,
+                                                            const std::string& ruleId,
+                                                            const std::string& owner,
+                                                            const std::string& suiteId,
+                                                            const std::vector<std::string>& coverageMap) {
+    Core::Remediation::FieldGuardrailEntry entry =
+        BuildEntry(domain, stableFieldKey, domainPair, targetFieldId, findingId, ruleId, owner);
+    entry.RegressionSuite.SuiteId = suiteId;
+    entry.RegressionSuite.Stage30CoverageMap = coverageMap;
+    return entry;
+}
+
 } // namespace
 
 int main() {
@@ -154,6 +170,126 @@ int main() {
             assert(second.Value.AssertionRecords[index].AssertionId == first.Value.AssertionRecords[index].AssertionId);
             assert(second.Value.AssertionRecords[index].DeterministicDigest ==
                    first.Value.AssertionRecords[index].DeterministicDigest);
+            assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId ==
+                   first.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId);
+            assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId ==
+                   first.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId);
+            assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.Owner ==
+                   first.Value.AssertionRecords[index].Taxonomy.Lineage.Owner);
+        }
+    }
+
+    {
+        FieldGuardrailRequest invalidRequest{};
+        const Result<FieldGuardrailResult> result = AddFieldContractRegressionSuites(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldGuardrailRequest unsupportedScope{};
+        unsupportedScope.Scope = "field-contract-regression-suites-v2";
+        unsupportedScope.OutputDirectory = root / "regression-unsupported";
+        unsupportedScope.RemediationBatchId = "batch-030402";
+        unsupportedScope.Entries = {BuildRegressionEntry(FieldGuardrailDomain::Runtime,
+                                                         "Runtime::Inventory::Version",
+                                                         "runtime<->persistence",
+                                                         "runtime::Inventory::Version",
+                                                         "guardrail-finding-regression-runtime",
+                                                         "FIELD_AUDIT_RULE_RUNTIME_REGRESSION_COVERAGE",
+                                                         "runtime-systems",
+                                                         "suite.stage30.contracts",
+                                                         {"30.3.1", "30.3.3"})};
+        const Result<FieldGuardrailResult> result = AddFieldContractRegressionSuites(unsupportedScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldGuardrailRequest request{};
+        request.Scope = "field-contract-regression-suites";
+        request.OutputDirectory = root / "regression-success";
+        request.RemediationBatchId = "batch-030402";
+
+        FieldGuardrailEntry correctionEntry = BuildRegressionEntry(FieldGuardrailDomain::Runtime,
+                                                                   "Runtime::Inventory::Version",
+                                                                   "runtime<->persistence",
+                                                                   "runtime::Inventory::Version",
+                                                                   "guardrail-finding-regression-runtime",
+                                                                   "FIELD_AUDIT_RULE_RUNTIME_REGRESSION_COVERAGE",
+                                                                   "runtime-systems",
+                                                                   "suite.stage30.contracts",
+                                                                   {"30.3.1", "30.3.3"});
+        correctionEntry.PropertyPath = "guardrail.regression.runtime";
+        correctionEntry.AssertionExpression = "assert(contract.version == stale)";
+        correctionEntry.ExpectedAssertionExpression = "assert(contract.version == canonical)";
+        correctionEntry.Rationale = "correct-stage30-coverage-map";
+
+        FieldGuardrailEntry registerEntry = BuildRegressionEntry(FieldGuardrailDomain::Build,
+                                                                 "Build::Manifest::Inventory::Version",
+                                                                 "build<->packaging",
+                                                                 "build::Manifest::Inventory::Version",
+                                                                 "guardrail-finding-regression-build",
+                                                                 "FIELD_AUDIT_RULE_BUILD_REGRESSION_COVERAGE",
+                                                                 "build-systems",
+                                                                 "suite.stage30.contracts",
+                                                                 {"30.3.2", "30.3.4"});
+        registerEntry.PropertyPath = "guardrail.regression.build";
+        registerEntry.AssertionExpression = "assert(manifest.contractVersion == canonical)";
+        registerEntry.ExpectedAssertionExpression = "assert(manifest.contractVersion == canonical)";
+        registerEntry.Rationale = "register-stage30-coverage-map";
+
+        request.Entries = {registerEntry, correctionEntry, correctionEntry};
+
+        const Result<FieldGuardrailResult> first = AddFieldContractRegressionSuites(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.RemediationBatchId == request.RemediationBatchId);
+        assert(first.Value.AssertionRecords.size() == 2u);
+        assert(first.Value.Summary.TotalAssertionCount == 2u);
+        assert(first.Value.Summary.RegressionSuiteCount == 1u);
+        assert(first.Value.Summary.RegressionCoverageSignalCount == 4u);
+        assert(first.Value.Summary.RegressionCoverageCorrectionCount == 1u);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        bool sawCorrection = false;
+        bool sawRegistration = false;
+        for (const FieldGuardrailRecord& record : first.Value.AssertionRecords) {
+            assert(!record.RegressionSuite.SuiteId.empty());
+            assert(!record.RegressionSuite.Stage30CoverageMap.empty());
+            assert(record.Taxonomy.Lineage.RemediationBatchId == request.RemediationBatchId);
+            assert(!record.DeterministicDigest.empty());
+            if (record.Rationale == "correct-stage30-coverage-map") {
+                sawCorrection = true;
+                assert(record.ExistingAssertionExpression == "assert(contract.version == stale)");
+                assert(record.AssertionExpression == "assert(contract.version == canonical)");
+                assert(record.RegressionSuite.Stage30CoverageMap.size() == 2u);
+                assert(record.RegressionSuite.Stage30CoverageMap[0] == "30.3.1");
+                assert(record.RegressionSuite.Stage30CoverageMap[1] == "30.3.3");
+            } else if (record.Rationale == "register-stage30-coverage-map") {
+                sawRegistration = true;
+                assert(record.ExistingAssertionExpression == "assert(manifest.contractVersion == canonical)");
+                assert(record.AssertionExpression == "assert(manifest.contractVersion == canonical)");
+                assert(record.RegressionSuite.Stage30CoverageMap.size() == 2u);
+                assert(record.RegressionSuite.Stage30CoverageMap[0] == "30.3.2");
+                assert(record.RegressionSuite.Stage30CoverageMap[1] == "30.3.4");
+            }
+        }
+        assert(sawCorrection);
+        assert(sawRegistration);
+
+        const Result<FieldGuardrailResult> second = AddFieldContractRegressionSuites(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.AssertionRecords.size() == first.Value.AssertionRecords.size());
+        for (std::size_t index = 0; index < first.Value.AssertionRecords.size(); ++index) {
+            assert(second.Value.AssertionRecords[index].AssertionId == first.Value.AssertionRecords[index].AssertionId);
+            assert(second.Value.AssertionRecords[index].DeterministicDigest ==
+                   first.Value.AssertionRecords[index].DeterministicDigest);
+            assert(second.Value.AssertionRecords[index].RegressionSuite.SuiteId ==
+                   first.Value.AssertionRecords[index].RegressionSuite.SuiteId);
+            assert(second.Value.AssertionRecords[index].RegressionSuite.Stage30CoverageMap ==
+                   first.Value.AssertionRecords[index].RegressionSuite.Stage30CoverageMap);
             assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId ==
                    first.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId);
             assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId ==

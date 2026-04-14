@@ -453,7 +453,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 30.3.4: Implement `FixStoreAndDedicatedServerFieldContracts()` for release metadata, artifact manifests, and deployment descriptors. (v0.30.3.4)
 * [ ] Step 30.4: Add permanent guardrails to prevent future field regressions.
   * [x] Sub-step 30.4.1: Implement `AddFieldInvariantAssertions()` in runtime/editor/build pipelines with explicit error taxonomies. (v0.30.4.1)
-  * [ ] Sub-step 30.4.2: Implement `AddFieldContractRegressionSuites()` spanning profiling, automation, packaging, networking, persistence, and tooling flows. (v0.30.4.2)
+  * [x] Sub-step 30.4.2: Implement `AddFieldContractRegressionSuites()` spanning profiling, automation, packaging, networking, persistence, and tooling flows. (v0.30.4.2)
   * [ ] Sub-step 30.4.3: Implement `AddFieldAuditGateToBuildPipeline()` that blocks release lanes on unresolved critical/high field defects. (v0.30.4.3)
   * [ ] Sub-step 30.4.4: Implement `AddFieldDriftMonitoringAndAlerting()` for schema drift detection between commits and build artifacts. (v0.30.4.4)
 * [ ] Step 30.5: Close remediation with independent verification and governance sign-off.

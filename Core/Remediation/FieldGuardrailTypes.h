@@ -32,6 +32,11 @@ struct FieldGuardrailTaxonomyMetadata {
     FieldGuardrailLineageMetadata Lineage;
 };
 
+struct FieldGuardrailRegressionSuiteMetadata {
+    std::string SuiteId;
+    std::vector<std::string> Stage30CoverageMap;
+};
+
 struct FieldGuardrailEntry {
     FieldGuardrailDomain Domain = FieldGuardrailDomain::Runtime;
     std::string StableFieldKey;
@@ -42,6 +47,7 @@ struct FieldGuardrailEntry {
     std::string ExpectedAssertionExpression;
     std::string Rationale;
     FieldGuardrailTaxonomyMetadata Taxonomy;
+    FieldGuardrailRegressionSuiteMetadata RegressionSuite;
 };
 
 struct FieldGuardrailRequest {
@@ -62,6 +68,7 @@ struct FieldGuardrailRecord {
     std::string AssertionExpression;
     std::string Rationale;
     FieldGuardrailTaxonomyMetadata Taxonomy;
+    FieldGuardrailRegressionSuiteMetadata RegressionSuite;
     std::string DeterministicDigest;
 };
 
@@ -70,6 +77,9 @@ struct FieldGuardrailSummary {
     uint32_t EditorAssertionCount = 0;
     uint32_t BuildAssertionCount = 0;
     uint32_t TotalAssertionCount = 0;
+    uint32_t RegressionSuiteCount = 0;
+    uint32_t RegressionCoverageSignalCount = 0;
+    uint32_t RegressionCoverageCorrectionCount = 0;
 };
 
 struct FieldGuardrailResult {

@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Core::Remediation {
@@ -59,6 +60,25 @@ namespace {
            !entry.Taxonomy.Lineage.Owner.empty();
 }
 
+[[nodiscard]] std::vector<std::string> NormalizeCoverageMap(const std::vector<std::string>& coverageMap) {
+    std::set<std::string> normalized;
+    for (const std::string& stageFixId : coverageMap) {
+        if (!stageFixId.empty()) {
+            normalized.emplace(stageFixId);
+        }
+    }
+    return {normalized.begin(), normalized.end()};
+}
+
+[[nodiscard]] bool IsValidRegressionEntry(const FieldGuardrailEntry& entry) {
+    if (entry.RegressionSuite.SuiteId.empty()) {
+        return false;
+    }
+
+    const std::vector<std::string> normalizedCoverageMap = NormalizeCoverageMap(entry.RegressionSuite.Stage30CoverageMap);
+    return !normalizedCoverageMap.empty();
+}
+
 [[nodiscard]] std::string BuildAssertionId(const FieldGuardrailRecord& record) {
     std::string idMaterial;
     idMaterial.reserve(384u);
@@ -74,6 +94,13 @@ namespace {
     idMaterial.append(record.AssertionExpression);
     idMaterial.push_back('|');
     idMaterial.append(record.Taxonomy.TaxonomyId);
+    idMaterial.push_back('|');
+    idMaterial.append(record.RegressionSuite.SuiteId);
+    idMaterial.push_back('|');
+    for (const std::string& stageFixId : record.RegressionSuite.Stage30CoverageMap) {
+        idMaterial.append(stageFixId);
+        idMaterial.push_back(',');
+    }
     return HashToHex(HashString(idMaterial));
 }
 
@@ -111,6 +138,13 @@ namespace {
     digestMaterial.append(record.Taxonomy.Lineage.Owner);
     digestMaterial.push_back('|');
     digestMaterial.append(record.Taxonomy.Lineage.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.RegressionSuite.SuiteId);
+    digestMaterial.push_back('|');
+    for (const std::string& stageFixId : record.RegressionSuite.Stage30CoverageMap) {
+        digestMaterial.append(stageFixId);
+        digestMaterial.push_back(',');
+    }
     return HashToHex(HashString(digestMaterial));
 }
 
@@ -128,6 +162,12 @@ namespace {
     digestMaterial.append(std::to_string(result.Summary.BuildAssertionCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.TotalAssertionCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.RegressionSuiteCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.RegressionCoverageSignalCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.RegressionCoverageCorrectionCount));
     digestMaterial.push_back('\n');
 
     for (const FieldGuardrailRecord& record : result.AssertionRecords) {
@@ -161,6 +201,15 @@ void SortAssertionRecords(std::vector<FieldGuardrailRecord>& records) {
         if (left.AssertionExpression != right.AssertionExpression) {
             return left.AssertionExpression < right.AssertionExpression;
         }
+        if (left.RegressionSuite.SuiteId != right.RegressionSuite.SuiteId) {
+            return left.RegressionSuite.SuiteId < right.RegressionSuite.SuiteId;
+        }
+        if (left.RegressionSuite.Stage30CoverageMap != right.RegressionSuite.Stage30CoverageMap) {
+            return std::lexicographical_compare(left.RegressionSuite.Stage30CoverageMap.begin(),
+                                                left.RegressionSuite.Stage30CoverageMap.end(),
+                                                right.RegressionSuite.Stage30CoverageMap.begin(),
+                                                right.RegressionSuite.Stage30CoverageMap.end());
+        }
         return left.Taxonomy.Lineage.FindingId < right.Taxonomy.Lineage.FindingId;
     });
 }
@@ -182,20 +231,55 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
     return assertionExpression;
 }
 
-} // namespace
+[[nodiscard]] std::string BuildDedupeKey(const FieldGuardrailEntry& entry,
+                                         const std::vector<std::string>& normalizedCoverageMap,
+                                         const bool includeRegressionSuite) {
+    std::string dedupeKey;
+    dedupeKey.reserve(640u);
+    dedupeKey.append(entry.Taxonomy.Lineage.FindingId);
+    dedupeKey.push_back('|');
+    dedupeKey.append(entry.Taxonomy.Lineage.RuleId);
+    dedupeKey.push_back('|');
+    dedupeKey.append(entry.Taxonomy.Lineage.Owner);
+    dedupeKey.push_back('|');
+    dedupeKey.append(std::to_string(static_cast<uint32_t>(entry.Domain)));
+    dedupeKey.push_back('|');
+    dedupeKey.append(entry.TargetFieldId);
+    dedupeKey.push_back('|');
+    dedupeKey.append(entry.PropertyPath);
+    dedupeKey.push_back('|');
+    dedupeKey.append(entry.ExpectedAssertionExpression);
+    dedupeKey.push_back('|');
+    dedupeKey.append(entry.Taxonomy.TaxonomyId);
+    if (includeRegressionSuite) {
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.RegressionSuite.SuiteId);
+        dedupeKey.push_back('|');
+        for (const std::string& stageFixId : normalizedCoverageMap) {
+            dedupeKey.append(stageFixId);
+            dedupeKey.push_back(',');
+        }
+    }
+    return dedupeKey;
+}
 
-Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailRequest& request) {
+[[nodiscard]] Result<FieldGuardrailResult> BuildGuardrailResult(const FieldGuardrailRequest& request,
+                                                                const std::string_view expectedScope,
+                                                                const bool requireRegressionSuite) {
     if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
         request.Entries.empty()) {
         return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
     }
 
-    if (request.Scope != "field-invariant-assertions") {
+    if (request.Scope != expectedScope) {
         return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
     }
 
     for (const FieldGuardrailEntry& entry : request.Entries) {
         if (!IsValidEntry(entry)) {
+            return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+        if (requireRegressionSuite && !IsValidRegressionEntry(entry)) {
             return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
         }
     }
@@ -207,27 +291,12 @@ Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailReq
     std::vector<FieldGuardrailRecord> assertionRecords;
     std::set<std::string> seenAssertionKeys;
     for (const FieldGuardrailEntry& entry : request.Entries) {
-        std::string dedupeKey;
-        dedupeKey.reserve(512u);
-        dedupeKey.append(entry.Taxonomy.Lineage.FindingId);
-        dedupeKey.push_back('|');
-        dedupeKey.append(entry.Taxonomy.Lineage.RuleId);
-        dedupeKey.push_back('|');
-        dedupeKey.append(entry.Taxonomy.Lineage.Owner);
-        dedupeKey.push_back('|');
-        dedupeKey.append(std::to_string(static_cast<uint32_t>(entry.Domain)));
-        dedupeKey.push_back('|');
-        dedupeKey.append(entry.TargetFieldId);
-        dedupeKey.push_back('|');
-        dedupeKey.append(entry.PropertyPath);
-        dedupeKey.push_back('|');
-        dedupeKey.append(entry.ExpectedAssertionExpression);
-        dedupeKey.push_back('|');
-        dedupeKey.append(entry.Taxonomy.TaxonomyId);
+        const std::vector<std::string> normalizedCoverageMap = NormalizeCoverageMap(entry.RegressionSuite.Stage30CoverageMap);
+        const std::string dedupeKey = BuildDedupeKey(entry, normalizedCoverageMap, requireRegressionSuite);
         if (seenAssertionKeys.contains(dedupeKey)) {
             continue;
         }
-        seenAssertionKeys.emplace(std::move(dedupeKey));
+        seenAssertionKeys.emplace(dedupeKey);
 
         FieldGuardrailRecord record{};
         record.Domain = entry.Domain;
@@ -237,9 +306,14 @@ Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailReq
         record.PropertyPath = entry.PropertyPath;
         record.ExistingAssertionExpression = ExistingAssertionOrUnset(entry.AssertionExpression);
         record.AssertionExpression = entry.ExpectedAssertionExpression;
-        record.Rationale = entry.Rationale.empty() ? "register-field-invariant-assertion" : entry.Rationale;
+        record.Rationale = entry.Rationale.empty()
+                               ? (requireRegressionSuite ? "register-field-contract-regression-suite"
+                                                         : "register-field-invariant-assertion")
+                               : entry.Rationale;
         record.Taxonomy = entry.Taxonomy;
         record.Taxonomy.Lineage.RemediationBatchId = request.RemediationBatchId;
+        record.RegressionSuite.SuiteId = entry.RegressionSuite.SuiteId;
+        record.RegressionSuite.Stage30CoverageMap = normalizedCoverageMap;
         record.AssertionId = BuildAssertionId(record);
         record.DeterministicDigest = ComputeRecordDigest(record);
         assertionRecords.push_back(std::move(record));
@@ -252,12 +326,33 @@ Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailReq
     result.OutputDirectory = request.OutputDirectory;
     result.RemediationBatchId = request.RemediationBatchId;
     result.AssertionRecords = std::move(assertionRecords);
+
+    std::set<std::string> uniqueSuites;
     for (const FieldGuardrailRecord& record : result.AssertionRecords) {
         AddDomainCount(result.Summary, record.Domain);
         ++result.Summary.TotalAssertionCount;
+        if (!record.RegressionSuite.SuiteId.empty()) {
+            uniqueSuites.emplace(record.RegressionSuite.SuiteId);
+            result.Summary.RegressionCoverageSignalCount +=
+                static_cast<uint32_t>(record.RegressionSuite.Stage30CoverageMap.size());
+            if (record.ExistingAssertionExpression != record.AssertionExpression) {
+                ++result.Summary.RegressionCoverageCorrectionCount;
+            }
+        }
     }
+    result.Summary.RegressionSuiteCount = static_cast<uint32_t>(uniqueSuites.size());
     result.DeterministicDigest = ComputeResultDigest(result);
     return Result<FieldGuardrailResult>::Success(std::move(result));
+}
+
+} // namespace
+
+Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailRequest& request) {
+    return BuildGuardrailResult(request, "field-invariant-assertions", false);
+}
+
+Result<FieldGuardrailResult> AddFieldContractRegressionSuites(const FieldGuardrailRequest& request) {
+    return BuildGuardrailResult(request, "field-contract-regression-suites", true);
 }
 
 } // namespace Core::Remediation
