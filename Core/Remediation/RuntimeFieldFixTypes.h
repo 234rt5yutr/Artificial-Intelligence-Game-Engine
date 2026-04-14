@@ -28,7 +28,10 @@ enum class RuntimeFieldFixKind : uint8_t {
     ReflectionInterfaceAliasCorrection = 2,
     ReplicationSchemaParityCorrection = 3,
     RPCPayloadParityCorrection = 4,
-    ReplayRollbackSchemaParityCorrection = 5
+    ReplayRollbackSchemaParityCorrection = 5,
+    FramePhaseOrderingCorrection = 6,
+    JobBoundaryOrderingCorrection = 7,
+    SerializationCheckpointOrderingCorrection = 8
 };
 
 struct RuntimeFieldFixProvenanceMetadata {
@@ -64,6 +67,12 @@ struct RuntimeFieldFixEntry {
     std::string RPCResponsePayloadSchema;
     std::string ReplaySchema;
     std::string RollbackSchema;
+    std::string FramePhaseOrdering;
+    std::string ExpectedFramePhaseOrdering;
+    std::string JobBoundaryOrdering;
+    std::string ExpectedJobBoundaryOrdering;
+    std::string SerializationCheckpointOrdering;
+    std::string ExpectedSerializationCheckpointOrdering;
     RuntimeFieldFixProvenanceMetadata Provenance;
 };
 
@@ -105,6 +114,9 @@ struct RuntimeFieldFixSummary {
     uint32_t ReplicationSchemaParityFixCount = 0;
     uint32_t RPCPayloadParityFixCount = 0;
     uint32_t ReplayRollbackSchemaParityFixCount = 0;
+    uint32_t FramePhaseOrderingFixCount = 0;
+    uint32_t JobBoundaryOrderingFixCount = 0;
+    uint32_t SerializationCheckpointOrderingFixCount = 0;
     uint32_t RollbackSafeFixCount = 0;
     uint32_t TotalFixCount = 0;
 };

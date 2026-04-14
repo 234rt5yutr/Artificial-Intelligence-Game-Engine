@@ -56,6 +56,13 @@ int main() {
     }
 
     {
+        RuntimeFieldFixRequest invalidRequest{};
+        const Result<RuntimeFieldFixResult> result = FixFieldUpdateOrderingForDeterminism(invalidRequest);
+        REQUIRE_OR_FAIL(!result.Ok);
+        REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
         RuntimeFieldFixRequest unsupportedScopeRequest{};
         unsupportedScopeRequest.Scope = "runtime-field-routes-v2";
         unsupportedScopeRequest.OutputDirectory = root / "unsupported";
@@ -328,6 +335,120 @@ int main() {
         REQUIRE_OR_FAIL(sawReplayRollbackFix);
 
         const Result<RuntimeFieldFixResult> second = FixReplicationRPCAndRollbackFieldParity(request);
+        REQUIRE_OR_FAIL(second.Ok);
+        REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
+        REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        REQUIRE_OR_FAIL(second.Value.FixRecords.size() == first.Value.FixRecords.size());
+        for (std::size_t index = 0; index < first.Value.FixRecords.size(); ++index) {
+            REQUIRE_OR_FAIL(second.Value.FixRecords[index].FixId == first.Value.FixRecords[index].FixId);
+            REQUIRE_OR_FAIL(second.Value.FixRecords[index].DeterministicDigest ==
+                            first.Value.FixRecords[index].DeterministicDigest);
+            REQUIRE_OR_FAIL(second.Value.FixRecords[index].Rollback.RollbackCheckpointId ==
+                            first.Value.FixRecords[index].Rollback.RollbackCheckpointId);
+        }
+    }
+
+    {
+        RuntimeFieldFixRequest request{};
+        request.Scope = "runtime-ordering-determinism";
+        request.OutputDirectory = root / "ordering-success";
+        request.RemediationBatchId = "batch-030303";
+        request.RollbackManifestPath = request.OutputDirectory / "rollback-runtime-ordering-determinism.json";
+
+        RuntimeFieldFixEntry framePhaseEntry = BuildEntry(RuntimeFieldDomain::ECS,
+                                                          "ECS::Simulation::PlayerState::UpdateOrder",
+                                                          "ecs<->schedule<->serialization",
+                                                          "ecs::simulation::PlayerState::UpdateOrder",
+                                                          "runtime-finding-ordering-frame",
+                                                          "simulation-runtime");
+        framePhaseEntry.FramePhaseOrdering = "Input>PostPhysics>PrePhysics>Render";
+        framePhaseEntry.ExpectedFramePhaseOrdering = "Input>PrePhysics>PostPhysics>Render";
+
+        RuntimeFieldFixEntry jobBoundaryEntry = BuildEntry(RuntimeFieldDomain::Replication,
+                                                           "Net::Jobs::StateReplicate::DispatchOrder",
+                                                           "job-system<->replication",
+                                                           "net::jobs::StateReplicate::DispatchOrder",
+                                                           "runtime-finding-ordering-job",
+                                                           "simulation-runtime");
+        jobBoundaryEntry.JobBoundaryOrdering = "CollectDiffs>ApplyRollback>Serialize";
+        jobBoundaryEntry.ExpectedJobBoundaryOrdering = "ApplyRollback>CollectDiffs>Serialize";
+
+        RuntimeFieldFixEntry checkpointEntry = BuildEntry(RuntimeFieldDomain::ReplayRollback,
+                                                          "Replay::Checkpoint::EntityState::Order",
+                                                          "replay<->rollback<->serialization",
+                                                          "replay::checkpoint::EntityState::Order",
+                                                          "runtime-finding-ordering-checkpoint",
+                                                          "simulation-runtime");
+        checkpointEntry.SerializationCheckpointOrdering = "WriteMetadata>WriteEntities>WriteHeader";
+        checkpointEntry.ExpectedSerializationCheckpointOrdering = "WriteHeader>WriteMetadata>WriteEntities";
+
+        RuntimeFieldFixEntry duplicateFramePhaseEntry = framePhaseEntry;
+        request.Entries = {checkpointEntry, duplicateFramePhaseEntry, framePhaseEntry, jobBoundaryEntry};
+
+        const Result<RuntimeFieldFixResult> first = FixFieldUpdateOrderingForDeterminism(request);
+        REQUIRE_OR_FAIL(first.Ok);
+        REQUIRE_OR_FAIL(first.Value.Scope == request.Scope);
+        REQUIRE_OR_FAIL(first.Value.RemediationBatchId == request.RemediationBatchId);
+        REQUIRE_OR_FAIL(first.Value.RollbackManifestPath == request.RollbackManifestPath);
+        REQUIRE_OR_FAIL(first.Value.Summary.ECSFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.ReplicationFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.ReplayRollbackFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.FramePhaseOrderingFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.JobBoundaryOrderingFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.SerializationCheckpointOrderingFixCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.RollbackSafeFixCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.TotalFixCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.FixRecords.size() == 3u);
+        REQUIRE_OR_FAIL(!first.Value.RollbackManifestDigest.empty());
+        REQUIRE_OR_FAIL(!first.Value.DeterministicDigest.empty());
+
+        bool sawFramePhaseFix = false;
+        bool sawJobBoundaryFix = false;
+        bool sawCheckpointFix = false;
+        for (const RuntimeFieldFixRecord& record : first.Value.FixRecords) {
+            REQUIRE_OR_FAIL(!record.FixId.empty());
+            REQUIRE_OR_FAIL(!record.StableFieldKey.empty());
+            REQUIRE_OR_FAIL(!record.TargetFieldId.empty());
+            REQUIRE_OR_FAIL(!record.PropertyPath.empty());
+            REQUIRE_OR_FAIL(!record.ExistingValue.empty());
+            REQUIRE_OR_FAIL(!record.ReplacementValue.empty());
+            REQUIRE_OR_FAIL(!record.Rationale.empty());
+            REQUIRE_OR_FAIL(!record.DeterministicDigest.empty());
+            REQUIRE_OR_FAIL(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+            REQUIRE_OR_FAIL(record.Rollback.RollbackRequired);
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackCheckpointId.empty());
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackPropertyPath.empty());
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackManifestPath.empty());
+
+            if (record.TargetFieldId == "ecs::simulation::PlayerState::UpdateOrder" &&
+                record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
+                sawFramePhaseFix = true;
+                REQUIRE_OR_FAIL(record.PropertyPath == "ordering.framePhases");
+                REQUIRE_OR_FAIL(record.ExistingValue == "Input>PostPhysics>PrePhysics>Render");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "Input>PrePhysics>PostPhysics>Render");
+            }
+
+            if (record.TargetFieldId == "net::jobs::StateReplicate::DispatchOrder" &&
+                record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
+                sawJobBoundaryFix = true;
+                REQUIRE_OR_FAIL(record.PropertyPath == "ordering.jobBoundaries");
+                REQUIRE_OR_FAIL(record.ExistingValue == "CollectDiffs>ApplyRollback>Serialize");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "ApplyRollback>CollectDiffs>Serialize");
+            }
+
+            if (record.TargetFieldId == "replay::checkpoint::EntityState::Order" &&
+                record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
+                sawCheckpointFix = true;
+                REQUIRE_OR_FAIL(record.PropertyPath == "ordering.serializationCheckpoints");
+                REQUIRE_OR_FAIL(record.ExistingValue == "WriteMetadata>WriteEntities>WriteHeader");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "WriteHeader>WriteMetadata>WriteEntities");
+            }
+        }
+        REQUIRE_OR_FAIL(sawFramePhaseFix);
+        REQUIRE_OR_FAIL(sawJobBoundaryFix);
+        REQUIRE_OR_FAIL(sawCheckpointFix);
+
+        const Result<RuntimeFieldFixResult> second = FixFieldUpdateOrderingForDeterminism(request);
         REQUIRE_OR_FAIL(second.Ok);
         REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
         REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);

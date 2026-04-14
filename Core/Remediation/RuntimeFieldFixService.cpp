@@ -121,6 +121,21 @@ namespace {
     return false;
 }
 
+[[nodiscard]] bool IsValidDeterminismEntry(const RuntimeFieldFixEntry& entry) {
+    if (entry.StableFieldKey.empty() || entry.DomainPair.empty() || entry.TargetFieldId.empty()) {
+        return false;
+    }
+    if (entry.Provenance.FindingId.empty() || entry.Provenance.RuleId.empty() || entry.Provenance.Owner.empty()) {
+        return false;
+    }
+
+    const bool hasFramePhaseSignal = !entry.FramePhaseOrdering.empty() || !entry.ExpectedFramePhaseOrdering.empty();
+    const bool hasJobBoundarySignal = !entry.JobBoundaryOrdering.empty() || !entry.ExpectedJobBoundaryOrdering.empty();
+    const bool hasCheckpointSignal =
+        !entry.SerializationCheckpointOrdering.empty() || !entry.ExpectedSerializationCheckpointOrdering.empty();
+    return hasFramePhaseSignal || hasJobBoundarySignal || hasCheckpointSignal;
+}
+
 [[nodiscard]] std::string BuildFixId(const RuntimeFieldFixRecord& record) {
     std::string idMaterial;
     idMaterial.reserve(320u);
@@ -255,6 +270,12 @@ namespace {
     digestMaterial.append(std::to_string(result.Summary.RPCPayloadParityFixCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.ReplayRollbackSchemaParityFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.FramePhaseOrderingFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.JobBoundaryOrderingFixCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.SerializationCheckpointOrderingFixCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RollbackSafeFixCount));
     digestMaterial.push_back('|');
@@ -433,6 +454,12 @@ Result<RuntimeFieldFixResult> FixRuntimeFieldBindingAndReflectionRoutes(const Ru
             ++result.Summary.RPCPayloadParityFixCount;
         } else if (record.FixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
             ++result.Summary.ReplayRollbackSchemaParityFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
+            ++result.Summary.FramePhaseOrderingFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
+            ++result.Summary.JobBoundaryOrderingFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
+            ++result.Summary.SerializationCheckpointOrderingFixCount;
         }
 
         if (record.Rollback.RollbackRequired) {
@@ -586,6 +613,160 @@ Result<RuntimeFieldFixResult> FixReplicationRPCAndRollbackFieldParity(const Runt
             ++result.Summary.RPCPayloadParityFixCount;
         } else if (record.FixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
             ++result.Summary.ReplayRollbackSchemaParityFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
+            ++result.Summary.FramePhaseOrderingFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
+            ++result.Summary.JobBoundaryOrderingFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
+            ++result.Summary.SerializationCheckpointOrderingFixCount;
+        }
+
+        if (record.Rollback.RollbackRequired) {
+            ++result.Summary.RollbackSafeFixCount;
+        }
+    }
+
+    result.Summary.TotalFixCount = static_cast<uint32_t>(result.FixRecords.size());
+    result.RollbackManifestDigest = ComputeRollbackManifestDigest(result);
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<RuntimeFieldFixResult>::Success(std::move(result));
+}
+
+Result<RuntimeFieldFixResult> FixFieldUpdateOrderingForDeterminism(const RuntimeFieldFixRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.RollbackManifestPath.empty() || request.Entries.empty()) {
+        return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "runtime-ordering-determinism") {
+        return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const RuntimeFieldFixEntry& entry : request.Entries) {
+        if (!IsValidDeterminismEntry(entry)) {
+            return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<RuntimeFieldFixResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<RuntimeFieldFixRecord> fixRecords;
+    std::map<std::string, bool> seenFixKeys;
+
+    for (const RuntimeFieldFixEntry& entry : request.Entries) {
+        auto emitFix = [&](const RuntimeFieldFixKind fixKind,
+                           const std::string& propertyPath,
+                           const std::string& existingValue,
+                           const std::string& replacementValue,
+                           const std::string& rationale) {
+            std::string dedupeKey;
+            dedupeKey.reserve(288u);
+            dedupeKey.append(entry.Provenance.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.TargetFieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(fixKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenFixKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenFixKeys.emplace(dedupeKey, true);
+
+            RuntimeFieldFixRecord record{};
+            record.Domain = entry.Domain;
+            record.FixKind = fixKind;
+            record.StableFieldKey = entry.StableFieldKey;
+            record.DomainPair = entry.DomainPair;
+            record.TargetFieldId = entry.TargetFieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.Rationale = rationale;
+            record.Provenance = entry.Provenance;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.Rollback.RollbackPropertyPath = propertyPath;
+            record.Rollback.RollbackValue = existingValue;
+            record.Rollback.RollbackManifestPath = request.RollbackManifestPath.generic_string();
+            record.FixId = BuildFixId(record);
+            record.Rollback.RollbackCheckpointId = BuildRollbackCheckpointId(record);
+            record.DeterministicDigest = ComputeFixRecordDigest(record);
+            fixRecords.push_back(std::move(record));
+        };
+
+        if (entry.FramePhaseOrdering != entry.ExpectedFramePhaseOrdering) {
+            emitFix(RuntimeFieldFixKind::FramePhaseOrderingCorrection,
+                    "ordering.framePhases",
+                    AsExistingValue(entry.FramePhaseOrdering),
+                    AsExistingValue(entry.ExpectedFramePhaseOrdering),
+                    "align-frame-phase-ordering-with-deterministic-runtime-schedule");
+        }
+
+        if (entry.JobBoundaryOrdering != entry.ExpectedJobBoundaryOrdering) {
+            emitFix(RuntimeFieldFixKind::JobBoundaryOrderingCorrection,
+                    "ordering.jobBoundaries",
+                    AsExistingValue(entry.JobBoundaryOrdering),
+                    AsExistingValue(entry.ExpectedJobBoundaryOrdering),
+                    "align-job-boundary-ordering-with-deterministic-runtime-schedule");
+        }
+
+        if (entry.SerializationCheckpointOrdering != entry.ExpectedSerializationCheckpointOrdering) {
+            emitFix(RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection,
+                    "ordering.serializationCheckpoints",
+                    AsExistingValue(entry.SerializationCheckpointOrdering),
+                    AsExistingValue(entry.ExpectedSerializationCheckpointOrdering),
+                    "align-serialization-checkpoint-ordering-with-deterministic-runtime-schedule");
+        }
+    }
+
+    SortFixRecords(fixRecords);
+
+    RuntimeFieldFixResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.RollbackManifestPath = request.RollbackManifestPath;
+    result.FixRecords = std::move(fixRecords);
+
+    for (const RuntimeFieldFixRecord& record : result.FixRecords) {
+        if (record.Domain == RuntimeFieldDomain::ECS) {
+            ++result.Summary.ECSFixCount;
+        } else if (record.Domain == RuntimeFieldDomain::UIBinding) {
+            ++result.Summary.UIBindingFixCount;
+        } else if (record.Domain == RuntimeFieldDomain::Animation) {
+            ++result.Summary.AnimationFixCount;
+        } else if (record.Domain == RuntimeFieldDomain::Tooling) {
+            ++result.Summary.ToolingFixCount;
+        } else if (record.Domain == RuntimeFieldDomain::Replication) {
+            ++result.Summary.ReplicationFixCount;
+        } else if (record.Domain == RuntimeFieldDomain::RPC) {
+            ++result.Summary.RPCFixCount;
+        } else if (record.Domain == RuntimeFieldDomain::ReplayRollback) {
+            ++result.Summary.ReplayRollbackFixCount;
+        }
+
+        if (record.FixKind == RuntimeFieldFixKind::BindingPathCorrection) {
+            ++result.Summary.BindingPathFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionRouteCorrection) {
+            ++result.Summary.ReflectionRouteFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::ReflectionInterfaceAliasCorrection) {
+            ++result.Summary.ReflectionInterfaceAliasFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::ReplicationSchemaParityCorrection) {
+            ++result.Summary.ReplicationSchemaParityFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::RPCPayloadParityCorrection) {
+            ++result.Summary.RPCPayloadParityFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::ReplayRollbackSchemaParityCorrection) {
+            ++result.Summary.ReplayRollbackSchemaParityFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::FramePhaseOrderingCorrection) {
+            ++result.Summary.FramePhaseOrderingFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::JobBoundaryOrderingCorrection) {
+            ++result.Summary.JobBoundaryOrderingFixCount;
+        } else if (record.FixKind == RuntimeFieldFixKind::SerializationCheckpointOrderingCorrection) {
+            ++result.Summary.SerializationCheckpointOrderingFixCount;
         }
 
         if (record.Rollback.RollbackRequired) {
