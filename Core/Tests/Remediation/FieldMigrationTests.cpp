@@ -56,6 +56,25 @@ Core::Remediation::FieldMigrationEntry BuildUIEntry(
     return entry;
 }
 
+Core::Remediation::FieldMigrationEntry BuildAddressableEntry(
+    const std::string& assetId,
+    const Core::Remediation::FieldMigrationAssetKind assetKind,
+    const std::string& fieldId,
+    const std::string& findingId,
+    const std::string& owner) {
+    Core::Remediation::FieldMigrationEntry entry{};
+    entry.AssetId = assetId;
+    entry.AssetKind = assetKind;
+    entry.StableFieldKey = "Addressable::Parity";
+    entry.DomainPair = "catalog<->bundle<->build";
+    entry.FieldId = fieldId;
+    entry.FieldValue = "configured";
+    entry.Provenance.FindingId = findingId;
+    entry.Provenance.RuleId = "FIELD_AUDIT_RULE_ADDRESSABLE_BUNDLE_BUILD_DRIFT";
+    entry.Provenance.Owner = owner;
+    return entry;
+}
+
 } // namespace
 
 #define REQUIRE_OR_FAIL(condition) \
@@ -194,6 +213,160 @@ int main() {
                    first.Value.MigrationRecords[index].DeterministicDigest);
             REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].Rollback.RollbackCheckpointId ==
                    first.Value.MigrationRecords[index].Rollback.RollbackCheckpointId);
+        }
+    }
+
+    {
+        FieldMigrationRequest invalidRequest{};
+        const Result<FieldMigrationResult> result = MigrateAddressableBundleAndBuildManifestFieldData(invalidRequest);
+        REQUIRE_OR_FAIL(!result.Ok);
+        REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldMigrationRequest request{};
+        request.Scope = "addressable-bundle-build-manifest-data";
+        request.OutputDirectory = root / "addressable-bundle-build-success";
+        request.RemediationBatchId = "batch-030203";
+        request.RollbackManifestPath = request.OutputDirectory / "rollback-addressable-bundle-build.json";
+
+        FieldMigrationEntry catalogEntry = BuildAddressableEntry("catalog://main",
+                                                                 FieldMigrationAssetKind::AddressableCatalog,
+                                                                 "catalog::main::player",
+                                                                 "finding-abm-a",
+                                                                 "asset-pipeline");
+        catalogEntry.CatalogAssetKey = "assets/player.prefab";
+        catalogEntry.ExpectedCatalogAssetKey = "assets/player";
+        catalogEntry.CatalogAddress = "characters/player-v1";
+        catalogEntry.ExpectedCatalogAddress = "characters/player";
+        catalogEntry.ManifestCatalogKey = "catalog-main-legacy";
+        catalogEntry.ExpectedManifestCatalogKey = "catalog-main";
+
+        FieldMigrationEntry bundleEntry = BuildAddressableEntry("bundle://characters/player",
+                                                                FieldMigrationAssetKind::AssetBundle,
+                                                                "bundle::characters::player",
+                                                                "finding-abm-b",
+                                                                "build-pipeline");
+        bundleEntry.BundleId = "bundle-player-legacy";
+        bundleEntry.ExpectedBundleId = "bundle-player";
+        bundleEntry.BundleHash = "hash-001";
+        bundleEntry.ExpectedBundleHash = "hash-101";
+        bundleEntry.BundleReference = "bundle://legacy/player";
+        bundleEntry.ExpectedBundleReference = "bundle://characters/player";
+        bundleEntry.ManifestBundleId = "bundle-player-legacy";
+        bundleEntry.ExpectedManifestBundleId = "bundle-player";
+
+        FieldMigrationEntry buildManifestEntry = BuildAddressableEntry("build-manifest://windows",
+                                                                       FieldMigrationAssetKind::BuildManifest,
+                                                                       "build-manifest::windows::default",
+                                                                       "finding-abm-c",
+                                                                       "release-engineering");
+        buildManifestEntry.BuildProfile = "debug";
+        buildManifestEntry.ExpectedBuildProfile = "release";
+        buildManifestEntry.BuildTarget = "win64-dev";
+        buildManifestEntry.ExpectedBuildTarget = "win64";
+
+        request.Entries = {catalogEntry, catalogEntry, bundleEntry, buildManifestEntry};
+
+        const Result<FieldMigrationResult> first = MigrateAddressableBundleAndBuildManifestFieldData(request);
+        REQUIRE_OR_FAIL(first.Ok);
+        REQUIRE_OR_FAIL(first.Value.Scope == request.Scope);
+        REQUIRE_OR_FAIL(first.Value.Summary.AddressableCatalogMigrationCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.AssetBundleMigrationCount == 4u);
+        REQUIRE_OR_FAIL(first.Value.Summary.BuildManifestMigrationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.CatalogParityNormalizationCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.BundleParityNormalizationCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.BuildProfileTargetNormalizationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.ManifestLinkageNormalizationCount == 1u);
+        REQUIRE_OR_FAIL(first.Value.Summary.TotalMigrationCount == 9u);
+        REQUIRE_OR_FAIL(first.Value.Summary.RollbackSafeMigrationCount == first.Value.Summary.TotalMigrationCount);
+        REQUIRE_OR_FAIL(first.Value.MigrationRecords.size() == 9u);
+        REQUIRE_OR_FAIL(!first.Value.RollbackManifestDigest.empty());
+        REQUIRE_OR_FAIL(!first.Value.DeterministicDigest.empty());
+
+        bool sawCatalogAssetKey = false;
+        bool sawCatalogAddress = false;
+        bool sawManifestCatalogLink = false;
+        bool sawBundleId = false;
+        bool sawBundleHash = false;
+        bool sawBundleReference = false;
+        bool sawManifestBundleLink = false;
+        bool sawBuildProfile = false;
+        bool sawBuildTarget = false;
+        for (const FieldMigrationRecord& record : first.Value.MigrationRecords) {
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackCheckpointId.empty());
+            REQUIRE_OR_FAIL(!record.DeterministicDigest.empty());
+            REQUIRE_OR_FAIL(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+
+            if (record.PropertyPath == "addressables.catalog.asset-key") {
+                sawCatalogAssetKey = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::CatalogParityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "assets/player.prefab");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "assets/player");
+            } else if (record.PropertyPath == "addressables.catalog.address") {
+                sawCatalogAddress = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::CatalogParityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "characters/player-v1");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "characters/player");
+            } else if (record.PropertyPath == "build.manifest.catalog-link.catalog-key") {
+                sawManifestCatalogLink = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::CatalogParityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "catalog-main-legacy");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "catalog-main");
+            } else if (record.PropertyPath == "addressables.bundle.id") {
+                sawBundleId = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BundleParityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "bundle-player-legacy");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "bundle-player");
+            } else if (record.PropertyPath == "addressables.bundle.hash") {
+                sawBundleHash = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BundleParityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "hash-001");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "hash-101");
+            } else if (record.PropertyPath == "addressables.bundle.reference") {
+                sawBundleReference = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BundleParityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "bundle://legacy/player");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "bundle://characters/player");
+            } else if (record.PropertyPath == "build.manifest.bundle-link.bundle-id") {
+                sawManifestBundleLink = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::ManifestLinkageNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "bundle-player-legacy");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "bundle-player");
+            } else if (record.PropertyPath == "build.profile") {
+                sawBuildProfile = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BuildProfileTargetNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "debug");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "release");
+            } else if (record.PropertyPath == "build.target") {
+                sawBuildTarget = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::BuildProfileTargetNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "win64-dev");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "win64");
+            }
+        }
+
+        REQUIRE_OR_FAIL(sawCatalogAssetKey);
+        REQUIRE_OR_FAIL(sawCatalogAddress);
+        REQUIRE_OR_FAIL(sawManifestCatalogLink);
+        REQUIRE_OR_FAIL(sawBundleId);
+        REQUIRE_OR_FAIL(sawBundleHash);
+        REQUIRE_OR_FAIL(sawBundleReference);
+        REQUIRE_OR_FAIL(sawManifestBundleLink);
+        REQUIRE_OR_FAIL(sawBuildProfile);
+        REQUIRE_OR_FAIL(sawBuildTarget);
+
+        const Result<FieldMigrationResult> second = MigrateAddressableBundleAndBuildManifestFieldData(request);
+        REQUIRE_OR_FAIL(second.Ok);
+        REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
+        REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        REQUIRE_OR_FAIL(second.Value.MigrationRecords.size() == first.Value.MigrationRecords.size());
+        for (std::size_t index = 0; index < first.Value.MigrationRecords.size(); ++index) {
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].MigrationId == first.Value.MigrationRecords[index].MigrationId);
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].DeterministicDigest ==
+                            first.Value.MigrationRecords[index].DeterministicDigest);
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].Rollback.RollbackCheckpointId ==
+                            first.Value.MigrationRecords[index].Rollback.RollbackCheckpointId);
         }
     }
 

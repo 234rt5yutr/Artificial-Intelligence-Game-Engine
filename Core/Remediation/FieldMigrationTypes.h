@@ -16,7 +16,10 @@ enum class FieldMigrationAssetKind : uint8_t {
     Scene = 0,
     Prefab = 1,
     UIWidget = 2,
-    LocalizationTable = 3
+    LocalizationTable = 3,
+    AddressableCatalog = 4,
+    AssetBundle = 5,
+    BuildManifest = 6
 };
 
 enum class FieldMigrationTransformKind : uint8_t {
@@ -25,7 +28,11 @@ enum class FieldMigrationTransformKind : uint8_t {
     BindingKeyPathNormalization = 2,
     LocalizationReferenceNormalization = 3,
     LocaleSchemaNormalization = 4,
-    WidgetMetadataNormalization = 5
+    WidgetMetadataNormalization = 5,
+    CatalogParityNormalization = 6,
+    BundleParityNormalization = 7,
+    BuildProfileTargetNormalization = 8,
+    ManifestLinkageNormalization = 9
 };
 
 struct FieldMigrationProvenanceMetadata {
@@ -67,6 +74,24 @@ struct FieldMigrationEntry {
     std::string ExpectedLocaleSchemaVersion;
     std::string WidgetPresentationMode;
     std::string WidgetMetadataSpace;
+    std::string CatalogAssetKey;
+    std::string ExpectedCatalogAssetKey;
+    std::string CatalogAddress;
+    std::string ExpectedCatalogAddress;
+    std::string BundleId;
+    std::string ExpectedBundleId;
+    std::string BundleHash;
+    std::string ExpectedBundleHash;
+    std::string BundleReference;
+    std::string ExpectedBundleReference;
+    std::string BuildProfile;
+    std::string ExpectedBuildProfile;
+    std::string BuildTarget;
+    std::string ExpectedBuildTarget;
+    std::string ManifestBundleId;
+    std::string ExpectedManifestBundleId;
+    std::string ManifestCatalogKey;
+    std::string ExpectedManifestCatalogKey;
     FieldMigrationProvenanceMetadata Provenance;
 };
 
@@ -100,12 +125,19 @@ struct FieldMigrationSummary {
     uint32_t PrefabMigrationCount = 0;
     uint32_t UIWidgetMigrationCount = 0;
     uint32_t LocalizationTableMigrationCount = 0;
+    uint32_t AddressableCatalogMigrationCount = 0;
+    uint32_t AssetBundleMigrationCount = 0;
+    uint32_t BuildManifestMigrationCount = 0;
     uint32_t RequiredBackfillCount = 0;
     uint32_t GraphNormalizationCount = 0;
     uint32_t BindingNormalizationCount = 0;
     uint32_t LocalizationNormalizationCount = 0;
     uint32_t LocaleSchemaNormalizationCount = 0;
     uint32_t WidgetMetadataNormalizationCount = 0;
+    uint32_t CatalogParityNormalizationCount = 0;
+    uint32_t BundleParityNormalizationCount = 0;
+    uint32_t BuildProfileTargetNormalizationCount = 0;
+    uint32_t ManifestLinkageNormalizationCount = 0;
     uint32_t RollbackSafeMigrationCount = 0;
     uint32_t TotalMigrationCount = 0;
 };

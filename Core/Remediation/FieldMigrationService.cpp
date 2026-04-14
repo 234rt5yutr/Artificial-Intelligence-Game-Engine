@@ -221,6 +221,12 @@ namespace {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.LocalizationTableMigrationCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.AddressableCatalogMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.AssetBundleMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.BuildManifestMigrationCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RequiredBackfillCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.GraphNormalizationCount));
@@ -232,6 +238,14 @@ namespace {
     digestMaterial.append(std::to_string(result.Summary.LocaleSchemaNormalizationCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.WidgetMetadataNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.CatalogParityNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.BundleParityNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.BuildProfileTargetNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.ManifestLinkageNormalizationCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RollbackSafeMigrationCount));
     digestMaterial.push_back('|');
@@ -562,6 +576,188 @@ Result<FieldMigrationResult> MigrateUIAndLocalizationFieldData(const FieldMigrat
             ++result.Summary.LocaleSchemaNormalizationCount;
         } else if (record.TransformKind == FieldMigrationTransformKind::WidgetMetadataNormalization) {
             ++result.Summary.WidgetMetadataNormalizationCount;
+        }
+
+        if (record.Rollback.RollbackRequired) {
+            ++result.Summary.RollbackSafeMigrationCount;
+        }
+    }
+    result.Summary.TotalMigrationCount = static_cast<uint32_t>(result.MigrationRecords.size());
+    result.RollbackManifestDigest = ComputeRollbackManifestDigest(result);
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<FieldMigrationResult>::Success(std::move(result));
+}
+
+Result<FieldMigrationResult> MigrateAddressableBundleAndBuildManifestFieldData(const FieldMigrationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.RollbackManifestPath.empty() || request.Entries.empty()) {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "addressable-bundle-build-manifest-data") {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const FieldMigrationEntry& entry : request.Entries) {
+        if (!IsValidEntry(entry)) {
+            return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldMigrationRecord> migrationRecords;
+    std::set<std::string> seenMigrationKeys;
+    for (const FieldMigrationEntry& entry : request.Entries) {
+        auto emitMigration = [&](const FieldMigrationTransformKind transformKind,
+                                 const std::string& propertyPath,
+                                 const std::string& existingValue,
+                                 const std::string& replacementValue,
+                                 const std::string& graphNormalizationAction) {
+            std::string dedupeKey;
+            dedupeKey.reserve(384u);
+            dedupeKey.append(entry.Provenance.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.AssetId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.FieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(transformKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenMigrationKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenMigrationKeys.emplace(std::move(dedupeKey));
+
+            FieldMigrationRecord record{};
+            record.AssetKind = entry.AssetKind;
+            record.TransformKind = transformKind;
+            record.AssetId = entry.AssetId;
+            record.StableFieldKey = entry.StableFieldKey;
+            record.DomainPair = entry.DomainPair;
+            record.TargetFieldId = entry.FieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.GraphNormalizationAction = graphNormalizationAction;
+            record.Provenance = entry.Provenance;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.Rollback.RollbackRequired = true;
+            record.Rollback.RollbackPropertyPath = propertyPath;
+            record.Rollback.RollbackValue = existingValue;
+            record.Rollback.RollbackManifestPath = request.RollbackManifestPath.generic_string();
+            record.Rollback.RollbackCheckpointId =
+                HashToHex(HashString(request.RemediationBatchId + "|" + entry.AssetId + "|" + entry.FieldId + "|" +
+                                     propertyPath + "|" + existingValue + "|" + replacementValue));
+            record.MigrationId = BuildMigrationId(record);
+            record.DeterministicDigest = ComputeMigrationRecordDigest(record);
+            migrationRecords.push_back(std::move(record));
+        };
+
+        if (!entry.ExpectedCatalogAssetKey.empty() && entry.CatalogAssetKey != entry.ExpectedCatalogAssetKey) {
+            emitMigration(FieldMigrationTransformKind::CatalogParityNormalization,
+                          "addressables.catalog.asset-key",
+                          AsExistingValue(entry.CatalogAssetKey),
+                          entry.ExpectedCatalogAssetKey,
+                          "repair-catalog-asset-key-drift");
+        }
+
+        if (!entry.ExpectedCatalogAddress.empty() && entry.CatalogAddress != entry.ExpectedCatalogAddress) {
+            emitMigration(FieldMigrationTransformKind::CatalogParityNormalization,
+                          "addressables.catalog.address",
+                          AsExistingValue(entry.CatalogAddress),
+                          entry.ExpectedCatalogAddress,
+                          "repair-catalog-address-drift");
+        }
+
+        if (!entry.ExpectedManifestCatalogKey.empty() && entry.ManifestCatalogKey != entry.ExpectedManifestCatalogKey) {
+            emitMigration(FieldMigrationTransformKind::CatalogParityNormalization,
+                          "build.manifest.catalog-link.catalog-key",
+                          AsExistingValue(entry.ManifestCatalogKey),
+                          entry.ExpectedManifestCatalogKey,
+                          "repair-manifest-catalog-linkage-drift");
+        }
+
+        if (!entry.ExpectedBundleId.empty() && entry.BundleId != entry.ExpectedBundleId) {
+            emitMigration(FieldMigrationTransformKind::BundleParityNormalization,
+                          "addressables.bundle.id",
+                          AsExistingValue(entry.BundleId),
+                          entry.ExpectedBundleId,
+                          "repair-bundle-id-drift");
+        }
+
+        if (!entry.ExpectedBundleHash.empty() && entry.BundleHash != entry.ExpectedBundleHash) {
+            emitMigration(FieldMigrationTransformKind::BundleParityNormalization,
+                          "addressables.bundle.hash",
+                          AsExistingValue(entry.BundleHash),
+                          entry.ExpectedBundleHash,
+                          "repair-bundle-hash-drift");
+        }
+
+        if (!entry.ExpectedBundleReference.empty() && entry.BundleReference != entry.ExpectedBundleReference) {
+            emitMigration(FieldMigrationTransformKind::BundleParityNormalization,
+                          "addressables.bundle.reference",
+                          AsExistingValue(entry.BundleReference),
+                          entry.ExpectedBundleReference,
+                          "repair-bundle-reference-drift");
+        }
+
+        if (!entry.ExpectedManifestBundleId.empty() && entry.ManifestBundleId != entry.ExpectedManifestBundleId) {
+            emitMigration(FieldMigrationTransformKind::ManifestLinkageNormalization,
+                          "build.manifest.bundle-link.bundle-id",
+                          AsExistingValue(entry.ManifestBundleId),
+                          entry.ExpectedManifestBundleId,
+                          "repair-manifest-bundle-linkage-drift");
+        }
+
+        if (!entry.ExpectedBuildProfile.empty() && entry.BuildProfile != entry.ExpectedBuildProfile) {
+            emitMigration(FieldMigrationTransformKind::BuildProfileTargetNormalization,
+                          "build.profile",
+                          AsExistingValue(entry.BuildProfile),
+                          entry.ExpectedBuildProfile,
+                          "repair-build-profile-drift");
+        }
+
+        if (!entry.ExpectedBuildTarget.empty() && entry.BuildTarget != entry.ExpectedBuildTarget) {
+            emitMigration(FieldMigrationTransformKind::BuildProfileTargetNormalization,
+                          "build.target",
+                          AsExistingValue(entry.BuildTarget),
+                          entry.ExpectedBuildTarget,
+                          "repair-build-target-drift");
+        }
+    }
+
+    SortMigrationRecords(migrationRecords);
+
+    FieldMigrationResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.RollbackManifestPath = request.RollbackManifestPath;
+    result.MigrationRecords = std::move(migrationRecords);
+
+    for (const FieldMigrationRecord& record : result.MigrationRecords) {
+        if (record.AssetKind == FieldMigrationAssetKind::AddressableCatalog) {
+            ++result.Summary.AddressableCatalogMigrationCount;
+        } else if (record.AssetKind == FieldMigrationAssetKind::AssetBundle) {
+            ++result.Summary.AssetBundleMigrationCount;
+        } else if (record.AssetKind == FieldMigrationAssetKind::BuildManifest) {
+            ++result.Summary.BuildManifestMigrationCount;
+        }
+
+        if (record.TransformKind == FieldMigrationTransformKind::CatalogParityNormalization) {
+            ++result.Summary.CatalogParityNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::BundleParityNormalization) {
+            ++result.Summary.BundleParityNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::BuildProfileTargetNormalization) {
+            ++result.Summary.BuildProfileTargetNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::ManifestLinkageNormalization) {
+            ++result.Summary.ManifestLinkageNormalizationCount;
         }
 
         if (record.Rollback.RollbackRequired) {
