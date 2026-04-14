@@ -257,6 +257,9 @@ add_library(EngineCore
     Core/Remediation/FieldMigrationTypes.h
     Core/Remediation/FieldMigrationService.h
     Core/Remediation/FieldMigrationService.cpp
+    Core/Remediation/RuntimeFieldFixTypes.h
+    Core/Remediation/RuntimeFieldFixService.h
+    Core/Remediation/RuntimeFieldFixService.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -558,3 +561,9 @@ add_executable(EngineCoreFieldMigrationTests
 )
 target_link_libraries(EngineCoreFieldMigrationTests PRIVATE EngineCore)
 add_test(NAME EngineCoreFieldMigrationTests COMMAND EngineCoreFieldMigrationTests)
+
+add_executable(EngineCoreRuntimeFieldFixTests
+    Core/Tests/Remediation/RuntimeFieldFixTests.cpp
+)
+target_link_libraries(EngineCoreRuntimeFieldFixTests PRIVATE EngineCore)
+add_test(NAME EngineCoreRuntimeFieldFixTests COMMAND EngineCoreRuntimeFieldFixTests)
