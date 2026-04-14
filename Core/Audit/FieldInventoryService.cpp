@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -311,6 +312,21 @@ void SortEntries(std::vector<FieldInventoryEntry>& entries) {
     return true;
 }
 
+[[nodiscard]] std::string BuildMergeStableKey(const FieldInventoryEntry& entry) {
+    return entry.TypeName + "::" + entry.FieldPath;
+}
+
+void AddUniqueValue(std::vector<std::string>& values, const std::string& value) {
+    if (std::find(values.begin(), values.end(), value) == values.end()) {
+        values.push_back(value);
+    }
+}
+
+void SortAndDedupeStrings(std::vector<std::string>& values) {
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+}
+
 [[nodiscard]] std::string ComputeInventoryDigest(const std::vector<FieldInventoryEntry>& entries);
 
 [[nodiscard]] FieldInventorySnapshot CreateSnapshot(const FieldInventoryRequest& request, std::vector<FieldInventoryEntry>&& entries) {
@@ -345,6 +361,20 @@ void SortEntries(std::vector<FieldInventoryEntry>& entries) {
         digestMaterial.append(std::to_string(entry.SourceTrace.SourceLine));
         digestMaterial.push_back('|');
         digestMaterial.push_back(entry.Required ? '1' : '0');
+        digestMaterial.push_back('|');
+        for (std::size_t index = 0; index < entry.AliasFieldIds.size(); ++index) {
+            if (index > 0u) {
+                digestMaterial.push_back(',');
+            }
+            digestMaterial.append(entry.AliasFieldIds[index]);
+        }
+        digestMaterial.push_back('|');
+        for (std::size_t index = 0; index < entry.VersionLineage.size(); ++index) {
+            if (index > 0u) {
+                digestMaterial.push_back(',');
+            }
+            digestMaterial.append(entry.VersionLineage[index]);
+        }
         digestMaterial.push_back('\n');
     }
     return HashToHex(HashString(digestMaterial));
@@ -455,6 +485,80 @@ Result<FieldInventorySnapshot> GenerateProtocolFieldInventory(const FieldInvento
     }
 
     return Result<FieldInventorySnapshot>::Success(CreateSnapshot(request, std::move(entries)));
+}
+
+Result<FieldInventorySnapshot> MergeFieldInventorySnapshots(const MergeFieldInventoryRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.RuntimeSnapshot.Scope != "runtime" || request.SerializedSnapshot.Scope != "serialized" ||
+        request.ProtocolSnapshot.Scope != "protocol") {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (request.RuntimeSnapshot.Entries.empty() || request.SerializedSnapshot.Entries.empty() ||
+        request.ProtocolSnapshot.Entries.empty()) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    if (!ValidateEntries(request.RuntimeSnapshot.Entries) || !ValidateEntries(request.SerializedSnapshot.Entries) ||
+        !ValidateEntries(request.ProtocolSnapshot.Entries)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_INVENTORY_FAILED");
+    }
+
+    std::vector<FieldInventoryEntry> mergedEntries;
+    std::map<std::string, std::size_t> stableKeyToEntryIndex;
+
+    const auto mergeSnapshot = [&](const FieldInventorySnapshot& snapshot) {
+        std::vector<FieldInventoryEntry> orderedEntries = snapshot.Entries;
+        SortEntries(orderedEntries);
+
+        for (const FieldInventoryEntry& entry : orderedEntries) {
+            const std::string stableKey = BuildMergeStableKey(entry);
+            const auto existing = stableKeyToEntryIndex.find(stableKey);
+            if (existing == stableKeyToEntryIndex.end()) {
+                FieldInventoryEntry mergedEntry = entry;
+                mergedEntry.AliasFieldIds.clear();
+                mergedEntry.VersionLineage.clear();
+                mergedEntry.AliasFieldIds.push_back(entry.FieldId);
+                mergedEntry.VersionLineage.push_back(snapshot.Scope);
+                stableKeyToEntryIndex.emplace(stableKey, mergedEntries.size());
+                mergedEntries.push_back(std::move(mergedEntry));
+                continue;
+            }
+
+            FieldInventoryEntry& mergedEntry = mergedEntries[existing->second];
+            AddUniqueValue(mergedEntry.AliasFieldIds, entry.FieldId);
+            AddUniqueValue(mergedEntry.VersionLineage, snapshot.Scope);
+            mergedEntry.Required = mergedEntry.Required || entry.Required;
+        }
+    };
+
+    mergeSnapshot(request.RuntimeSnapshot);
+    mergeSnapshot(request.SerializedSnapshot);
+    mergeSnapshot(request.ProtocolSnapshot);
+
+    for (FieldInventoryEntry& entry : mergedEntries) {
+        AddUniqueValue(entry.AliasFieldIds, entry.FieldId);
+        SortAndDedupeStrings(entry.AliasFieldIds);
+        SortAndDedupeStrings(entry.VersionLineage);
+    }
+
+    SortEntries(mergedEntries);
+
+    if (!ValidateEntries(mergedEntries)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_INVENTORY_FAILED");
+    }
+
+    FieldInventoryRequest mergedRequest{};
+    mergedRequest.Scope = request.Scope;
+    mergedRequest.OutputDirectory = request.OutputDirectory;
+    return Result<FieldInventorySnapshot>::Success(CreateSnapshot(mergedRequest, std::move(mergedEntries)));
 }
 
 } // namespace Core::Audit

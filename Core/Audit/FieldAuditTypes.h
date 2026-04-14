@@ -26,6 +26,8 @@ struct FieldInventoryEntry {
     std::string TypeName;
     std::string FieldPath;
     bool Required = true;
+    std::vector<std::string> AliasFieldIds;
+    std::vector<std::string> VersionLineage;
     FieldSourceTraceMetadata SourceTrace;
 };
 
@@ -40,6 +42,14 @@ struct FieldInventorySnapshot {
     std::vector<std::string> Domains;
     std::vector<FieldInventoryEntry> Entries;
     std::string DeterministicDigest;
+};
+
+struct MergeFieldInventoryRequest {
+    std::string Scope = "merged";
+    std::filesystem::path OutputDirectory;
+    FieldInventorySnapshot RuntimeSnapshot;
+    FieldInventorySnapshot SerializedSnapshot;
+    FieldInventorySnapshot ProtocolSnapshot;
 };
 
 } // namespace Core::Audit

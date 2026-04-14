@@ -46,6 +46,40 @@ bool AreFieldEntriesSorted(const Core::Audit::FieldInventorySnapshot& snapshot) 
                           });
 }
 
+std::string ComposeFieldId(const std::string_view domain, const std::string_view typeName, const std::string_view fieldPath) {
+    return std::string(domain) + "::" + std::string(typeName) + "::" + std::string(fieldPath);
+}
+
+Core::Audit::FieldInventoryEntry BuildFieldEntry(const std::string_view domain,
+                                                 const std::string_view ownerSubsystem,
+                                                 const std::string_view typeName,
+                                                 const std::string_view fieldPath,
+                                                 const std::string_view collectorId) {
+    Core::Audit::FieldInventoryEntry entry{};
+    entry.Domain = domain;
+    entry.OwnerSubsystem = ownerSubsystem;
+    entry.TypeName = typeName;
+    entry.FieldPath = fieldPath;
+    entry.FieldId = ComposeFieldId(domain, typeName, fieldPath);
+    entry.Required = true;
+    entry.SourceTrace.SourceFile = "Core/Tests/Audit/FieldInventoryTests.cpp";
+    entry.SourceTrace.SourceSymbol = "BuildFieldEntry";
+    entry.SourceTrace.SourceLine = 1u;
+    entry.SourceTrace.CollectorId = collectorId;
+    return entry;
+}
+
+const Core::Audit::FieldInventoryEntry* FindEntryByStableKey(const Core::Audit::FieldInventorySnapshot& snapshot,
+                                                             const std::string_view typeName,
+                                                             const std::string_view fieldPath) {
+    for (const Core::Audit::FieldInventoryEntry& entry : snapshot.Entries) {
+        if (entry.TypeName == typeName && entry.FieldPath == fieldPath) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 int main() {
@@ -239,6 +273,115 @@ int main() {
         const Result<FieldInventorySnapshot> result = GenerateProtocolFieldInventory(invalidScope);
         assert(!result.Ok);
         assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        MergeFieldInventoryRequest invalidRequest{};
+        const Result<FieldInventorySnapshot> result = MergeFieldInventorySnapshots(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        const Result<FieldInventorySnapshot> runtime =
+            GenerateRuntimeFieldInventory(BuildValidRequest(root / "merge-runtime", "runtime"));
+        const Result<FieldInventorySnapshot> serialized =
+            GenerateSerializedFieldInventory(BuildValidRequest(root / "merge-serialized", "serialized"));
+        const Result<FieldInventorySnapshot> protocol =
+            GenerateProtocolFieldInventory(BuildValidRequest(root / "merge-protocol", "protocol"));
+        assert(runtime.Ok);
+        assert(serialized.Ok);
+        assert(protocol.Ok);
+
+        MergeFieldInventoryRequest request{};
+        request.Scope = "merged";
+        request.OutputDirectory = root / "merge-output";
+        request.RuntimeSnapshot = runtime.Value;
+        request.SerializedSnapshot = serialized.Value;
+        request.ProtocolSnapshot = protocol.Value;
+
+        const Result<FieldInventorySnapshot> merged = MergeFieldInventorySnapshots(request);
+        assert(merged.Ok);
+        assert(merged.Value.Scope == "merged");
+        assert(merged.Value.OutputDirectory == request.OutputDirectory);
+        assert(!merged.Value.Entries.empty());
+        assert(!merged.Value.DeterministicDigest.empty());
+        assert(AreFieldEntriesSorted(merged.Value));
+        assert(merged.Value.Entries.size() <=
+               (runtime.Value.Entries.size() + serialized.Value.Entries.size() + protocol.Value.Entries.size()));
+
+        const std::set<std::string> domains = CollectDomains(merged.Value);
+        assert(domains.contains("ecs"));
+        assert(domains.contains("scene"));
+        assert(domains.contains("packets"));
+    }
+
+    {
+        FieldInventorySnapshot runtimeSnapshot{};
+        runtimeSnapshot.Scope = "runtime";
+        runtimeSnapshot.OutputDirectory = root / "merge-overlap-runtime";
+        runtimeSnapshot.Entries = {
+            BuildFieldEntry("shared-runtime", "runtime-owner", "SharedType", "SharedPath", "runtime-collector"),
+            BuildFieldEntry("runtime-only", "runtime-owner", "RuntimeType", "OnlyPath", "runtime-collector")};
+
+        FieldInventorySnapshot serializedSnapshot{};
+        serializedSnapshot.Scope = "serialized";
+        serializedSnapshot.OutputDirectory = root / "merge-overlap-serialized";
+        serializedSnapshot.Entries = {
+            BuildFieldEntry("shared-serialized", "serialized-owner", "SharedType", "SharedPath", "serialized-collector")};
+
+        FieldInventorySnapshot protocolSnapshot{};
+        protocolSnapshot.Scope = "protocol";
+        protocolSnapshot.OutputDirectory = root / "merge-overlap-protocol";
+        protocolSnapshot.Entries = {
+            BuildFieldEntry("protocol-only", "protocol-owner", "ProtocolType", "OnlyPath", "protocol-collector")};
+
+        MergeFieldInventoryRequest request{};
+        request.Scope = "merged";
+        request.OutputDirectory = root / "merge-overlap-output";
+        request.RuntimeSnapshot = runtimeSnapshot;
+        request.SerializedSnapshot = serializedSnapshot;
+        request.ProtocolSnapshot = protocolSnapshot;
+
+        const Result<FieldInventorySnapshot> merged = MergeFieldInventorySnapshots(request);
+        assert(merged.Ok);
+        assert(merged.Value.Entries.size() == 3u);
+
+        const FieldInventoryEntry* sharedEntry = FindEntryByStableKey(merged.Value, "SharedType", "SharedPath");
+        if (sharedEntry == nullptr || sharedEntry->FieldId != ComposeFieldId("shared-runtime", "SharedType", "SharedPath") ||
+            sharedEntry->AliasFieldIds.size() != 2u ||
+            sharedEntry->AliasFieldIds[0] != ComposeFieldId("shared-runtime", "SharedType", "SharedPath") ||
+            sharedEntry->AliasFieldIds[1] != ComposeFieldId("shared-serialized", "SharedType", "SharedPath") ||
+            sharedEntry->VersionLineage.size() != 2u || sharedEntry->VersionLineage[0] != "runtime" ||
+            sharedEntry->VersionLineage[1] != "serialized") {
+            return 1;
+        }
+    }
+
+    {
+        const Result<FieldInventorySnapshot> runtime =
+            GenerateRuntimeFieldInventory(BuildValidRequest(root / "merge-repeat-runtime", "runtime"));
+        const Result<FieldInventorySnapshot> serialized =
+            GenerateSerializedFieldInventory(BuildValidRequest(root / "merge-repeat-serialized", "serialized"));
+        const Result<FieldInventorySnapshot> protocol =
+            GenerateProtocolFieldInventory(BuildValidRequest(root / "merge-repeat-protocol", "protocol"));
+        assert(runtime.Ok);
+        assert(serialized.Ok);
+        assert(protocol.Ok);
+
+        MergeFieldInventoryRequest request{};
+        request.Scope = "merged-repeat";
+        request.OutputDirectory = root / "merge-repeat-output";
+        request.RuntimeSnapshot = runtime.Value;
+        request.SerializedSnapshot = serialized.Value;
+        request.ProtocolSnapshot = protocol.Value;
+
+        const Result<FieldInventorySnapshot> first = MergeFieldInventorySnapshots(request);
+        const Result<FieldInventorySnapshot> second = MergeFieldInventorySnapshots(request);
+        assert(first.Ok);
+        assert(second.Ok);
+        assert(first.Value.DeterministicDigest == second.Value.DeterministicDigest);
+        assert(first.Value.Entries.size() == second.Value.Entries.size());
     }
 
     return 0;
