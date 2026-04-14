@@ -263,6 +263,9 @@ add_library(EngineCore
     Core/Remediation/FieldGuardrailTypes.h
     Core/Remediation/FieldGuardrailService.h
     Core/Remediation/FieldGuardrailService.cpp
+    Core/Remediation/FieldClosureTypes.h
+    Core/Remediation/FieldClosureService.h
+    Core/Remediation/FieldClosureService.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -576,3 +579,9 @@ add_executable(EngineCoreFieldGuardrailTests
 )
 target_link_libraries(EngineCoreFieldGuardrailTests PRIVATE EngineCore)
 add_test(NAME EngineCoreFieldGuardrailTests COMMAND EngineCoreFieldGuardrailTests)
+
+add_executable(EngineCoreFieldClosureTests
+    Core/Tests/Remediation/FieldClosureTests.cpp
+)
+target_link_libraries(EngineCoreFieldClosureTests PRIVATE EngineCore)
+add_test(NAME EngineCoreFieldClosureTests COMMAND EngineCoreFieldClosureTests)
