@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string_view>
@@ -192,6 +193,12 @@ void SortFindings(std::vector<FieldValidationFinding>& findings) {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(report.Summary.IdentifierNormalizationMismatchCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.ConditionalRequiredInvariantMismatchCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.DependencyOrderingInvariantMismatchCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.RelatedFieldConsistencyInvariantMismatchCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(report.Summary.TotalFindingCount));
     digestMaterial.push_back('\n');
 
@@ -364,6 +371,51 @@ void SortFindings(std::vector<FieldValidationFinding>& findings) {
               });
 
     return observations;
+}
+
+[[nodiscard]] std::optional<uint32_t> GetScopeRank(const std::string_view scope) {
+    if (scope == "runtime") {
+        return 0u;
+    }
+    if (scope == "serialized") {
+        return 1u;
+    }
+    if (scope == "protocol") {
+        return 2u;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool IsOrderedVersionLineage(const std::vector<std::string>& versionLineage) {
+    if (versionLineage.empty()) {
+        return true;
+    }
+
+    std::optional<uint32_t> previousRank;
+    for (const std::string& scope : versionLineage) {
+        const std::optional<uint32_t> currentRank = GetScopeRank(scope);
+        if (!currentRank.has_value()) {
+            return false;
+        }
+        if (previousRank.has_value() && *currentRank < *previousRank) {
+            return false;
+        }
+        previousRank = currentRank;
+    }
+    return true;
+}
+
+[[nodiscard]] std::vector<std::string> CollectDependencyFieldIds(const FieldInventoryEntry& entry) {
+    std::vector<std::string> dependencyFieldIds;
+    dependencyFieldIds.reserve(entry.AliasFieldIds.size());
+    for (const std::string& aliasFieldId : entry.AliasFieldIds) {
+        if (!aliasFieldId.empty() && aliasFieldId != entry.FieldId) {
+            dependencyFieldIds.push_back(aliasFieldId);
+        }
+    }
+    std::sort(dependencyFieldIds.begin(), dependencyFieldIds.end());
+    dependencyFieldIds.erase(std::unique(dependencyFieldIds.begin(), dependencyFieldIds.end()), dependencyFieldIds.end());
+    return dependencyFieldIds;
 }
 
 } // namespace
@@ -573,6 +625,138 @@ Result<FieldValidationReport> ValidateFieldRangeEnumAndPatternDomains(const Fiel
             ++report.Summary.PatternDomainMismatchCount;
         } else if (finding.MismatchKind == FieldValidationMismatchKind::IdentifierNormalizationMismatch) {
             ++report.Summary.IdentifierNormalizationMismatchCount;
+        }
+    }
+    report.Summary.TotalFindingCount = static_cast<uint32_t>(report.Findings.size());
+    report.DeterministicDigest = ComputeValidationDigest(report);
+
+    return Result<FieldValidationReport>::Success(std::move(report));
+}
+
+Result<FieldValidationReport> ValidateCrossFieldInvariantRules(const FieldValidationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "cross-field-invariant-rules") {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!ValidateSnapshot(request.RuntimeSnapshot, "runtime") || !ValidateSnapshot(request.SerializedSnapshot, "serialized") ||
+        !ValidateSnapshot(request.ProtocolSnapshot, "protocol")) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    const std::vector<FieldObservation> observations = BuildObservations(request);
+    std::map<std::string, std::size_t> fieldIdToObservationIndex;
+    std::map<std::string, std::vector<std::size_t>> equivalentKeyToIndices;
+    for (std::size_t index = 0; index < observations.size(); ++index) {
+        fieldIdToObservationIndex.emplace(observations[index].Entry->FieldId, index);
+        equivalentKeyToIndices[BuildEquivalentFieldKey(*observations[index].Entry)].push_back(index);
+    }
+
+    std::vector<FieldValidationFinding> findings;
+    std::set<std::string> comparedFields;
+
+    for (const FieldObservation& observation : observations) {
+        const FieldInventoryEntry& entry = *observation.Entry;
+        comparedFields.insert(BuildEquivalentFieldKey(entry));
+        if (!entry.Required) {
+            continue;
+        }
+
+        const std::vector<std::string> dependencyFieldIds = CollectDependencyFieldIds(entry);
+        for (const std::string& dependencyFieldId : dependencyFieldIds) {
+            const std::string stableDependencyKey = "dependency::" + entry.FieldId + "->" + dependencyFieldId;
+            const auto dependencyIt = fieldIdToObservationIndex.find(dependencyFieldId);
+            if (dependencyIt == fieldIdToObservationIndex.end()) {
+                findings.push_back(BuildDomainMismatchFinding(
+                    "FIELD_AUDIT_RULE_CONDITIONAL_REQUIRED_INVARIANT_MISMATCH",
+                    FieldValidationMismatchKind::ConditionalRequiredInvariantMismatch,
+                    stableDependencyKey,
+                    observation,
+                    observation));
+                continue;
+            }
+
+            const FieldObservation& dependencyObservation = observations[dependencyIt->second];
+            if (!dependencyObservation.Entry->Required) {
+                findings.push_back(BuildDomainMismatchFinding(
+                    "FIELD_AUDIT_RULE_CONDITIONAL_REQUIRED_INVARIANT_MISMATCH",
+                    FieldValidationMismatchKind::ConditionalRequiredInvariantMismatch,
+                    stableDependencyKey,
+                    observation,
+                    dependencyObservation));
+            }
+        }
+
+        if (!IsOrderedVersionLineage(entry.VersionLineage)) {
+            findings.push_back(BuildDomainMismatchFinding("FIELD_AUDIT_RULE_DEPENDENCY_ORDERING_INVARIANT_MISMATCH",
+                                                          FieldValidationMismatchKind::DependencyOrderingInvariantMismatch,
+                                                          "lineage::" + entry.FieldId,
+                                                          observation,
+                                                          observation));
+        }
+    }
+
+    for (const auto& [equivalentFieldKey, indices] : equivalentKeyToIndices) {
+        comparedFields.insert(equivalentFieldKey);
+        if (indices.size() < 2u) {
+            continue;
+        }
+
+        auto baselineIt = std::find_if(indices.begin(), indices.end(), [&observations](const std::size_t index) {
+            return observations[index].SnapshotScope == "serialized";
+        });
+        if (baselineIt == indices.end()) {
+            baselineIt = indices.begin();
+        }
+
+        const FieldObservation& baselineObservation = observations[*baselineIt];
+        for (const std::size_t index : indices) {
+            if (index == *baselineIt) {
+                continue;
+            }
+
+            const FieldObservation& observation = observations[index];
+            if (observation.Entry->OwnerSubsystem != baselineObservation.Entry->OwnerSubsystem) {
+                findings.push_back(BuildDomainMismatchFinding(
+                    "FIELD_AUDIT_RULE_RELATED_FIELD_CONSISTENCY_INVARIANT_MISMATCH",
+                    FieldValidationMismatchKind::RelatedFieldConsistencyInvariantMismatch,
+                    BuildStableMergeKey(*observation.Entry),
+                    observation,
+                    baselineObservation));
+            }
+        }
+    }
+
+    SortFindings(findings);
+    findings.erase(std::unique(findings.begin(),
+                               findings.end(),
+                               [](const FieldValidationFinding& left, const FieldValidationFinding& right) {
+                                   return left.RuleId == right.RuleId && left.StableFieldKey == right.StableFieldKey &&
+                                          left.DomainPair == right.DomainPair &&
+                                          left.LeftEvidence.FieldId == right.LeftEvidence.FieldId &&
+                                          left.RightEvidence.FieldId == right.RightEvidence.FieldId;
+                               }),
+                   findings.end());
+
+    FieldValidationReport report{};
+    report.Scope = request.Scope;
+    report.OutputDirectory = request.OutputDirectory;
+    report.Findings = std::move(findings);
+    report.Summary.ComparedFieldCount = static_cast<uint32_t>(comparedFields.size());
+    for (const FieldValidationFinding& finding : report.Findings) {
+        if (finding.MismatchKind == FieldValidationMismatchKind::ConditionalRequiredInvariantMismatch) {
+            ++report.Summary.ConditionalRequiredInvariantMismatchCount;
+        } else if (finding.MismatchKind == FieldValidationMismatchKind::DependencyOrderingInvariantMismatch) {
+            ++report.Summary.DependencyOrderingInvariantMismatchCount;
+        } else if (finding.MismatchKind == FieldValidationMismatchKind::RelatedFieldConsistencyInvariantMismatch) {
+            ++report.Summary.RelatedFieldConsistencyInvariantMismatchCount;
         }
     }
     report.Summary.TotalFindingCount = static_cast<uint32_t>(report.Findings.size());

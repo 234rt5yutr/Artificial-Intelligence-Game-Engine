@@ -65,7 +65,10 @@ enum class FieldValidationMismatchKind : uint8_t {
     RangeDomainMismatch = 2,
     EnumDomainMismatch = 3,
     PatternDomainMismatch = 4,
-    IdentifierNormalizationMismatch = 5
+    IdentifierNormalizationMismatch = 5,
+    ConditionalRequiredInvariantMismatch = 6,
+    DependencyOrderingInvariantMismatch = 7,
+    RelatedFieldConsistencyInvariantMismatch = 8
 };
 
 struct FieldValidationRequest {
@@ -110,6 +113,9 @@ struct FieldValidationSummary {
     uint32_t EnumDomainMismatchCount = 0;
     uint32_t PatternDomainMismatchCount = 0;
     uint32_t IdentifierNormalizationMismatchCount = 0;
+    uint32_t ConditionalRequiredInvariantMismatchCount = 0;
+    uint32_t DependencyOrderingInvariantMismatchCount = 0;
+    uint32_t RelatedFieldConsistencyInvariantMismatchCount = 0;
     uint32_t TotalFindingCount = 0;
 };
 

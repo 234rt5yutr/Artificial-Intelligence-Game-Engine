@@ -344,5 +344,150 @@ int main() {
         }
     }
 
+    {
+        FieldValidationRequest invalidRequest{};
+        invalidRequest.Scope = "cross-field-invariant-rules";
+        const Result<FieldValidationReport> result = ValidateCrossFieldInvariantRules(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldInventoryEntry runtimeDependent =
+            BuildEntry("runtime-gameplay", "shared-subsystem", "PlayerState", "HasLoadout", true, "runtime-collector");
+        runtimeDependent.VersionLineage = {"runtime", "serialized", "protocol"};
+        runtimeDependent.AliasFieldIds = {"runtime-gameplay::PlayerState::HasLoadout",
+                                          "runtime-gameplay::PlayerState::LoadoutId"};
+        FieldInventoryEntry runtimeDependency =
+            BuildEntry("runtime-gameplay", "shared-subsystem", "PlayerState", "LoadoutId", true, "runtime-collector");
+        runtimeDependency.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry serializedDependent = BuildEntry(
+            "serialized-save", "shared-subsystem", "PlayerState", "HasLoadout", true, "serialized-collector");
+        serializedDependent.VersionLineage = {"runtime", "serialized", "protocol"};
+        serializedDependent.AliasFieldIds = {"serialized-save::PlayerState::HasLoadout",
+                                             "serialized-save::PlayerState::LoadoutId"};
+        FieldInventoryEntry serializedDependency = BuildEntry(
+            "serialized-save", "shared-subsystem", "PlayerState", "LoadoutId", true, "serialized-collector");
+        serializedDependency.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry protocolDependent =
+            BuildEntry("protocol-rpc", "shared-subsystem", "PlayerState", "HasLoadout", true, "protocol-collector");
+        protocolDependent.VersionLineage = {"runtime", "serialized", "protocol"};
+        protocolDependent.AliasFieldIds = {"protocol-rpc::PlayerState::HasLoadout", "protocol-rpc::PlayerState::LoadoutId"};
+        FieldInventoryEntry protocolDependency =
+            BuildEntry("protocol-rpc", "shared-subsystem", "PlayerState", "LoadoutId", true, "protocol-collector");
+        protocolDependency.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        const FieldInventorySnapshot runtimeSnapshot = BuildSnapshot(
+            "runtime", root / "runtime-invariant-no-mismatch", {runtimeDependent, runtimeDependency});
+        const FieldInventorySnapshot serializedSnapshot = BuildSnapshot(
+            "serialized", root / "serialized-invariant-no-mismatch", {serializedDependent, serializedDependency});
+        const FieldInventorySnapshot protocolSnapshot = BuildSnapshot(
+            "protocol", root / "protocol-invariant-no-mismatch", {protocolDependent, protocolDependency});
+
+        const FieldValidationRequest request = BuildRequest(root / "validation-invariant-no-mismatch",
+                                                            "cross-field-invariant-rules",
+                                                            runtimeSnapshot,
+                                                            serializedSnapshot,
+                                                            protocolSnapshot);
+        const Result<FieldValidationReport> first = ValidateCrossFieldInvariantRules(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.Findings.empty());
+        assert(first.Value.Summary.ComparedFieldCount == 2u);
+        assert(first.Value.Summary.ConditionalRequiredInvariantMismatchCount == 0u);
+        assert(first.Value.Summary.DependencyOrderingInvariantMismatchCount == 0u);
+        assert(first.Value.Summary.RelatedFieldConsistencyInvariantMismatchCount == 0u);
+        assert(first.Value.Summary.TotalFindingCount == 0u);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        const Result<FieldValidationReport> second = ValidateCrossFieldInvariantRules(request);
+        assert(second.Ok);
+        assert(second.Value.Findings.empty());
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.Summary.ComparedFieldCount == first.Value.Summary.ComparedFieldCount);
+    }
+
+    {
+        FieldInventoryEntry runtimeDependent =
+            BuildEntry("runtime-gameplay", "runtime-subsystem", "PlayerState", "HasLoadout", true, "runtime-collector");
+        runtimeDependent.VersionLineage = {"serialized", "runtime"};
+        runtimeDependent.AliasFieldIds = {"runtime-gameplay::PlayerState::HasLoadout",
+                                          "runtime-gameplay::PlayerState::LoadoutId"};
+        FieldInventoryEntry runtimeDependency =
+            BuildEntry("runtime-gameplay", "shared-subsystem", "PlayerState", "LoadoutId", false, "runtime-collector");
+        runtimeDependency.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry serializedDependent = BuildEntry(
+            "serialized-save", "serialized-subsystem", "PlayerState", "HasLoadout", true, "serialized-collector");
+        serializedDependent.VersionLineage = {"runtime", "serialized", "protocol"};
+        serializedDependent.AliasFieldIds = {"serialized-save::PlayerState::HasLoadout",
+                                             "serialized-save::PlayerState::LoadoutId"};
+        FieldInventoryEntry serializedDependency = BuildEntry(
+            "serialized-save", "shared-subsystem", "PlayerState", "LoadoutId", true, "serialized-collector");
+        serializedDependency.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry protocolDependent =
+            BuildEntry("protocol-rpc", "protocol-subsystem", "PlayerState", "HasLoadout", true, "protocol-collector");
+        protocolDependent.VersionLineage = {"runtime", "serialized", "protocol"};
+        protocolDependent.AliasFieldIds = {"protocol-rpc::PlayerState::HasLoadout", "protocol-rpc::PlayerState::LoadoutId"};
+        FieldInventoryEntry protocolDependency =
+            BuildEntry("protocol-rpc", "shared-subsystem", "PlayerState", "LoadoutId", true, "protocol-collector");
+        protocolDependency.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        const FieldInventorySnapshot runtimeSnapshot = BuildSnapshot(
+            "runtime", root / "runtime-invariant-mismatch", {runtimeDependent, runtimeDependency});
+        const FieldInventorySnapshot serializedSnapshot = BuildSnapshot(
+            "serialized", root / "serialized-invariant-mismatch", {serializedDependent, serializedDependency});
+        const FieldInventorySnapshot protocolSnapshot = BuildSnapshot(
+            "protocol", root / "protocol-invariant-mismatch", {protocolDependent, protocolDependency});
+
+        const FieldValidationRequest request = BuildRequest(root / "validation-invariant-mismatch",
+                                                            "cross-field-invariant-rules",
+                                                            runtimeSnapshot,
+                                                            serializedSnapshot,
+                                                            protocolSnapshot);
+        const Result<FieldValidationReport> first = ValidateCrossFieldInvariantRules(request);
+        assert(first.Ok);
+        assert(first.Value.Findings.size() == 4u);
+        assert(first.Value.Summary.ComparedFieldCount == 2u);
+        assert(first.Value.Summary.ConditionalRequiredInvariantMismatchCount == 1u);
+        assert(first.Value.Summary.DependencyOrderingInvariantMismatchCount == 1u);
+        assert(first.Value.Summary.RelatedFieldConsistencyInvariantMismatchCount == 2u);
+        assert(first.Value.Summary.TotalFindingCount == 4u);
+        assert(AreFindingsSorted(first.Value.Findings));
+
+        bool foundConditionalRequiredMismatch = false;
+        bool foundDependencyOrderingMismatch = false;
+        bool foundRelatedConsistencyMismatch = false;
+        for (const FieldValidationFinding& finding : first.Value.Findings) {
+            if (finding.RuleId == "FIELD_AUDIT_RULE_CONDITIONAL_REQUIRED_INVARIANT_MISMATCH") {
+                foundConditionalRequiredMismatch = true;
+            }
+            if (finding.RuleId == "FIELD_AUDIT_RULE_DEPENDENCY_ORDERING_INVARIANT_MISMATCH") {
+                foundDependencyOrderingMismatch = true;
+            }
+            if (finding.RuleId == "FIELD_AUDIT_RULE_RELATED_FIELD_CONSISTENCY_INVARIANT_MISMATCH") {
+                foundRelatedConsistencyMismatch = true;
+            }
+            assert(!finding.DomainPair.empty());
+            assert(!finding.StableFieldKey.empty());
+        }
+        assert(foundConditionalRequiredMismatch);
+        assert(foundDependencyOrderingMismatch);
+        assert(foundRelatedConsistencyMismatch);
+
+        const Result<FieldValidationReport> second = ValidateCrossFieldInvariantRules(request);
+        assert(second.Ok);
+        assert(second.Value.Findings.size() == first.Value.Findings.size());
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        for (std::size_t index = 0; index < first.Value.Findings.size(); ++index) {
+            assert(second.Value.Findings[index].RuleId == first.Value.Findings[index].RuleId);
+            assert(second.Value.Findings[index].StableFieldKey == first.Value.Findings[index].StableFieldKey);
+            assert(second.Value.Findings[index].DomainPair == first.Value.Findings[index].DomainPair);
+        }
+    }
+
     return 0;
 }
