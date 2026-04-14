@@ -219,6 +219,9 @@ add_library(EngineCore
     Core/Renderer/Upscaling/FrameGenerationController.cpp
     Core/Renderer/Diagnostics/GPUFrameTraceService.h
     Core/Renderer/Diagnostics/GPUFrameTraceService.cpp
+    Core/Diagnostics/ProfilerCaptureTypes.h
+    Core/Diagnostics/CPUProfilerCapture.h
+    Core/Diagnostics/CPUProfilerCapture.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
