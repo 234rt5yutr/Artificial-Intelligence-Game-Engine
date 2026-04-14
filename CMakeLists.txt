@@ -231,6 +231,9 @@ add_library(EngineCore
     Core/Automation/PlayModeTestRunner.cpp
     Core/Automation/PerformanceTestRunner.h
     Core/Automation/PerformanceTestRunner.cpp
+    Core/Build/BuildPipelineTypes.h
+    Core/Build/BuildOrchestrator.h
+    Core/Build/BuildOrchestrator.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -466,3 +469,9 @@ add_executable(EngineCorePerformanceRunnerTests
 )
 target_link_libraries(EngineCorePerformanceRunnerTests PRIVATE EngineCore)
 add_test(NAME EngineCorePerformanceRunnerTests COMMAND EngineCorePerformanceRunnerTests)
+
+add_executable(EngineCoreBuildPipelineTests
+    Core/Tests/Build/BuildPipelineTests.cpp
+)
+target_link_libraries(EngineCoreBuildPipelineTests PRIVATE EngineCore)
+add_test(NAME EngineCoreBuildPipelineTests COMMAND EngineCoreBuildPipelineTests)

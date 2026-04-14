@@ -407,6 +407,6 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 28.2.1: Implement `RunAutomatedPlayModeTests()` for deterministic gameplay regression packs. (v0.28.2.1)
   * [x] Sub-step 28.2.2: Implement `RunAutomatedPerformanceTests()` for budget regression gates by platform tier. (v0.28.2.2)
 * [ ] Step 28.3: Build shipping-grade multi-platform packaging flow.
-  * [ ] Sub-step 28.3.1: Implement `BuildForPlatformTarget()` with profile-driven compile/cook/package stages. (v0.28.3.1)
+  * [x] Sub-step 28.3.1: Implement `BuildForPlatformTarget()` with profile-driven compile/cook/package stages. (v0.28.3.1)
   * [ ] Sub-step 28.3.2: Implement `PackageStoreSubmissionArtifacts()` for storefront-compliant output bundles. (v0.28.3.2)
   * [ ] Sub-step 28.3.3: Implement `GenerateDedicatedServerBuildArtifacts()` for headless deploy images and symbols. (v0.28.3.3)
