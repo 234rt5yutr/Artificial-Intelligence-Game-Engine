@@ -300,10 +300,27 @@ void MergeEvidence(std::vector<FieldClosureEvidenceMetadata>& destination,
     digestMaterial.append(std::to_string(result.Summary.BaselineCheckpointCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.CriticalFindingCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(result.Summary.GateDecision)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.ContractVersionFrozen ? 1u : 0u));
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.SignoffApprover);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.ContractVersion);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.SignoffReportDigest);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.FreezeManifestDigest);
     digestMaterial.push_back('\n');
 
     for (const std::string& checkpointId : result.BaselineCheckpointIds) {
         digestMaterial.append(checkpointId);
+        digestMaterial.push_back('\n');
+    }
+
+    for (const std::string& policyCheckpointId : result.PolicyCheckpointIds) {
+        digestMaterial.append(policyCheckpointId);
         digestMaterial.push_back('\n');
     }
 
@@ -314,6 +331,48 @@ void MergeEvidence(std::vector<FieldClosureEvidenceMetadata>& destination,
         digestMaterial.push_back('|');
         digestMaterial.append(record.FindingId);
         digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
+[[nodiscard]] std::string ComputeSignoffReportDigest(const FieldClosureResult& result) {
+    std::string digestMaterial;
+    digestMaterial.reserve((result.DiffRecords.size() * 160u) + 320u);
+    digestMaterial.append(result.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.BaselineRevision);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.CurrentRevision);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.SignoffApprover);
+    digestMaterial.push_back('\n');
+
+    for (const FieldClosureDiffRecord& record : result.DiffRecords) {
+        digestMaterial.append(record.DiffId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(std::to_string(static_cast<uint32_t>(record.DiffKind)));
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.FindingId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.RuleId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.Ownership.OwnerSubsystem);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.Ownership.OwnerTeam);
+        digestMaterial.push_back('|');
+        digestMaterial.append(std::to_string(static_cast<uint32_t>(record.BaselineSeverity)));
+        digestMaterial.push_back('|');
+        digestMaterial.append(std::to_string(static_cast<uint32_t>(record.CurrentSeverity)));
+        digestMaterial.push_back('\n');
+
+        for (const FieldClosureEvidenceMetadata& evidence : record.EvidenceIndex) {
+            digestMaterial.append(evidence.EvidenceId);
+            digestMaterial.push_back('|');
+            digestMaterial.append(evidence.EvidencePath);
+            digestMaterial.push_back('|');
+            digestMaterial.append(evidence.EvidenceDigest);
+            digestMaterial.push_back('\n');
+        }
     }
     return HashToHex(HashString(digestMaterial));
 }
@@ -486,6 +545,24 @@ Result<FieldClosureResult> EnforceZeroCriticalFieldDefectGate(const FieldClosure
     }
 
     result.Summary.GateDecision = FieldClosureGateDecision::Pass;
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<FieldClosureResult>::Success(std::move(result));
+}
+
+Result<FieldClosureResult> PublishFieldIntegritySignoffReport(const FieldClosureRequest& request) {
+    if (request.SignoffApprover.empty()) {
+        return Result<FieldClosureResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    const Result<FieldClosureResult> rerunResult =
+        BuildClosureDiffResult(request, "publish-field-integrity-signoff-report");
+    if (!rerunResult.Ok) {
+        return rerunResult;
+    }
+
+    FieldClosureResult result = rerunResult.Value;
+    result.SignoffApprover = request.SignoffApprover;
+    result.SignoffReportDigest = ComputeSignoffReportDigest(result);
     result.DeterministicDigest = ComputeResultDigest(result);
     return Result<FieldClosureResult>::Success(std::move(result));
 }

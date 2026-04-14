@@ -401,5 +401,133 @@ int main() {
         assert(second.Value.Summary.GateDecision == FieldClosureGateDecision::Pass);
     }
 
+    {
+        FieldClosureRequest invalidRequest{};
+        const Result<FieldClosureResult> result = PublishFieldIntegritySignoffReport(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldClosureRequest unsupportedScope{};
+        unsupportedScope.Scope = "publish-field-integrity-signoff-report-v2";
+        unsupportedScope.OutputDirectory = root / "signoff-unsupported";
+        unsupportedScope.RemediationBatchId = "batch-030503";
+        unsupportedScope.BaselineRevision = "phase29-final";
+        unsupportedScope.CurrentRevision = "phase30-rerun-004";
+        unsupportedScope.BaselineCheckpointIds = {"phase29-final", "phase30-4"};
+        unsupportedScope.SignoffApprover = "release-owner";
+        unsupportedScope.BaselineFindings = {BuildFinding(
+            "finding-baseline-signoff-unsupported",
+            "FIELD_AUDIT_RULE_RUNTIME_BINDING_PARITY",
+            "Runtime::Player::Health",
+            "runtime<->serialized",
+            FieldClosureSeverity::Medium,
+            "runtime-systems",
+            "gameplay",
+            {BuildEvidence("evidence-baseline-signoff-unsupported",
+                           "reports/signoff-baseline-runtime.json",
+                           "ab11223344")})};
+        unsupportedScope.RerunFindings = {BuildFinding(
+            "finding-rerun-signoff-unsupported",
+            "FIELD_AUDIT_RULE_RUNTIME_BINDING_PARITY",
+            "Runtime::Player::Health",
+            "runtime<->serialized",
+            FieldClosureSeverity::Medium,
+            "runtime-systems",
+            "gameplay",
+            {BuildEvidence("evidence-rerun-signoff-unsupported",
+                           "reports/signoff-rerun-runtime.json",
+                           "ab55667788")})};
+
+        const Result<FieldClosureResult> result = PublishFieldIntegritySignoffReport(unsupportedScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldClosureRequest request{};
+        request.Scope = "publish-field-integrity-signoff-report";
+        request.OutputDirectory = root / "signoff-success";
+        request.RemediationBatchId = "batch-030503";
+        request.BaselineRevision = "phase29-final";
+        request.CurrentRevision = "phase30-rerun-004";
+        request.BaselineCheckpointIds = {"phase30-4", "phase29-final", "phase30-4"};
+        request.SignoffApprover = "release-owner";
+
+        request.BaselineFindings = {
+            BuildFinding("finding-baseline-signoff-resolved",
+                         "FIELD_AUDIT_RULE_UI_BINDING_DRIFT",
+                         "UI::Widget::InventoryPanel",
+                         "ui<->runtime",
+                         FieldClosureSeverity::Medium,
+                         "ui-systems",
+                         "ux",
+                         {BuildEvidence("evidence-baseline-signoff-resolved",
+                                        "reports/signoff-baseline-ui.json",
+                                        "1c2d3e4f01")}),
+            BuildFinding("finding-baseline-signoff-unchanged",
+                         "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+                         "Build::Manifest::CatalogKey",
+                         "build<->runtime",
+                         FieldClosureSeverity::Low,
+                         "build-release",
+                         "release-engineering",
+                         {BuildEvidence("evidence-baseline-signoff-unchanged",
+                                        "reports/signoff-baseline-build.json",
+                                        "5f6a7b8c90")})};
+
+        request.RerunFindings = {
+            BuildFinding("finding-rerun-signoff-unchanged",
+                         "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+                         "Build::Manifest::CatalogKey",
+                         "build<->runtime",
+                         FieldClosureSeverity::Low,
+                         "build-release",
+                         "release-engineering",
+                         {BuildEvidence("evidence-rerun-signoff-unchanged",
+                                        "reports/signoff-rerun-build.json",
+                                        "5f6a7b8c99")}),
+            BuildFinding("finding-rerun-signoff-new",
+                         "FIELD_AUDIT_RULE_TOOLING_SCHEMA_DRIFT",
+                         "Tooling::Editor::WidgetContract",
+                         "tooling<->runtime",
+                         FieldClosureSeverity::High,
+                         "tooling-systems",
+                         "editor-platform",
+                         {BuildEvidence("evidence-rerun-signoff-new",
+                                        "reports/signoff-rerun-tooling.json",
+                                        "9f8e7d6c55")})};
+
+        const Result<FieldClosureResult> first = PublishFieldIntegritySignoffReport(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.SignoffApprover == request.SignoffApprover);
+        assert(first.Value.Summary.TotalDiffCount == 3u);
+        assert(first.Value.Summary.ResolvedFindingCount == 1u);
+        assert(first.Value.Summary.NewFindingCount == 1u);
+        assert(first.Value.Summary.UnchangedFindingCount == 1u);
+        assert(!first.Value.SignoffReportDigest.empty());
+        assert(!first.Value.DeterministicDigest.empty());
+        std::size_t evidenceIndexedRecordCount = 0u;
+        std::size_t ownedRecordCount = 0u;
+        for (const FieldClosureDiffRecord& record : first.Value.DiffRecords) {
+            if (!record.EvidenceIndex.empty()) {
+                ++evidenceIndexedRecordCount;
+            }
+            if (!record.Ownership.OwnerSubsystem.empty()) {
+                ++ownedRecordCount;
+            }
+        }
+        assert(evidenceIndexedRecordCount == first.Value.DiffRecords.size());
+        assert(ownedRecordCount == first.Value.DiffRecords.size());
+
+        const Result<FieldClosureResult> second = PublishFieldIntegritySignoffReport(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.SignoffReportDigest == first.Value.SignoffReportDigest);
+        assert(second.Value.SignoffApprover == first.Value.SignoffApprover);
+    }
+
     return 0;
 }
