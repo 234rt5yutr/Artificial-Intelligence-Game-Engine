@@ -489,5 +489,133 @@ int main() {
         }
     }
 
+    {
+        FieldValidationRequest invalidRequest{};
+        invalidRequest.Scope = "evolution-compatibility";
+        const Result<FieldValidationReport> result = ValidateFieldEvolutionCompatibility(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldInventoryEntry runtimeEntry =
+            BuildEntry("runtime-gameplay", "runtime-subsystem", "PlayerState", "Health", true, "runtime-collector");
+        runtimeEntry.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry serializedEntry =
+            BuildEntry("serialized-save", "serialized-subsystem", "PlayerState", "Health", true, "serialized-collector");
+        serializedEntry.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry protocolEntry =
+            BuildEntry("protocol-rpc", "protocol-subsystem", "PlayerState", "Health", true, "protocol-collector");
+        protocolEntry.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        const FieldInventorySnapshot runtimeSnapshot =
+            BuildSnapshot("runtime", root / "runtime-evolution-no-mismatch", {runtimeEntry});
+        const FieldInventorySnapshot serializedSnapshot =
+            BuildSnapshot("serialized", root / "serialized-evolution-no-mismatch", {serializedEntry});
+        const FieldInventorySnapshot protocolSnapshot =
+            BuildSnapshot("protocol", root / "protocol-evolution-no-mismatch", {protocolEntry});
+
+        const FieldValidationRequest request = BuildRequest(root / "validation-evolution-no-mismatch",
+                                                            "evolution-compatibility",
+                                                            runtimeSnapshot,
+                                                            serializedSnapshot,
+                                                            protocolSnapshot);
+        const Result<FieldValidationReport> first = ValidateFieldEvolutionCompatibility(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.Findings.empty());
+        assert(first.Value.Summary.ComparedFieldCount == 1u);
+        assert(first.Value.Summary.EvolutionBackwardCompatibilityMismatchCount == 0u);
+        assert(first.Value.Summary.EvolutionForwardCompatibilityMismatchCount == 0u);
+        assert(first.Value.Summary.EvolutionMigrationWindowMismatchCount == 0u);
+        assert(first.Value.Summary.TotalFindingCount == 0u);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        const Result<FieldValidationReport> second = ValidateFieldEvolutionCompatibility(request);
+        assert(second.Ok);
+        assert(second.Value.Findings.empty());
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.Summary.ComparedFieldCount == first.Value.Summary.ComparedFieldCount);
+    }
+
+    {
+        FieldInventoryEntry runtimeRank =
+            BuildEntry("runtime-gameplay", "runtime-subsystem", "PlayerRankV2", "Rank", true, "runtime-collector");
+        runtimeRank.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry serializedRank =
+            BuildEntry("serialized-save", "serialized-subsystem", "PlayerRankV1", "Rank", false, "serialized-collector");
+        serializedRank.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry runtimeSeasonBadge = BuildEntry(
+            "runtime-gameplay", "runtime-subsystem", "SeasonBadgeState", "SeasonBadge", true, "runtime-collector");
+        runtimeSeasonBadge.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry protocolSeasonBadge = BuildEntry(
+            "protocol-rpc", "protocol-subsystem", "SeasonBadgeState", "SeasonBadge", true, "protocol-collector");
+        protocolSeasonBadge.VersionLineage = {"runtime", "serialized", "protocol"};
+
+        FieldInventoryEntry protocolInventoryRevision = BuildEntry(
+            "protocol-rpc", "protocol-subsystem", "InventoryPayload", "InventoryRevision", false, "protocol-collector");
+        protocolInventoryRevision.VersionLineage = {"protocol"};
+
+        const FieldInventorySnapshot runtimeSnapshot = BuildSnapshot(
+            "runtime", root / "runtime-evolution-mismatch", {runtimeRank, runtimeSeasonBadge});
+        const FieldInventorySnapshot serializedSnapshot =
+            BuildSnapshot("serialized", root / "serialized-evolution-mismatch", {serializedRank});
+        const FieldInventorySnapshot protocolSnapshot = BuildSnapshot(
+            "protocol", root / "protocol-evolution-mismatch", {protocolSeasonBadge, protocolInventoryRevision});
+
+        const FieldValidationRequest request = BuildRequest(root / "validation-evolution-mismatch",
+                                                            "evolution-compatibility",
+                                                            runtimeSnapshot,
+                                                            serializedSnapshot,
+                                                            protocolSnapshot);
+        const Result<FieldValidationReport> first = ValidateFieldEvolutionCompatibility(request);
+        assert(first.Ok);
+        assert(first.Value.Findings.size() == 6u);
+        assert(first.Value.Summary.ComparedFieldCount == 3u);
+        assert(first.Value.Summary.EvolutionBackwardCompatibilityMismatchCount == 3u);
+        assert(first.Value.Summary.EvolutionForwardCompatibilityMismatchCount == 2u);
+        assert(first.Value.Summary.EvolutionMigrationWindowMismatchCount == 1u);
+        assert(first.Value.Summary.TotalFindingCount == 6u);
+        assert(AreFindingsSorted(first.Value.Findings));
+
+        bool foundBackwardMismatch = false;
+        bool foundForwardMismatch = false;
+        bool foundMigrationWindowMismatch = false;
+        for (const FieldValidationFinding& finding : first.Value.Findings) {
+            if (finding.RuleId == "FIELD_AUDIT_RULE_EVOLUTION_BACKWARD_COMPATIBILITY_MISMATCH") {
+                foundBackwardMismatch = true;
+            }
+            if (finding.RuleId == "FIELD_AUDIT_RULE_EVOLUTION_FORWARD_COMPATIBILITY_MISMATCH") {
+                foundForwardMismatch = true;
+            }
+            if (finding.RuleId == "FIELD_AUDIT_RULE_EVOLUTION_MIGRATION_WINDOW_MISMATCH") {
+                foundMigrationWindowMismatch = true;
+            }
+            assert(!finding.MigrationRecommendationPlaceholder.empty());
+            assert(!finding.DomainPair.empty());
+            assert(!finding.StableFieldKey.empty());
+        }
+        assert(foundBackwardMismatch);
+        assert(foundForwardMismatch);
+        assert(foundMigrationWindowMismatch);
+
+        const Result<FieldValidationReport> second = ValidateFieldEvolutionCompatibility(request);
+        assert(second.Ok);
+        assert(second.Value.Findings.size() == first.Value.Findings.size());
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        for (std::size_t index = 0; index < first.Value.Findings.size(); ++index) {
+            assert(second.Value.Findings[index].RuleId == first.Value.Findings[index].RuleId);
+            assert(second.Value.Findings[index].StableFieldKey == first.Value.Findings[index].StableFieldKey);
+            assert(second.Value.Findings[index].DomainPair == first.Value.Findings[index].DomainPair);
+            assert(second.Value.Findings[index].MigrationRecommendationPlaceholder ==
+                   first.Value.Findings[index].MigrationRecommendationPlaceholder);
+        }
+    }
+
     return 0;
 }

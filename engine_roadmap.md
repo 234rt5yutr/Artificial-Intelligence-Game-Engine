@@ -418,11 +418,11 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 29.1.2: Implement `GenerateSerializedFieldInventory()` to enumerate scene/prefab/save/widget/localization/addressable/bundle field schemas. (v0.29.1.2)
   * [x] Sub-step 29.1.3: Implement `GenerateProtocolFieldInventory()` for packet/RPC/replay/MCP payload fields and transport-level metadata constraints. (v0.29.1.3)
   * [x] Sub-step 29.1.4: Implement `MergeFieldInventorySnapshots()` with stable field IDs, ownership tags, source traces, and version lineage metadata. (v0.29.1.4)
-* [ ] Step 29.2: Add strict field-level validation rules and invariant analysis.
+* [x] Step 29.2: Add strict field-level validation rules and invariant analysis.
   * [x] Sub-step 29.2.1: Implement `ValidateFieldTypeAndNullabilityContracts()` across runtime reflection, serializers, and generated manifests. (v0.29.2.1)
   * [x] Sub-step 29.2.2: Implement `ValidateFieldRangeEnumAndPatternDomains()` for numeric bounds, enum domains, string formats, and identifier normalization. (v0.29.2.2)
   * [x] Sub-step 29.2.3: Implement `ValidateCrossFieldInvariantRules()` for dependency ordering, conditional required fields, and subsystem coupling assumptions. (v0.29.2.3)
-  * [ ] Sub-step 29.2.4: Implement `ValidateFieldEvolutionCompatibility()` for forward/backward schema evolution and migration safety checks. (v0.29.2.4)
+  * [x] Sub-step 29.2.4: Implement `ValidateFieldEvolutionCompatibility()` for forward/backward schema evolution and migration safety checks. (v0.29.2.4)
 * [ ] Step 29.3: Execute full-surface audit runs over live runtime and offline artifacts.
   * [ ] Sub-step 29.3.1: Implement `RunRuntimeStateFieldAudit()` with deterministic snapshots during gameplay/editor/runtime service transitions. (v0.29.3.1)
   * [ ] Sub-step 29.3.2: Implement `RunCookedAndPackagedArtifactFieldAudit()` for cooked assets, build manifests, store bundles, and dedicated-server outputs. (v0.29.3.2)

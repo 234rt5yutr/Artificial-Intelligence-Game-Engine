@@ -68,7 +68,10 @@ enum class FieldValidationMismatchKind : uint8_t {
     IdentifierNormalizationMismatch = 5,
     ConditionalRequiredInvariantMismatch = 6,
     DependencyOrderingInvariantMismatch = 7,
-    RelatedFieldConsistencyInvariantMismatch = 8
+    RelatedFieldConsistencyInvariantMismatch = 8,
+    EvolutionBackwardCompatibilityMismatch = 9,
+    EvolutionForwardCompatibilityMismatch = 10,
+    EvolutionMigrationWindowMismatch = 11
 };
 
 struct FieldValidationRequest {
@@ -101,6 +104,7 @@ struct FieldValidationFinding {
     FieldValidationMismatchKind MismatchKind = FieldValidationMismatchKind::TypeMismatch;
     std::string StableFieldKey;
     std::string DomainPair;
+    std::string MigrationRecommendationPlaceholder;
     FieldValidationEvidence LeftEvidence;
     FieldValidationEvidence RightEvidence;
 };
@@ -116,6 +120,9 @@ struct FieldValidationSummary {
     uint32_t ConditionalRequiredInvariantMismatchCount = 0;
     uint32_t DependencyOrderingInvariantMismatchCount = 0;
     uint32_t RelatedFieldConsistencyInvariantMismatchCount = 0;
+    uint32_t EvolutionBackwardCompatibilityMismatchCount = 0;
+    uint32_t EvolutionForwardCompatibilityMismatchCount = 0;
+    uint32_t EvolutionMigrationWindowMismatchCount = 0;
     uint32_t TotalFindingCount = 0;
 };
 

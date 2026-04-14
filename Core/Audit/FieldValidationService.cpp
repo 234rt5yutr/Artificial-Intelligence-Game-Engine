@@ -156,6 +156,17 @@ struct FieldObservation {
     return finding;
 }
 
+[[nodiscard]] FieldValidationFinding BuildEvolutionMismatchFinding(const std::string& ruleId,
+                                                                   const FieldValidationMismatchKind mismatchKind,
+                                                                   const std::string& stableFieldKey,
+                                                                   const FieldObservation& left,
+                                                                   const FieldObservation& right,
+                                                                   const std::string& migrationRecommendationPlaceholder) {
+    FieldValidationFinding finding = BuildDomainMismatchFinding(ruleId, mismatchKind, stableFieldKey, left, right);
+    finding.MigrationRecommendationPlaceholder = migrationRecommendationPlaceholder;
+    return finding;
+}
+
 void SortFindings(std::vector<FieldValidationFinding>& findings) {
     std::sort(findings.begin(), findings.end(), [](const FieldValidationFinding& left, const FieldValidationFinding& right) {
         if (left.StableFieldKey != right.StableFieldKey) {
@@ -199,6 +210,12 @@ void SortFindings(std::vector<FieldValidationFinding>& findings) {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(report.Summary.RelatedFieldConsistencyInvariantMismatchCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.EvolutionBackwardCompatibilityMismatchCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.EvolutionForwardCompatibilityMismatchCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(report.Summary.EvolutionMigrationWindowMismatchCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(report.Summary.TotalFindingCount));
     digestMaterial.push_back('\n');
 
@@ -208,6 +225,8 @@ void SortFindings(std::vector<FieldValidationFinding>& findings) {
         digestMaterial.append(finding.StableFieldKey);
         digestMaterial.push_back('|');
         digestMaterial.append(finding.DomainPair);
+        digestMaterial.push_back('|');
+        digestMaterial.append(finding.MigrationRecommendationPlaceholder);
         digestMaterial.push_back('|');
         digestMaterial.append(finding.LeftEvidence.FieldId);
         digestMaterial.push_back('|');
@@ -403,6 +422,13 @@ void SortFindings(std::vector<FieldValidationFinding>& findings) {
         previousRank = currentRank;
     }
     return true;
+}
+
+[[nodiscard]] bool LineageContainsScope(const std::vector<std::string>& versionLineage, const std::string_view scope) {
+    return std::find_if(versionLineage.begin(),
+                        versionLineage.end(),
+                        [scope](const std::string& value) { return std::string_view(value) == scope; }) !=
+           versionLineage.end();
 }
 
 [[nodiscard]] std::vector<std::string> CollectDependencyFieldIds(const FieldInventoryEntry& entry) {
@@ -757,6 +783,169 @@ Result<FieldValidationReport> ValidateCrossFieldInvariantRules(const FieldValida
             ++report.Summary.DependencyOrderingInvariantMismatchCount;
         } else if (finding.MismatchKind == FieldValidationMismatchKind::RelatedFieldConsistencyInvariantMismatch) {
             ++report.Summary.RelatedFieldConsistencyInvariantMismatchCount;
+        }
+    }
+    report.Summary.TotalFindingCount = static_cast<uint32_t>(report.Findings.size());
+    report.DeterministicDigest = ComputeValidationDigest(report);
+
+    return Result<FieldValidationReport>::Success(std::move(report));
+}
+
+Result<FieldValidationReport> ValidateFieldEvolutionCompatibility(const FieldValidationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "evolution-compatibility") {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!ValidateSnapshot(request.RuntimeSnapshot, "runtime") || !ValidateSnapshot(request.SerializedSnapshot, "serialized") ||
+        !ValidateSnapshot(request.ProtocolSnapshot, "protocol")) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldValidationReport>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    const std::vector<FieldObservation> observations = BuildObservations(request);
+    std::map<std::string, std::vector<std::size_t>> equivalentKeyToIndices;
+    for (std::size_t index = 0; index < observations.size(); ++index) {
+        equivalentKeyToIndices[BuildEquivalentFieldKey(*observations[index].Entry)].push_back(index);
+    }
+
+    std::vector<FieldValidationFinding> findings;
+    std::set<std::string> comparedFields;
+
+    for (const FieldObservation& observation : observations) {
+        const FieldInventoryEntry& entry = *observation.Entry;
+        comparedFields.insert(BuildEquivalentFieldKey(entry));
+
+        const bool orderedLineage = !entry.VersionLineage.empty() && IsOrderedVersionLineage(entry.VersionLineage);
+        const bool containsCurrentScope = LineageContainsScope(entry.VersionLineage, observation.SnapshotScope);
+        const bool containsSerializedAnchor =
+            observation.SnapshotScope == "serialized" || LineageContainsScope(entry.VersionLineage, "serialized");
+        if (!orderedLineage || !containsCurrentScope || !containsSerializedAnchor) {
+            findings.push_back(BuildEvolutionMismatchFinding(
+                "FIELD_AUDIT_RULE_EVOLUTION_MIGRATION_WINDOW_MISMATCH",
+                FieldValidationMismatchKind::EvolutionMigrationWindowMismatch,
+                "migration-window::" + entry.FieldId,
+                observation,
+                observation,
+                "MIGRATION_RECOMMENDATION_PLACEHOLDER:DEFINE_ORDERED_VERSION_LINEAGE_AND_SERIALIZED_COMPAT_WINDOW"));
+        }
+    }
+
+    for (const auto& [equivalentFieldKey, indices] : equivalentKeyToIndices) {
+        comparedFields.insert(equivalentFieldKey);
+        if (indices.empty()) {
+            continue;
+        }
+
+        auto serializedBaselineIt = std::find_if(indices.begin(), indices.end(), [&observations](const std::size_t index) {
+            return observations[index].SnapshotScope == "serialized";
+        });
+
+        if (serializedBaselineIt == indices.end()) {
+            for (const std::size_t index : indices) {
+                const FieldObservation& observation = observations[index];
+                if (observation.Entry->Required) {
+                    findings.push_back(BuildEvolutionMismatchFinding(
+                        "FIELD_AUDIT_RULE_EVOLUTION_FORWARD_COMPATIBILITY_MISMATCH",
+                        FieldValidationMismatchKind::EvolutionForwardCompatibilityMismatch,
+                        "forward-required::" + observation.Entry->FieldId,
+                        observation,
+                        observation,
+                        "MIGRATION_RECOMMENDATION_PLACEHOLDER:ADD_DEFAULT_OR_TRANSFORM_FOR_NEW_REQUIRED_FIELD"));
+                }
+            }
+            continue;
+        }
+
+        const FieldObservation& serializedBaseline = observations[*serializedBaselineIt];
+        bool hasRuntime = false;
+        bool hasProtocol = false;
+        for (const std::size_t index : indices) {
+            if (observations[index].SnapshotScope == "runtime") {
+                hasRuntime = true;
+            } else if (observations[index].SnapshotScope == "protocol") {
+                hasProtocol = true;
+            }
+        }
+
+        if (!hasRuntime) {
+            findings.push_back(BuildEvolutionMismatchFinding(
+                "FIELD_AUDIT_RULE_EVOLUTION_BACKWARD_COMPATIBILITY_MISMATCH",
+                FieldValidationMismatchKind::EvolutionBackwardCompatibilityMismatch,
+                "backward-presence::" + equivalentFieldKey + "::runtime",
+                serializedBaseline,
+                serializedBaseline,
+                "MIGRATION_RECOMMENDATION_PLACEHOLDER:RESTORE_RUNTIME_READER_OR_ALIAS_FOR_REMOVED_FIELD"));
+        }
+        if (!hasProtocol) {
+            findings.push_back(BuildEvolutionMismatchFinding(
+                "FIELD_AUDIT_RULE_EVOLUTION_BACKWARD_COMPATIBILITY_MISMATCH",
+                FieldValidationMismatchKind::EvolutionBackwardCompatibilityMismatch,
+                "backward-presence::" + equivalentFieldKey + "::protocol",
+                serializedBaseline,
+                serializedBaseline,
+                "MIGRATION_RECOMMENDATION_PLACEHOLDER:RESTORE_PROTOCOL_READER_OR_ALIAS_FOR_REMOVED_FIELD"));
+        }
+
+        for (const std::size_t index : indices) {
+            if (index == *serializedBaselineIt) {
+                continue;
+            }
+
+            const FieldObservation& observation = observations[index];
+            if (observation.Entry->TypeName != serializedBaseline.Entry->TypeName) {
+                findings.push_back(BuildEvolutionMismatchFinding(
+                    "FIELD_AUDIT_RULE_EVOLUTION_BACKWARD_COMPATIBILITY_MISMATCH",
+                    FieldValidationMismatchKind::EvolutionBackwardCompatibilityMismatch,
+                    "backward-type::" + BuildStableMergeKey(*observation.Entry),
+                    observation,
+                    serializedBaseline,
+                    "MIGRATION_RECOMMENDATION_PLACEHOLDER:ADD_VERSIONED_TYPE_ADAPTER_OR_REWRITE_RULE"));
+            }
+
+            if (!serializedBaseline.Entry->Required && observation.Entry->Required) {
+                findings.push_back(BuildEvolutionMismatchFinding(
+                    "FIELD_AUDIT_RULE_EVOLUTION_BACKWARD_COMPATIBILITY_MISMATCH",
+                    FieldValidationMismatchKind::EvolutionBackwardCompatibilityMismatch,
+                    "backward-required::" + BuildStableMergeKey(*observation.Entry),
+                    observation,
+                    serializedBaseline,
+                    "MIGRATION_RECOMMENDATION_PLACEHOLDER:PROVIDE_DEFAULT_FOR_OPTIONAL_TO_REQUIRED_TRANSITION"));
+            }
+        }
+    }
+
+    SortFindings(findings);
+    findings.erase(std::unique(findings.begin(),
+                               findings.end(),
+                               [](const FieldValidationFinding& left, const FieldValidationFinding& right) {
+                                   return left.RuleId == right.RuleId && left.StableFieldKey == right.StableFieldKey &&
+                                          left.DomainPair == right.DomainPair &&
+                                          left.LeftEvidence.FieldId == right.LeftEvidence.FieldId &&
+                                          left.RightEvidence.FieldId == right.RightEvidence.FieldId &&
+                                          left.MigrationRecommendationPlaceholder ==
+                                              right.MigrationRecommendationPlaceholder;
+                               }),
+                   findings.end());
+
+    FieldValidationReport report{};
+    report.Scope = request.Scope;
+    report.OutputDirectory = request.OutputDirectory;
+    report.Findings = std::move(findings);
+    report.Summary.ComparedFieldCount = static_cast<uint32_t>(comparedFields.size());
+    for (const FieldValidationFinding& finding : report.Findings) {
+        if (finding.MismatchKind == FieldValidationMismatchKind::EvolutionBackwardCompatibilityMismatch) {
+            ++report.Summary.EvolutionBackwardCompatibilityMismatchCount;
+        } else if (finding.MismatchKind == FieldValidationMismatchKind::EvolutionForwardCompatibilityMismatch) {
+            ++report.Summary.EvolutionForwardCompatibilityMismatchCount;
+        } else if (finding.MismatchKind == FieldValidationMismatchKind::EvolutionMigrationWindowMismatch) {
+            ++report.Summary.EvolutionMigrationWindowMismatchCount;
         }
     }
     report.Summary.TotalFindingCount = static_cast<uint32_t>(report.Findings.size());
