@@ -377,6 +377,32 @@ void MergeEvidence(std::vector<FieldClosureEvidenceMetadata>& destination,
     return HashToHex(HashString(digestMaterial));
 }
 
+[[nodiscard]] std::string ComputeFreezeManifestDigest(const FieldClosureResult& result) {
+    std::string digestMaterial;
+    digestMaterial.reserve((result.PolicyCheckpointIds.size() * 64u) + (result.DiffRecords.size() * 96u) + 320u);
+    digestMaterial.append(result.RemediationBatchId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(result.ContractVersion);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.ContractVersionFrozen ? 1u : 0u));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.CriticalFindingCount));
+    digestMaterial.push_back('\n');
+
+    for (const std::string& checkpointId : result.PolicyCheckpointIds) {
+        digestMaterial.append(checkpointId);
+        digestMaterial.push_back('\n');
+    }
+
+    for (const FieldClosureDiffRecord& record : result.DiffRecords) {
+        digestMaterial.append(record.DiffId);
+        digestMaterial.push_back('|');
+        digestMaterial.append(record.DeterministicDigest);
+        digestMaterial.push_back('\n');
+    }
+    return HashToHex(HashString(digestMaterial));
+}
+
 void SortDiffRecords(std::vector<FieldClosureDiffRecord>& records) {
     std::sort(records.begin(), records.end(), [](const FieldClosureDiffRecord& left, const FieldClosureDiffRecord& right) {
         if (left.DiffKind != right.DiffKind) {
@@ -563,6 +589,37 @@ Result<FieldClosureResult> PublishFieldIntegritySignoffReport(const FieldClosure
     FieldClosureResult result = rerunResult.Value;
     result.SignoffApprover = request.SignoffApprover;
     result.SignoffReportDigest = ComputeSignoffReportDigest(result);
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<FieldClosureResult>::Success(std::move(result));
+}
+
+Result<FieldClosureResult> FreezeFieldContractVersionForNextPhase(const FieldClosureRequest& request) {
+    if (request.TargetContractVersion.empty() || request.PolicyCheckpointIds.empty()) {
+        return Result<FieldClosureResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    const Result<FieldClosureResult> rerunResult = BuildClosureDiffResult(request, "freeze-field-contract-version");
+    if (!rerunResult.Ok) {
+        return rerunResult;
+    }
+
+    FieldClosureResult result = rerunResult.Value;
+    if (result.Summary.CriticalFindingCount > 0u) {
+        return Result<FieldClosureResult>::Failure("FIELD_CONTRACT_FREEZE_FAILED");
+    }
+
+    const std::vector<std::string> normalizedPolicyCheckpoints = NormalizeTokenList(request.PolicyCheckpointIds);
+    if (normalizedPolicyCheckpoints.empty()) {
+        return Result<FieldClosureResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    result.ContractVersion = request.TargetContractVersion;
+    result.PolicyCheckpointIds = normalizedPolicyCheckpoints;
+    result.Summary.ContractVersionFrozen = true;
+    if (result.Summary.GateDecision == FieldClosureGateDecision::NotEvaluated) {
+        result.Summary.GateDecision = FieldClosureGateDecision::Pass;
+    }
+    result.FreezeManifestDigest = ComputeFreezeManifestDigest(result);
     result.DeterministicDigest = ComputeResultDigest(result);
     return Result<FieldClosureResult>::Success(std::move(result));
 }

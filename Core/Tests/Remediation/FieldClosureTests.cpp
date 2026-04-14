@@ -529,5 +529,158 @@ int main() {
         assert(second.Value.SignoffApprover == first.Value.SignoffApprover);
     }
 
+    {
+        FieldClosureRequest invalidRequest{};
+        const Result<FieldClosureResult> result = FreezeFieldContractVersionForNextPhase(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldClosureRequest unsupportedScope{};
+        unsupportedScope.Scope = "freeze-field-contract-version-v2";
+        unsupportedScope.OutputDirectory = root / "freeze-unsupported";
+        unsupportedScope.RemediationBatchId = "batch-030504";
+        unsupportedScope.BaselineRevision = "phase29-final";
+        unsupportedScope.CurrentRevision = "phase30-rerun-005";
+        unsupportedScope.BaselineCheckpointIds = {"phase29-final", "phase30-4"};
+        unsupportedScope.TargetContractVersion = "field-contract-v30.5";
+        unsupportedScope.PolicyCheckpointIds = {"policy.freeze.approval", "policy.change.control"};
+        unsupportedScope.BaselineFindings = {BuildFinding(
+            "finding-baseline-freeze-unsupported",
+            "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+            "Build::Manifest::CatalogKey",
+            "build<->runtime",
+            FieldClosureSeverity::Low,
+            "build-release",
+            "release-engineering",
+            {BuildEvidence("evidence-baseline-freeze-unsupported",
+                           "reports/freeze-baseline-build.json",
+                           "aa55667788")})};
+        unsupportedScope.RerunFindings = {BuildFinding(
+            "finding-rerun-freeze-unsupported",
+            "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+            "Build::Manifest::CatalogKey",
+            "build<->runtime",
+            FieldClosureSeverity::Low,
+            "build-release",
+            "release-engineering",
+            {BuildEvidence("evidence-rerun-freeze-unsupported",
+                           "reports/freeze-rerun-build.json",
+                           "aa11223344")})};
+
+        const Result<FieldClosureResult> result = FreezeFieldContractVersionForNextPhase(unsupportedScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldClosureRequest blockedRequest{};
+        blockedRequest.Scope = "freeze-field-contract-version";
+        blockedRequest.OutputDirectory = root / "freeze-blocked";
+        blockedRequest.RemediationBatchId = "batch-030504";
+        blockedRequest.BaselineRevision = "phase29-final";
+        blockedRequest.CurrentRevision = "phase30-rerun-005";
+        blockedRequest.BaselineCheckpointIds = {"phase29-final", "phase30-4"};
+        blockedRequest.TargetContractVersion = "field-contract-v30.5";
+        blockedRequest.PolicyCheckpointIds = {"policy.freeze.approval", "policy.change.control"};
+        blockedRequest.BaselineFindings = {BuildFinding(
+            "finding-baseline-freeze-blocked",
+            "FIELD_AUDIT_RULE_REPLICATION_SCHEMA_DRIFT",
+            "Runtime::Inventory::Version",
+            "runtime<->network",
+            FieldClosureSeverity::High,
+            "network-systems",
+            "multiplayer",
+            {BuildEvidence("evidence-baseline-freeze-blocked",
+                           "reports/freeze-baseline-network.json",
+                           "0a1b2c3d4e")})};
+        blockedRequest.RerunFindings = {BuildFinding(
+            "finding-rerun-freeze-blocked",
+            "FIELD_AUDIT_RULE_REPLICATION_SCHEMA_DRIFT",
+            "Runtime::Inventory::Version",
+            "runtime<->network",
+            FieldClosureSeverity::Critical,
+            "network-systems",
+            "multiplayer",
+            {BuildEvidence("evidence-rerun-freeze-blocked",
+                           "reports/freeze-rerun-network.json",
+                           "5e4d3c2b1a")})};
+
+        const Result<FieldClosureResult> blocked = FreezeFieldContractVersionForNextPhase(blockedRequest);
+        assert(!blocked.Ok);
+        assert(blocked.Error == "FIELD_CONTRACT_FREEZE_FAILED");
+    }
+
+    {
+        FieldClosureRequest request{};
+        request.Scope = "freeze-field-contract-version";
+        request.OutputDirectory = root / "freeze-success";
+        request.RemediationBatchId = "batch-030504";
+        request.BaselineRevision = "phase29-final";
+        request.CurrentRevision = "phase30-rerun-006";
+        request.BaselineCheckpointIds = {"phase30-4", "phase29-final", "phase30-4"};
+        request.TargetContractVersion = "field-contract-v30.5";
+        request.PolicyCheckpointIds = {
+            "policy.change.control",
+            "policy.freeze.approval",
+            "policy.change.control",
+            "policy.audit.record"};
+
+        request.BaselineFindings = {
+            BuildFinding("finding-baseline-freeze-resolved",
+                         "FIELD_AUDIT_RULE_RUNTIME_BINDING_PARITY",
+                         "Runtime::Player::Health",
+                         "runtime<->serialized",
+                         FieldClosureSeverity::High,
+                         "runtime-systems",
+                         "gameplay",
+                         {BuildEvidence("evidence-baseline-freeze-resolved",
+                                        "reports/freeze-baseline-runtime.json",
+                                        "ff00112233")}),
+            BuildFinding("finding-baseline-freeze-unchanged",
+                         "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+                         "Build::Manifest::CatalogKey",
+                         "build<->runtime",
+                         FieldClosureSeverity::Medium,
+                         "build-release",
+                         "release-engineering",
+                         {BuildEvidence("evidence-baseline-freeze-unchanged",
+                                        "reports/freeze-baseline-build.json",
+                                        "ff44556677")})};
+
+        request.RerunFindings = {
+            BuildFinding("finding-rerun-freeze-unchanged",
+                         "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+                         "Build::Manifest::CatalogKey",
+                         "build<->runtime",
+                         FieldClosureSeverity::Medium,
+                         "build-release",
+                         "release-engineering",
+                         {BuildEvidence("evidence-rerun-freeze-unchanged",
+                                        "reports/freeze-rerun-build.json",
+                                        "ff77889900")})};
+
+        const Result<FieldClosureResult> first = FreezeFieldContractVersionForNextPhase(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.ContractVersion == request.TargetContractVersion);
+        assert(first.Value.PolicyCheckpointIds.size() == 3u);
+        assert(first.Value.PolicyCheckpointIds[0] == "policy.audit.record");
+        assert(first.Value.PolicyCheckpointIds[1] == "policy.change.control");
+        assert(first.Value.PolicyCheckpointIds[2] == "policy.freeze.approval");
+        assert(first.Value.Summary.ContractVersionFrozen);
+        assert(first.Value.Summary.CriticalFindingCount == 0u);
+        assert(first.Value.Summary.GateDecision == FieldClosureGateDecision::Pass);
+        assert(!first.Value.FreezeManifestDigest.empty());
+        assert(!first.Value.DeterministicDigest.empty());
+
+        const Result<FieldClosureResult> second = FreezeFieldContractVersionForNextPhase(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.FreezeManifestDigest == first.Value.FreezeManifestDigest);
+        assert(second.Value.ContractVersion == first.Value.ContractVersion);
+    }
+
     return 0;
 }
