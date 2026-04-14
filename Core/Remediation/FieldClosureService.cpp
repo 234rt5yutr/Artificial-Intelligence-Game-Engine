@@ -336,15 +336,14 @@ void SortDiffRecords(std::vector<FieldClosureDiffRecord>& records) {
     });
 }
 
-} // namespace
-
-Result<FieldClosureResult> ReRunFullFieldAuditAndDiffAgainstBaseline(const FieldClosureRequest& request) {
+[[nodiscard]] Result<FieldClosureResult> BuildClosureDiffResult(const FieldClosureRequest& request,
+                                                                const std::string_view expectedScope) {
     if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
         request.BaselineRevision.empty() || request.CurrentRevision.empty() || request.BaselineCheckpointIds.empty()) {
         return Result<FieldClosureResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
     }
 
-    if (request.Scope != "rerun-diff-baseline") {
+    if (request.Scope != expectedScope) {
         return Result<FieldClosureResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
     }
 
@@ -464,6 +463,29 @@ Result<FieldClosureResult> ReRunFullFieldAuditAndDiffAgainstBaseline(const Field
         }
     }
 
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<FieldClosureResult>::Success(std::move(result));
+}
+
+} // namespace
+
+Result<FieldClosureResult> ReRunFullFieldAuditAndDiffAgainstBaseline(const FieldClosureRequest& request) {
+    return BuildClosureDiffResult(request, "rerun-diff-baseline");
+}
+
+Result<FieldClosureResult> EnforceZeroCriticalFieldDefectGate(const FieldClosureRequest& request) {
+    const Result<FieldClosureResult> rerunResult = BuildClosureDiffResult(request, "zero-critical-defect-gate");
+    if (!rerunResult.Ok) {
+        return rerunResult;
+    }
+
+    FieldClosureResult result = rerunResult.Value;
+    if (result.Summary.CriticalFindingCount > 0u) {
+        result.Summary.GateDecision = FieldClosureGateDecision::Block;
+        return Result<FieldClosureResult>::Failure("FIELD_SIGNOFF_BLOCKED");
+    }
+
+    result.Summary.GateDecision = FieldClosureGateDecision::Pass;
     result.DeterministicDigest = ComputeResultDigest(result);
     return Result<FieldClosureResult>::Success(std::move(result));
 }

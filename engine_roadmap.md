@@ -458,6 +458,6 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 30.4.4: Implement `AddFieldDriftMonitoringAndAlerting()` for schema drift detection between commits and build artifacts. (v0.30.4.4)
 * [ ] Step 30.5: Close remediation with independent verification and governance sign-off.
   * [x] Sub-step 30.5.1: Implement `ReRunFullFieldAuditAndDiffAgainstBaseline()` to verify net defect reduction and detect regressions. (v0.30.5.1)
-  * [ ] Sub-step 30.5.2: Implement `EnforceZeroCriticalFieldDefectGate()` across runtime, network, persistence, and release artifact domains. (v0.30.5.2)
+  * [x] Sub-step 30.5.2: Implement `EnforceZeroCriticalFieldDefectGate()` across runtime, network, persistence, and release artifact domains. (v0.30.5.2)
   * [ ] Sub-step 30.5.3: Implement `PublishFieldIntegritySignoffReport()` with unresolved-risk disclosures and ownership acknowledgements. (v0.30.5.3)
   * [ ] Sub-step 30.5.4: Implement `FreezeFieldContractVersionForNextPhase()` with policy checkpoints for controlled schema evolution. (v0.30.5.4)

@@ -266,5 +266,140 @@ int main() {
         }
     }
 
+    {
+        FieldClosureRequest invalidRequest{};
+        const Result<FieldClosureResult> result = EnforceZeroCriticalFieldDefectGate(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldClosureRequest unsupportedScope{};
+        unsupportedScope.Scope = "zero-critical-defect-gate-v2";
+        unsupportedScope.OutputDirectory = root / "zero-critical-unsupported";
+        unsupportedScope.RemediationBatchId = "batch-030502";
+        unsupportedScope.BaselineRevision = "phase29-final";
+        unsupportedScope.CurrentRevision = "phase30-rerun-002";
+        unsupportedScope.BaselineCheckpointIds = {"phase29-final", "phase30-4"};
+        unsupportedScope.BaselineFindings = {BuildFinding(
+            "finding-baseline-critical-unsupported",
+            "FIELD_AUDIT_RULE_NETWORK_PARITY",
+            "Runtime::Replication::StateHash",
+            "runtime<->network",
+            FieldClosureSeverity::Critical,
+            "network-systems",
+            "multiplayer",
+            {BuildEvidence("evidence-baseline-critical-unsupported",
+                           "reports/zero-critical-baseline-network.json",
+                           "beef111122")})};
+        unsupportedScope.RerunFindings = {BuildFinding(
+            "finding-rerun-critical-unsupported",
+            "FIELD_AUDIT_RULE_NETWORK_PARITY",
+            "Runtime::Replication::StateHash",
+            "runtime<->network",
+            FieldClosureSeverity::Critical,
+            "network-systems",
+            "multiplayer",
+            {BuildEvidence("evidence-rerun-critical-unsupported",
+                           "reports/zero-critical-rerun-network.json",
+                           "beef333344")})};
+        const Result<FieldClosureResult> result = EnforceZeroCriticalFieldDefectGate(unsupportedScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldClosureRequest blockedRequest{};
+        blockedRequest.Scope = "zero-critical-defect-gate";
+        blockedRequest.OutputDirectory = root / "zero-critical-blocked";
+        blockedRequest.RemediationBatchId = "batch-030502";
+        blockedRequest.BaselineRevision = "phase29-final";
+        blockedRequest.CurrentRevision = "phase30-rerun-002";
+        blockedRequest.BaselineCheckpointIds = {"phase29-final", "phase30-4"};
+        blockedRequest.BaselineFindings = {BuildFinding(
+            "finding-baseline-critical",
+            "FIELD_AUDIT_RULE_NETWORK_PARITY",
+            "Runtime::Replication::StateHash",
+            "runtime<->network",
+            FieldClosureSeverity::High,
+            "network-systems",
+            "multiplayer",
+            {BuildEvidence("evidence-baseline-critical",
+                           "reports/zero-critical-baseline-network.json",
+                           "beef111122")})};
+        blockedRequest.RerunFindings = {BuildFinding(
+            "finding-rerun-critical",
+            "FIELD_AUDIT_RULE_NETWORK_PARITY",
+            "Runtime::Replication::StateHash",
+            "runtime<->network",
+            FieldClosureSeverity::Critical,
+            "network-systems",
+            "multiplayer",
+            {BuildEvidence("evidence-rerun-critical",
+                           "reports/zero-critical-rerun-network.json",
+                           "beef333344")})};
+
+        const Result<FieldClosureResult> blocked = EnforceZeroCriticalFieldDefectGate(blockedRequest);
+        assert(!blocked.Ok);
+        assert(blocked.Error == "FIELD_SIGNOFF_BLOCKED");
+    }
+
+    {
+        FieldClosureRequest passRequest{};
+        passRequest.Scope = "zero-critical-defect-gate";
+        passRequest.OutputDirectory = root / "zero-critical-pass";
+        passRequest.RemediationBatchId = "batch-030502";
+        passRequest.BaselineRevision = "phase29-final";
+        passRequest.CurrentRevision = "phase30-rerun-003";
+        passRequest.BaselineCheckpointIds = {"phase29-final", "phase30-4"};
+        passRequest.BaselineFindings = {
+            BuildFinding("finding-baseline-high",
+                         "FIELD_AUDIT_RULE_RUNTIME_BINDING_PARITY",
+                         "Runtime::Player::Health",
+                         "runtime<->serialized",
+                         FieldClosureSeverity::High,
+                         "runtime-systems",
+                         "gameplay",
+                         {BuildEvidence("evidence-baseline-high", "reports/pass-baseline-runtime.json", "c11122aacc")}),
+            BuildFinding("finding-baseline-medium",
+                         "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+                         "Build::Manifest::CatalogKey",
+                         "build<->runtime",
+                         FieldClosureSeverity::Medium,
+                         "build-release",
+                         "release-engineering",
+                         {BuildEvidence("evidence-baseline-medium", "reports/pass-baseline-build.json", "d11122aacc")})};
+        passRequest.RerunFindings = {
+            BuildFinding("finding-rerun-high-downscoped",
+                         "FIELD_AUDIT_RULE_RUNTIME_BINDING_PARITY",
+                         "Runtime::Player::Health",
+                         "runtime<->serialized",
+                         FieldClosureSeverity::Medium,
+                         "runtime-systems",
+                         "gameplay",
+                         {BuildEvidence("evidence-rerun-high-downscoped", "reports/pass-rerun-runtime.json", "e11122aacc")}),
+            BuildFinding("finding-rerun-medium",
+                         "FIELD_AUDIT_RULE_BUILD_MANIFEST_ALIAS_DRIFT",
+                         "Build::Manifest::CatalogKey",
+                         "build<->runtime",
+                         FieldClosureSeverity::Medium,
+                         "build-release",
+                         "release-engineering",
+                         {BuildEvidence("evidence-rerun-medium", "reports/pass-rerun-build.json", "f11122aacc")})};
+
+        const Result<FieldClosureResult> first = EnforceZeroCriticalFieldDefectGate(passRequest);
+        assert(first.Ok);
+        assert(first.Value.Scope == passRequest.Scope);
+        assert(first.Value.Summary.CriticalFindingCount == 0u);
+        assert(first.Value.Summary.GateDecision == FieldClosureGateDecision::Pass);
+        assert(first.Value.Summary.TotalDiffCount == 2u);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        const Result<FieldClosureResult> second = EnforceZeroCriticalFieldDefectGate(passRequest);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.Summary.GateDecision == FieldClosureGateDecision::Pass);
+    }
+
     return 0;
 }
