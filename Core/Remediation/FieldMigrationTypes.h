@@ -19,7 +19,10 @@ enum class FieldMigrationAssetKind : uint8_t {
     LocalizationTable = 3,
     AddressableCatalog = 4,
     AssetBundle = 5,
-    BuildManifest = 6
+    BuildManifest = 6,
+    PlayerSave = 7,
+    ReplayData = 8,
+    AutomationBaseline = 9
 };
 
 enum class FieldMigrationTransformKind : uint8_t {
@@ -32,7 +35,10 @@ enum class FieldMigrationTransformKind : uint8_t {
     CatalogParityNormalization = 6,
     BundleParityNormalization = 7,
     BuildProfileTargetNormalization = 8,
-    ManifestLinkageNormalization = 9
+    ManifestLinkageNormalization = 9,
+    SaveCompatibilityNormalization = 10,
+    ReplayDeterminismNormalization = 11,
+    AutomationBaselineNormalization = 12
 };
 
 struct FieldMigrationProvenanceMetadata {
@@ -92,6 +98,20 @@ struct FieldMigrationEntry {
     std::string ExpectedManifestBundleId;
     std::string ManifestCatalogKey;
     std::string ExpectedManifestCatalogKey;
+    std::string SaveSchemaVersion;
+    std::string ExpectedSaveSchemaVersion;
+    std::string SaveCompatibilityPath;
+    std::string ExpectedSaveCompatibilityPath;
+    std::string ReplaySchemaVersion;
+    std::string ExpectedReplaySchemaVersion;
+    std::string ReplayDeterminismVersion;
+    std::string ExpectedReplayDeterminismVersion;
+    std::string AutomationBaselineId;
+    std::string ExpectedAutomationBaselineId;
+    std::string AutomationSeed;
+    std::string ExpectedAutomationSeed;
+    std::string AutomationDeterminismBaseline;
+    std::string ExpectedAutomationDeterminismBaseline;
     FieldMigrationProvenanceMetadata Provenance;
 };
 
@@ -128,6 +148,9 @@ struct FieldMigrationSummary {
     uint32_t AddressableCatalogMigrationCount = 0;
     uint32_t AssetBundleMigrationCount = 0;
     uint32_t BuildManifestMigrationCount = 0;
+    uint32_t PlayerSaveMigrationCount = 0;
+    uint32_t ReplayDataMigrationCount = 0;
+    uint32_t AutomationBaselineMigrationCount = 0;
     uint32_t RequiredBackfillCount = 0;
     uint32_t GraphNormalizationCount = 0;
     uint32_t BindingNormalizationCount = 0;
@@ -138,6 +161,9 @@ struct FieldMigrationSummary {
     uint32_t BundleParityNormalizationCount = 0;
     uint32_t BuildProfileTargetNormalizationCount = 0;
     uint32_t ManifestLinkageNormalizationCount = 0;
+    uint32_t SaveCompatibilityNormalizationCount = 0;
+    uint32_t ReplayDeterminismNormalizationCount = 0;
+    uint32_t AutomationBaselineNormalizationCount = 0;
     uint32_t RollbackSafeMigrationCount = 0;
     uint32_t TotalMigrationCount = 0;
 };

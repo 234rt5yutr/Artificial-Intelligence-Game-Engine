@@ -75,6 +75,25 @@ Core::Remediation::FieldMigrationEntry BuildAddressableEntry(
     return entry;
 }
 
+Core::Remediation::FieldMigrationEntry BuildPersistenceEntry(
+    const std::string& assetId,
+    const Core::Remediation::FieldMigrationAssetKind assetKind,
+    const std::string& fieldId,
+    const std::string& findingId,
+    const std::string& owner) {
+    Core::Remediation::FieldMigrationEntry entry{};
+    entry.AssetId = assetId;
+    entry.AssetKind = assetKind;
+    entry.StableFieldKey = "Persistence::Determinism";
+    entry.DomainPair = "save<->replay<->automation";
+    entry.FieldId = fieldId;
+    entry.FieldValue = "configured";
+    entry.Provenance.FindingId = findingId;
+    entry.Provenance.RuleId = "FIELD_AUDIT_RULE_PERSISTENCE_DETERMINISM_DRIFT";
+    entry.Provenance.Owner = owner;
+    return entry;
+}
+
 } // namespace
 
 #define REQUIRE_OR_FAIL(condition) \
@@ -219,6 +238,13 @@ int main() {
     {
         FieldMigrationRequest invalidRequest{};
         const Result<FieldMigrationResult> result = MigrateAddressableBundleAndBuildManifestFieldData(invalidRequest);
+        REQUIRE_OR_FAIL(!result.Ok);
+        REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldMigrationRequest invalidRequest{};
+        const Result<FieldMigrationResult> result = RepairPlayerSaveReplayAndAutomationFieldData(invalidRequest);
         REQUIRE_OR_FAIL(!result.Ok);
         REQUIRE_OR_FAIL(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
     }
@@ -468,6 +494,134 @@ int main() {
         REQUIRE_OR_FAIL(sawWidgetMetadata);
 
         const Result<FieldMigrationResult> second = MigrateUIAndLocalizationFieldData(request);
+        REQUIRE_OR_FAIL(second.Ok);
+        REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
+        REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        REQUIRE_OR_FAIL(second.Value.MigrationRecords.size() == first.Value.MigrationRecords.size());
+        for (std::size_t index = 0; index < first.Value.MigrationRecords.size(); ++index) {
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].MigrationId == first.Value.MigrationRecords[index].MigrationId);
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].DeterministicDigest ==
+                            first.Value.MigrationRecords[index].DeterministicDigest);
+            REQUIRE_OR_FAIL(second.Value.MigrationRecords[index].Rollback.RollbackCheckpointId ==
+                            first.Value.MigrationRecords[index].Rollback.RollbackCheckpointId);
+        }
+    }
+
+    {
+        FieldMigrationRequest request{};
+        request.Scope = "player-save-replay-automation-data";
+        request.OutputDirectory = root / "persistence-success";
+        request.RemediationBatchId = "batch-030204";
+        request.RollbackManifestPath = request.OutputDirectory / "rollback-persistence.json";
+
+        FieldMigrationEntry saveEntry = BuildPersistenceEntry("save://slot-1",
+                                                              FieldMigrationAssetKind::PlayerSave,
+                                                              "save::slot-1::header",
+                                                              "finding-persistence-a",
+                                                              "save-system");
+        saveEntry.SaveSchemaVersion = "v3";
+        saveEntry.ExpectedSaveSchemaVersion = "v4";
+        saveEntry.SaveCompatibilityPath = "compat/legacy/v3";
+        saveEntry.ExpectedSaveCompatibilityPath = "compat/runtime/v4";
+
+        FieldMigrationEntry replayEntry = BuildPersistenceEntry("replay://session-77",
+                                                                FieldMigrationAssetKind::ReplayData,
+                                                                "replay::session-77::header",
+                                                                "finding-persistence-b",
+                                                                "replay-system");
+        replayEntry.ReplaySchemaVersion = "schema-3";
+        replayEntry.ExpectedReplaySchemaVersion = "schema-4";
+        replayEntry.ReplayDeterminismVersion = "simhash-legacy";
+        replayEntry.ExpectedReplayDeterminismVersion = "simhash-2024";
+
+        FieldMigrationEntry automationEntry = BuildPersistenceEntry("automation://baseline-nightly",
+                                                                    FieldMigrationAssetKind::AutomationBaseline,
+                                                                    "automation::baseline::nightly",
+                                                                    "finding-persistence-c",
+                                                                    "automation-system");
+        automationEntry.AutomationBaselineId = "baseline-nightly-v1";
+        automationEntry.ExpectedAutomationBaselineId = "baseline-nightly-v2";
+        automationEntry.AutomationSeed = "seed:101";
+        automationEntry.ExpectedAutomationSeed = "seed:2024";
+        automationEntry.AutomationDeterminismBaseline = "det-baseline-a";
+        automationEntry.ExpectedAutomationDeterminismBaseline = "det-baseline-b";
+
+        request.Entries = {saveEntry, saveEntry, replayEntry, automationEntry};
+
+        const Result<FieldMigrationResult> first = RepairPlayerSaveReplayAndAutomationFieldData(request);
+        REQUIRE_OR_FAIL(first.Ok);
+        REQUIRE_OR_FAIL(first.Value.Scope == request.Scope);
+        REQUIRE_OR_FAIL(first.Value.Summary.PlayerSaveMigrationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.ReplayDataMigrationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.AutomationBaselineMigrationCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.SaveCompatibilityNormalizationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.ReplayDeterminismNormalizationCount == 2u);
+        REQUIRE_OR_FAIL(first.Value.Summary.AutomationBaselineNormalizationCount == 3u);
+        REQUIRE_OR_FAIL(first.Value.Summary.TotalMigrationCount == 7u);
+        REQUIRE_OR_FAIL(first.Value.Summary.RollbackSafeMigrationCount == first.Value.Summary.TotalMigrationCount);
+        REQUIRE_OR_FAIL(first.Value.MigrationRecords.size() == 7u);
+        REQUIRE_OR_FAIL(!first.Value.RollbackManifestDigest.empty());
+        REQUIRE_OR_FAIL(!first.Value.DeterministicDigest.empty());
+
+        bool sawSaveSchemaVersion = false;
+        bool sawSaveCompatibilityPath = false;
+        bool sawReplaySchemaVersion = false;
+        bool sawReplayDeterminism = false;
+        bool sawAutomationBaselineId = false;
+        bool sawAutomationSeed = false;
+        bool sawAutomationDeterminismBaseline = false;
+        for (const FieldMigrationRecord& record : first.Value.MigrationRecords) {
+            REQUIRE_OR_FAIL(!record.Rollback.RollbackCheckpointId.empty());
+            REQUIRE_OR_FAIL(!record.DeterministicDigest.empty());
+            REQUIRE_OR_FAIL(record.Provenance.RemediationBatchId == request.RemediationBatchId);
+
+            if (record.PropertyPath == "save.schema.version") {
+                sawSaveSchemaVersion = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::SaveCompatibilityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "v3");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "v4");
+            } else if (record.PropertyPath == "save.compatibility.path") {
+                sawSaveCompatibilityPath = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::SaveCompatibilityNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "compat/legacy/v3");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "compat/runtime/v4");
+            } else if (record.PropertyPath == "replay.schema.version") {
+                sawReplaySchemaVersion = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::ReplayDeterminismNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "schema-3");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "schema-4");
+            } else if (record.PropertyPath == "replay.determinism.version") {
+                sawReplayDeterminism = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::ReplayDeterminismNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "simhash-legacy");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "simhash-2024");
+            } else if (record.PropertyPath == "automation.baseline.id") {
+                sawAutomationBaselineId = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::AutomationBaselineNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "baseline-nightly-v1");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "baseline-nightly-v2");
+            } else if (record.PropertyPath == "automation.seed") {
+                sawAutomationSeed = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::AutomationBaselineNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "seed:101");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "seed:2024");
+            } else if (record.PropertyPath == "automation.determinism.baseline") {
+                sawAutomationDeterminismBaseline = true;
+                REQUIRE_OR_FAIL(record.TransformKind == FieldMigrationTransformKind::AutomationBaselineNormalization);
+                REQUIRE_OR_FAIL(record.ExistingValue == "det-baseline-a");
+                REQUIRE_OR_FAIL(record.ReplacementValue == "det-baseline-b");
+            }
+        }
+
+        REQUIRE_OR_FAIL(sawSaveSchemaVersion);
+        REQUIRE_OR_FAIL(sawSaveCompatibilityPath);
+        REQUIRE_OR_FAIL(sawReplaySchemaVersion);
+        REQUIRE_OR_FAIL(sawReplayDeterminism);
+        REQUIRE_OR_FAIL(sawAutomationBaselineId);
+        REQUIRE_OR_FAIL(sawAutomationSeed);
+        REQUIRE_OR_FAIL(sawAutomationDeterminismBaseline);
+
+        const Result<FieldMigrationResult> second = RepairPlayerSaveReplayAndAutomationFieldData(request);
         REQUIRE_OR_FAIL(second.Ok);
         REQUIRE_OR_FAIL(second.Value.RollbackManifestDigest == first.Value.RollbackManifestDigest);
         REQUIRE_OR_FAIL(second.Value.DeterministicDigest == first.Value.DeterministicDigest);

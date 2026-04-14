@@ -227,6 +227,12 @@ namespace {
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.BuildManifestMigrationCount));
     digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.PlayerSaveMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.ReplayDataMigrationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.AutomationBaselineMigrationCount));
+    digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RequiredBackfillCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.GraphNormalizationCount));
@@ -246,6 +252,12 @@ namespace {
     digestMaterial.append(std::to_string(result.Summary.BuildProfileTargetNormalizationCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.ManifestLinkageNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.SaveCompatibilityNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.ReplayDeterminismNormalizationCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.AutomationBaselineNormalizationCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RollbackSafeMigrationCount));
     digestMaterial.push_back('|');
@@ -764,6 +776,174 @@ Result<FieldMigrationResult> MigrateAddressableBundleAndBuildManifestFieldData(c
             ++result.Summary.RollbackSafeMigrationCount;
         }
     }
+    result.Summary.TotalMigrationCount = static_cast<uint32_t>(result.MigrationRecords.size());
+    result.RollbackManifestDigest = ComputeRollbackManifestDigest(result);
+    result.DeterministicDigest = ComputeResultDigest(result);
+    return Result<FieldMigrationResult>::Success(std::move(result));
+}
+
+Result<FieldMigrationResult> RepairPlayerSaveReplayAndAutomationFieldData(const FieldMigrationRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
+        request.RollbackManifestPath.empty() || request.Entries.empty()) {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    if (request.Scope != "player-save-replay-automation-data") {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    for (const FieldMigrationEntry& entry : request.Entries) {
+        if (!IsValidEntry(entry)) {
+            return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldMigrationResult>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldMigrationRecord> migrationRecords;
+    std::set<std::string> seenMigrationKeys;
+    for (const FieldMigrationEntry& entry : request.Entries) {
+        auto emitMigration = [&](const FieldMigrationTransformKind transformKind,
+                                 const std::string& propertyPath,
+                                 const std::string& existingValue,
+                                 const std::string& replacementValue,
+                                 const std::string& graphNormalizationAction) {
+            std::string dedupeKey;
+            dedupeKey.reserve(384u);
+            dedupeKey.append(entry.Provenance.FindingId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.AssetId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(entry.FieldId);
+            dedupeKey.push_back('|');
+            dedupeKey.append(std::to_string(static_cast<uint32_t>(transformKind)));
+            dedupeKey.push_back('|');
+            dedupeKey.append(propertyPath);
+            dedupeKey.push_back('|');
+            dedupeKey.append(replacementValue);
+            if (seenMigrationKeys.contains(dedupeKey)) {
+                return;
+            }
+            seenMigrationKeys.emplace(std::move(dedupeKey));
+
+            FieldMigrationRecord record{};
+            record.AssetKind = entry.AssetKind;
+            record.TransformKind = transformKind;
+            record.AssetId = entry.AssetId;
+            record.StableFieldKey = entry.StableFieldKey;
+            record.DomainPair = entry.DomainPair;
+            record.TargetFieldId = entry.FieldId;
+            record.PropertyPath = propertyPath;
+            record.ExistingValue = existingValue;
+            record.ReplacementValue = replacementValue;
+            record.GraphNormalizationAction = graphNormalizationAction;
+            record.Provenance = entry.Provenance;
+            record.Provenance.RemediationBatchId = request.RemediationBatchId;
+            record.Rollback.RollbackRequired = true;
+            record.Rollback.RollbackPropertyPath = propertyPath;
+            record.Rollback.RollbackValue = existingValue;
+            record.Rollback.RollbackManifestPath = request.RollbackManifestPath.generic_string();
+            record.Rollback.RollbackCheckpointId =
+                HashToHex(HashString(request.RemediationBatchId + "|" + entry.AssetId + "|" + entry.FieldId + "|" +
+                                     propertyPath + "|" + existingValue + "|" + replacementValue));
+            record.MigrationId = BuildMigrationId(record);
+            record.DeterministicDigest = ComputeMigrationRecordDigest(record);
+            migrationRecords.push_back(std::move(record));
+        };
+
+        if (!entry.ExpectedSaveSchemaVersion.empty() && entry.SaveSchemaVersion != entry.ExpectedSaveSchemaVersion) {
+            emitMigration(FieldMigrationTransformKind::SaveCompatibilityNormalization,
+                          "save.schema.version",
+                          AsExistingValue(entry.SaveSchemaVersion),
+                          entry.ExpectedSaveSchemaVersion,
+                          "repair-save-schema-version-drift");
+        }
+
+        if (!entry.ExpectedSaveCompatibilityPath.empty() &&
+            entry.SaveCompatibilityPath != entry.ExpectedSaveCompatibilityPath) {
+            emitMigration(FieldMigrationTransformKind::SaveCompatibilityNormalization,
+                          "save.compatibility.path",
+                          AsExistingValue(entry.SaveCompatibilityPath),
+                          entry.ExpectedSaveCompatibilityPath,
+                          "repair-save-compatibility-path-drift");
+        }
+
+        if (!entry.ExpectedReplaySchemaVersion.empty() && entry.ReplaySchemaVersion != entry.ExpectedReplaySchemaVersion) {
+            emitMigration(FieldMigrationTransformKind::ReplayDeterminismNormalization,
+                          "replay.schema.version",
+                          AsExistingValue(entry.ReplaySchemaVersion),
+                          entry.ExpectedReplaySchemaVersion,
+                          "repair-replay-schema-version-drift");
+        }
+
+        if (!entry.ExpectedReplayDeterminismVersion.empty() &&
+            entry.ReplayDeterminismVersion != entry.ExpectedReplayDeterminismVersion) {
+            emitMigration(FieldMigrationTransformKind::ReplayDeterminismNormalization,
+                          "replay.determinism.version",
+                          AsExistingValue(entry.ReplayDeterminismVersion),
+                          entry.ExpectedReplayDeterminismVersion,
+                          "repair-replay-determinism-drift");
+        }
+
+        if (!entry.ExpectedAutomationBaselineId.empty() && entry.AutomationBaselineId != entry.ExpectedAutomationBaselineId) {
+            emitMigration(FieldMigrationTransformKind::AutomationBaselineNormalization,
+                          "automation.baseline.id",
+                          AsExistingValue(entry.AutomationBaselineId),
+                          entry.ExpectedAutomationBaselineId,
+                          "repair-automation-baseline-id-drift");
+        }
+
+        if (!entry.ExpectedAutomationSeed.empty() && entry.AutomationSeed != entry.ExpectedAutomationSeed) {
+            emitMigration(FieldMigrationTransformKind::AutomationBaselineNormalization,
+                          "automation.seed",
+                          AsExistingValue(entry.AutomationSeed),
+                          entry.ExpectedAutomationSeed,
+                          "repair-automation-seed-drift");
+        }
+
+        if (!entry.ExpectedAutomationDeterminismBaseline.empty() &&
+            entry.AutomationDeterminismBaseline != entry.ExpectedAutomationDeterminismBaseline) {
+            emitMigration(FieldMigrationTransformKind::AutomationBaselineNormalization,
+                          "automation.determinism.baseline",
+                          AsExistingValue(entry.AutomationDeterminismBaseline),
+                          entry.ExpectedAutomationDeterminismBaseline,
+                          "repair-automation-determinism-baseline-drift");
+        }
+    }
+
+    SortMigrationRecords(migrationRecords);
+
+    FieldMigrationResult result{};
+    result.Scope = request.Scope;
+    result.OutputDirectory = request.OutputDirectory;
+    result.RemediationBatchId = request.RemediationBatchId;
+    result.RollbackManifestPath = request.RollbackManifestPath;
+    result.MigrationRecords = std::move(migrationRecords);
+
+    for (const FieldMigrationRecord& record : result.MigrationRecords) {
+        if (record.AssetKind == FieldMigrationAssetKind::PlayerSave) {
+            ++result.Summary.PlayerSaveMigrationCount;
+        } else if (record.AssetKind == FieldMigrationAssetKind::ReplayData) {
+            ++result.Summary.ReplayDataMigrationCount;
+        } else if (record.AssetKind == FieldMigrationAssetKind::AutomationBaseline) {
+            ++result.Summary.AutomationBaselineMigrationCount;
+        }
+
+        if (record.TransformKind == FieldMigrationTransformKind::SaveCompatibilityNormalization) {
+            ++result.Summary.SaveCompatibilityNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::ReplayDeterminismNormalization) {
+            ++result.Summary.ReplayDeterminismNormalizationCount;
+        } else if (record.TransformKind == FieldMigrationTransformKind::AutomationBaselineNormalization) {
+            ++result.Summary.AutomationBaselineNormalizationCount;
+        }
+
+        if (record.Rollback.RollbackRequired) {
+            ++result.Summary.RollbackSafeMigrationCount;
+        }
+    }
+
     result.Summary.TotalMigrationCount = static_cast<uint32_t>(result.MigrationRecords.size());
     result.RollbackManifestDigest = ComputeRollbackManifestDigest(result);
     result.DeterministicDigest = ComputeResultDigest(result);
