@@ -27,11 +27,12 @@ Implemented foundation (code present and wired into build):
 - Physics integration path (Jolt)
 - Networking layer (GameNetworkingSockets) with replication/prediction modules
 - MCP server, HTTP interface, and scene serialization/tool scaffolding
+- Runtime UI authoring stack with widget blueprint/layout assets, data bindings, transitions, world-space widgets, localization, and modal focus routing
 
 Roadmap snapshot from `engine_roadmap.md`:
-- Completed: Foundational phases through advanced gameplay/ray tracing/physics integration milestones (latest reviewed up to Phase 20)
-- Latest hardening pass: security and code-quality review updates released as `v0.20.1`
-- Ongoing work: stabilization, toolchain/documentation polish, and runtime UX improvements
+- Completed: Roadmap phases through **Phase 27** (including Stage 27 UI persistence sub-step `27.3.4`)
+- Latest release milestone: `v0.27.3.4`
+- Current focus: **Phase 28** profiling, automation, and production build pipeline
 
 ## Architecture Overview
 
@@ -79,6 +80,8 @@ Key directories:
 
 - Build guide: [`BUILD_GUIDE.md`](BUILD_GUIDE.md)
 - MCP server guide: [`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md)
+- Implementation roadmap: [`engine_roadmap.md`](engine_roadmap.md)
+- Detailed phase plans: [`docs/plans/`](docs/plans/)
 
 ## Build Prerequisites
 
