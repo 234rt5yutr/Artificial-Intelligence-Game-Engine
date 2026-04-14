@@ -404,7 +404,7 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 28.1.2: Implement `StartGPUProfilerCapture()` with pass-level timing and queue breakdowns. (v0.28.1.2)
   * [x] Sub-step 28.1.3: Implement `ExportProfilerTrace()` to persistent trace formats for post-analysis. (v0.28.1.3)
 * [ ] Step 28.2: Integrate automated runtime validation suites.
-  * [ ] Sub-step 28.2.1: Implement `RunAutomatedPlayModeTests()` for deterministic gameplay regression packs. (v0.28.2.1)
+  * [x] Sub-step 28.2.1: Implement `RunAutomatedPlayModeTests()` for deterministic gameplay regression packs. (v0.28.2.1)
   * [ ] Sub-step 28.2.2: Implement `RunAutomatedPerformanceTests()` for budget regression gates by platform tier. (v0.28.2.2)
 * [ ] Step 28.3: Build shipping-grade multi-platform packaging flow.
   * [ ] Sub-step 28.3.1: Implement `BuildForPlatformTarget()` with profile-driven compile/cook/package stages. (v0.28.3.1)
