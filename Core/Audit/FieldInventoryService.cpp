@@ -44,13 +44,15 @@ namespace {
                                                    const std::string& sourceFile,
                                                    const std::string& sourceSymbol,
                                                    const uint32_t sourceLine,
-                                                   const std::string& collectorId) {
+                                                   const std::string& collectorId,
+                                                   const bool required = true) {
     FieldInventoryEntry entry{};
     entry.Domain = domain;
     entry.OwnerSubsystem = ownerSubsystem;
     entry.TypeName = typeName;
     entry.FieldPath = fieldPath;
     entry.FieldId = ComposeFieldId(entry.Domain, entry.TypeName, entry.FieldPath);
+    entry.Required = required;
     entry.SourceTrace.SourceFile = sourceFile;
     entry.SourceTrace.SourceSymbol = sourceSymbol;
     entry.SourceTrace.SourceLine = sourceLine;
@@ -123,6 +125,153 @@ namespace {
     };
 }
 
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectSceneSerializedFields() {
+    constexpr std::string_view domain = "scene";
+    constexpr std::string_view owner = "scene-serialization";
+    constexpr std::string_view collector = "serialized-scene-collector";
+    constexpr std::string_view schemaType = "SceneSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Header.Version", "Core/State/SceneLoader.h", "SceneSchema::Header.Version", 16u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Nodes.Transform", "Core/State/SceneLoader.h", "SceneSchema::Nodes.Transform", 22u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Nodes.Tags", "Core/State/SceneLoader.h", "SceneSchema::Nodes.Tags", 23u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectPrefabSerializedFields() {
+    constexpr std::string_view domain = "prefab";
+    constexpr std::string_view owner = "scene-serialization";
+    constexpr std::string_view collector = "serialized-prefab-collector";
+    constexpr std::string_view schemaType = "PrefabSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "PrefabId", "Core/ECS/Scene.h", "PrefabSchema::PrefabId", 18u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Root.Transform", "Core/ECS/Scene.h", "PrefabSchema::Root.Transform", 20u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Overrides.Materials", "Core/ECS/Scene.h", "PrefabSchema::Overrides.Materials", 21u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectSaveSerializedFields() {
+    constexpr std::string_view domain = "save";
+    constexpr std::string_view owner = "state-save";
+    constexpr std::string_view collector = "serialized-save-collector";
+    constexpr std::string_view schemaType = "SaveSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Metadata.SaveVersion", "Core/State/SaveFile.h", "SaveSchema::Metadata.SaveVersion", 14u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "World.PlayerState", "Core/State/SaveFile.h", "SaveSchema::World.PlayerState", 17u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "World.OptionalCheckpoint", "Core/State/SaveFile.h", "SaveSchema::World.OptionalCheckpoint", 18u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectWidgetSerializedFields() {
+    constexpr std::string_view domain = "widget";
+    constexpr std::string_view owner = "ui-authoring";
+    constexpr std::string_view collector = "serialized-widget-collector";
+    constexpr std::string_view schemaType = "WidgetSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "WidgetId", "Core/UI/Authoring/WidgetBlueprintAsset.cpp", "WidgetSchema::WidgetId", 12u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Layout.Anchor", "Core/UI/Authoring/WidgetLayoutAsset.cpp", "WidgetSchema::Layout.Anchor", 21u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Bindings", "Core/UI/Binding/UIBindingService.h", "WidgetSchema::Bindings", 14u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectLocalizationSerializedFields() {
+    constexpr std::string_view domain = "localization";
+    constexpr std::string_view owner = "localization-pipeline";
+    constexpr std::string_view collector = "serialized-localization-collector";
+    constexpr std::string_view schemaType = "LocalizationSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Locale", "Core/Application.cpp", "LocalizationSchema::Locale", 27u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Entries.Key", "Core/Application.cpp", "LocalizationSchema::Entries.Key", 29u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Entries.Context", "Core/Application.cpp", "LocalizationSchema::Entries.Context", 30u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectAddressableSerializedFields() {
+    constexpr std::string_view domain = "addressable";
+    constexpr std::string_view owner = "asset-addressables";
+    constexpr std::string_view collector = "serialized-addressable-collector";
+    constexpr std::string_view schemaType = "AddressableSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "CatalogVersion", "Core/Asset/Addressables/AddressablesCatalogTypes.h", "AddressableSchema::CatalogVersion", 14u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Entries.Key", "Core/Asset/Addressables/AddressablesCatalogTypes.h", "AddressableSchema::Entries.Key", 22u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Entries.Labels", "Core/Asset/Addressables/AddressablesCatalogTypes.h", "AddressableSchema::Entries.Labels", 23u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectBundleSerializedFields() {
+    constexpr std::string_view domain = "bundle";
+    constexpr std::string_view owner = "asset-bundles";
+    constexpr std::string_view collector = "serialized-bundle-collector";
+    constexpr std::string_view schemaType = "BundleSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "BundleId", "Core/Asset/Bundles/AssetBundleBuilder.h", "BundleSchema::BundleId", 16u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "AssetEntries.Path", "Core/Asset/Bundles/AssetBundleBuilder.h", "BundleSchema::AssetEntries.Path", 17u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "CompressionPreset", "Core/Asset/Bundles/AssetBundleBuilder.h", "BundleSchema::CompressionPreset", 18u, std::string(collector), false)};
+}
+
+[[nodiscard]] std::vector<FieldInventoryEntry> CollectBuildManifestSerializedFields() {
+    constexpr std::string_view domain = "build-manifest";
+    constexpr std::string_view owner = "build-pipeline";
+    constexpr std::string_view collector = "serialized-build-manifest-collector";
+    constexpr std::string_view schemaType = "BuildManifestSchema.v1";
+    return {
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "BuildId", "Core/Build/BuildPipelineTypes.h", "BuildManifestSchema::BuildId", 22u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Artifacts.Path", "Core/Build/BuildPipelineTypes.h", "BuildManifestSchema::Artifacts.Path", 24u, std::string(collector), true),
+        CreateFieldEntry(std::string(domain), std::string(owner), std::string(schemaType), "Artifacts.Hash", "Core/Build/BuildPipelineTypes.h", "BuildManifestSchema::Artifacts.Hash", 25u, std::string(collector), false)};
+}
+
+[[nodiscard]] bool EnsureOutputDirectory(const std::filesystem::path& outputDirectory) {
+    std::error_code errorCode;
+    const bool outputExists = std::filesystem::exists(outputDirectory, errorCode);
+    if (errorCode) {
+        return false;
+    }
+
+    if (outputExists) {
+        const bool isDirectory = std::filesystem::is_directory(outputDirectory, errorCode);
+        return !errorCode && isDirectory;
+    }
+
+    std::filesystem::create_directories(outputDirectory, errorCode);
+    return !errorCode;
+}
+
+void SortEntries(std::vector<FieldInventoryEntry>& entries) {
+    std::sort(entries.begin(), entries.end(), [](const FieldInventoryEntry& left, const FieldInventoryEntry& right) {
+        if (left.FieldId != right.FieldId) {
+            return left.FieldId < right.FieldId;
+        }
+        if (left.Domain != right.Domain) {
+            return left.Domain < right.Domain;
+        }
+        if (left.TypeName != right.TypeName) {
+            return left.TypeName < right.TypeName;
+        }
+        return left.FieldPath < right.FieldPath;
+    });
+}
+
+[[nodiscard]] bool ValidateEntries(const std::vector<FieldInventoryEntry>& entries) {
+    for (const FieldInventoryEntry& entry : entries) {
+        if (entry.FieldId != ComposeFieldId(entry.Domain, entry.TypeName, entry.FieldPath) || entry.Domain.empty() ||
+            entry.TypeName.empty() || entry.FieldPath.empty() || entry.SourceTrace.SourceFile.empty() ||
+            entry.SourceTrace.SourceSymbol.empty() || entry.SourceTrace.CollectorId.empty() || entry.SourceTrace.SourceLine == 0u) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] std::string ComputeInventoryDigest(const std::vector<FieldInventoryEntry>& entries);
+
+[[nodiscard]] FieldInventorySnapshot CreateSnapshot(const FieldInventoryRequest& request, std::vector<FieldInventoryEntry>&& entries) {
+    std::set<std::string> domainSet;
+    for (const FieldInventoryEntry& entry : entries) {
+        domainSet.insert(entry.Domain);
+    }
+
+    FieldInventorySnapshot snapshot{};
+    snapshot.Scope = request.Scope;
+    snapshot.OutputDirectory = request.OutputDirectory;
+    snapshot.Entries = std::move(entries);
+    snapshot.Domains.assign(domainSet.begin(), domainSet.end());
+    snapshot.DeterministicDigest = ComputeInventoryDigest(snapshot.Entries);
+    return snapshot;
+}
+
 [[nodiscard]] std::string ComputeInventoryDigest(const std::vector<FieldInventoryEntry>& entries) {
     std::string digestMaterial;
     digestMaterial.reserve(entries.size() * 96u);
@@ -138,6 +287,8 @@ namespace {
         digestMaterial.append(entry.SourceTrace.CollectorId);
         digestMaterial.push_back('|');
         digestMaterial.append(std::to_string(entry.SourceTrace.SourceLine));
+        digestMaterial.push_back('|');
+        digestMaterial.push_back(entry.Required ? '1' : '0');
         digestMaterial.push_back('\n');
     }
     return HashToHex(HashString(digestMaterial));
@@ -154,22 +305,8 @@ Result<FieldInventorySnapshot> GenerateRuntimeFieldInventory(const FieldInventor
         return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
     }
 
-    std::error_code errorCode;
-    const bool outputExists = std::filesystem::exists(request.OutputDirectory, errorCode);
-    if (errorCode) {
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
         return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
-    }
-
-    if (outputExists) {
-        const bool isDirectory = std::filesystem::is_directory(request.OutputDirectory, errorCode);
-        if (errorCode || !isDirectory) {
-            return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
-        }
-    } else {
-        std::filesystem::create_directories(request.OutputDirectory, errorCode);
-        if (errorCode) {
-            return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
-        }
     }
 
     std::vector<FieldInventoryEntry> entries;
@@ -184,39 +321,50 @@ Result<FieldInventorySnapshot> GenerateRuntimeFieldInventory(const FieldInventor
         entries.insert(entries.end(), domainEntries.begin(), domainEntries.end());
     }
 
-    std::sort(entries.begin(), entries.end(), [](const FieldInventoryEntry& left, const FieldInventoryEntry& right) {
-        if (left.FieldId != right.FieldId) {
-            return left.FieldId < right.FieldId;
-        }
-        if (left.Domain != right.Domain) {
-            return left.Domain < right.Domain;
-        }
-        if (left.TypeName != right.TypeName) {
-            return left.TypeName < right.TypeName;
-        }
-        return left.FieldPath < right.FieldPath;
-    });
+    SortEntries(entries);
 
-    for (const FieldInventoryEntry& entry : entries) {
-        if (entry.FieldId != ComposeFieldId(entry.Domain, entry.TypeName, entry.FieldPath) || entry.Domain.empty() ||
-            entry.TypeName.empty() || entry.FieldPath.empty() || entry.SourceTrace.SourceFile.empty() ||
-            entry.SourceTrace.CollectorId.empty()) {
-            return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_INVENTORY_FAILED");
-        }
+    if (!ValidateEntries(entries)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_INVENTORY_FAILED");
     }
 
-    std::set<std::string> domainSet;
-    for (const FieldInventoryEntry& entry : entries) {
-        domainSet.insert(entry.Domain);
+    return Result<FieldInventorySnapshot>::Success(CreateSnapshot(request, std::move(entries)));
+}
+
+Result<FieldInventorySnapshot> GenerateSerializedFieldInventory(const FieldInventoryRequest& request) {
+    if (request.Scope.empty() || request.OutputDirectory.empty()) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
     }
 
-    FieldInventorySnapshot snapshot{};
-    snapshot.Scope = request.Scope;
-    snapshot.OutputDirectory = request.OutputDirectory;
-    snapshot.Entries = std::move(entries);
-    snapshot.Domains.assign(domainSet.begin(), domainSet.end());
-    snapshot.DeterministicDigest = ComputeInventoryDigest(snapshot.Entries);
-    return Result<FieldInventorySnapshot>::Success(std::move(snapshot));
+    if (request.Scope != "serialized") {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    if (!EnsureOutputDirectory(request.OutputDirectory)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_REPORT_WRITE_FAILED");
+    }
+
+    std::vector<FieldInventoryEntry> entries;
+    const std::array<std::vector<FieldInventoryEntry>, 8> collectedEntries = {
+        CollectSceneSerializedFields(),
+        CollectPrefabSerializedFields(),
+        CollectSaveSerializedFields(),
+        CollectWidgetSerializedFields(),
+        CollectLocalizationSerializedFields(),
+        CollectAddressableSerializedFields(),
+        CollectBundleSerializedFields(),
+        CollectBuildManifestSerializedFields()};
+
+    for (const std::vector<FieldInventoryEntry>& domainEntries : collectedEntries) {
+        entries.insert(entries.end(), domainEntries.begin(), domainEntries.end());
+    }
+
+    SortEntries(entries);
+
+    if (!ValidateEntries(entries)) {
+        return Result<FieldInventorySnapshot>::Failure("FIELD_AUDIT_INVENTORY_FAILED");
+    }
+
+    return Result<FieldInventorySnapshot>::Success(CreateSnapshot(request, std::move(entries)));
 }
 
 } // namespace Core::Audit

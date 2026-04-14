@@ -415,7 +415,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 
 * [ ] Step 29.1: Build an exhaustive field inventory across runtime, serialized assets, build outputs, and tooling surfaces.
   * [x] Sub-step 29.1.1: Implement `GenerateRuntimeFieldInventory()` to enumerate ECS/component/renderer/physics/network/UI/editor-exposed fields with canonical identifiers. (v0.29.1.1)
-  * [ ] Sub-step 29.1.2: Implement `GenerateSerializedFieldInventory()` to enumerate scene/prefab/save/widget/localization/addressable/bundle field schemas. (v0.29.1.2)
+  * [x] Sub-step 29.1.2: Implement `GenerateSerializedFieldInventory()` to enumerate scene/prefab/save/widget/localization/addressable/bundle field schemas. (v0.29.1.2)
   * [ ] Sub-step 29.1.3: Implement `GenerateProtocolFieldInventory()` for packet/RPC/replay/MCP payload fields and transport-level metadata constraints. (v0.29.1.3)
   * [ ] Sub-step 29.1.4: Implement `MergeFieldInventorySnapshots()` with stable field IDs, ownership tags, source traces, and version lineage metadata. (v0.29.1.4)
 * [ ] Step 29.2: Add strict field-level validation rules and invariant analysis.
