@@ -79,10 +79,23 @@ namespace {
     return !normalizedCoverageMap.empty();
 }
 
-[[nodiscard]] std::string BuildAssertionId(const FieldGuardrailRecord& record) {
+[[nodiscard]] bool IsValidAuditGateEntry(const FieldGuardrailEntry& entry) {
+    return !entry.AuditPolicy.PolicyId.empty();
+}
+
+[[nodiscard]] bool IsBlockingReleaseGateFinding(const FieldGuardrailAuditPolicyMetadata& auditPolicy) {
+    if (!auditPolicy.ReleaseLane || auditPolicy.FindingStatus != FieldAuditFindingStatus::Unresolved) {
+        return false;
+    }
+
+    return auditPolicy.Severity == FieldAuditSeverity::High || auditPolicy.Severity == FieldAuditSeverity::Critical;
+}
+
+[[nodiscard]] std::string BuildAssertionId(const std::string_view scope, const FieldGuardrailRecord& record) {
     std::string idMaterial;
     idMaterial.reserve(384u);
-    idMaterial.append("field-invariant-assertion|");
+    idMaterial.append(scope);
+    idMaterial.push_back('|');
     idMaterial.append(record.Taxonomy.Lineage.FindingId);
     idMaterial.push_back('|');
     idMaterial.append(std::to_string(static_cast<uint32_t>(record.Domain)));
@@ -101,6 +114,16 @@ namespace {
         idMaterial.append(stageFixId);
         idMaterial.push_back(',');
     }
+    idMaterial.push_back('|');
+    idMaterial.append(record.AuditPolicy.PolicyId);
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(record.AuditPolicy.ReleaseLane ? 1u : 0u));
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.Severity)));
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.FindingStatus)));
+    idMaterial.push_back('|');
+    idMaterial.append(std::to_string(static_cast<uint32_t>(record.GateDecision)));
     return HashToHex(HashString(idMaterial));
 }
 
@@ -145,6 +168,16 @@ namespace {
         digestMaterial.append(stageFixId);
         digestMaterial.push_back(',');
     }
+    digestMaterial.push_back('|');
+    digestMaterial.append(record.AuditPolicy.PolicyId);
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(record.AuditPolicy.ReleaseLane ? 1u : 0u));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.Severity)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.AuditPolicy.FindingStatus)));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(record.GateDecision)));
     return HashToHex(HashString(digestMaterial));
 }
 
@@ -168,6 +201,14 @@ namespace {
     digestMaterial.append(std::to_string(result.Summary.RegressionCoverageSignalCount));
     digestMaterial.push_back('|');
     digestMaterial.append(std::to_string(result.Summary.RegressionCoverageCorrectionCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.UnresolvedHighFindingCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.UnresolvedCriticalFindingCount));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(result.Summary.ReleaseGateBlocked ? 1u : 0u));
+    digestMaterial.push_back('|');
+    digestMaterial.append(std::to_string(static_cast<uint32_t>(result.Summary.ReleaseGateDecision)));
     digestMaterial.push_back('\n');
 
     for (const FieldGuardrailRecord& record : result.AssertionRecords) {
@@ -210,6 +251,22 @@ void SortAssertionRecords(std::vector<FieldGuardrailRecord>& records) {
                                                 right.RegressionSuite.Stage30CoverageMap.begin(),
                                                 right.RegressionSuite.Stage30CoverageMap.end());
         }
+        if (left.AuditPolicy.PolicyId != right.AuditPolicy.PolicyId) {
+            return left.AuditPolicy.PolicyId < right.AuditPolicy.PolicyId;
+        }
+        if (left.AuditPolicy.ReleaseLane != right.AuditPolicy.ReleaseLane) {
+            return left.AuditPolicy.ReleaseLane < right.AuditPolicy.ReleaseLane;
+        }
+        if (left.AuditPolicy.Severity != right.AuditPolicy.Severity) {
+            return static_cast<uint32_t>(left.AuditPolicy.Severity) < static_cast<uint32_t>(right.AuditPolicy.Severity);
+        }
+        if (left.AuditPolicy.FindingStatus != right.AuditPolicy.FindingStatus) {
+            return static_cast<uint32_t>(left.AuditPolicy.FindingStatus) <
+                   static_cast<uint32_t>(right.AuditPolicy.FindingStatus);
+        }
+        if (left.GateDecision != right.GateDecision) {
+            return static_cast<uint32_t>(left.GateDecision) < static_cast<uint32_t>(right.GateDecision);
+        }
         return left.Taxonomy.Lineage.FindingId < right.Taxonomy.Lineage.FindingId;
     });
 }
@@ -233,7 +290,8 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
 
 [[nodiscard]] std::string BuildDedupeKey(const FieldGuardrailEntry& entry,
                                          const std::vector<std::string>& normalizedCoverageMap,
-                                         const bool includeRegressionSuite) {
+                                         const bool includeRegressionSuite,
+                                         const bool includeAuditPolicy) {
     std::string dedupeKey;
     dedupeKey.reserve(640u);
     dedupeKey.append(entry.Taxonomy.Lineage.FindingId);
@@ -260,12 +318,23 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
             dedupeKey.push_back(',');
         }
     }
+    if (includeAuditPolicy) {
+        dedupeKey.push_back('|');
+        dedupeKey.append(entry.AuditPolicy.PolicyId);
+        dedupeKey.push_back('|');
+        dedupeKey.append(std::to_string(entry.AuditPolicy.ReleaseLane ? 1u : 0u));
+        dedupeKey.push_back('|');
+        dedupeKey.append(std::to_string(static_cast<uint32_t>(entry.AuditPolicy.Severity)));
+        dedupeKey.push_back('|');
+        dedupeKey.append(std::to_string(static_cast<uint32_t>(entry.AuditPolicy.FindingStatus)));
+    }
     return dedupeKey;
 }
 
 [[nodiscard]] Result<FieldGuardrailResult> BuildGuardrailResult(const FieldGuardrailRequest& request,
                                                                 const std::string_view expectedScope,
-                                                                const bool requireRegressionSuite) {
+                                                                const bool requireRegressionSuite,
+                                                                const bool evaluateAuditGate) {
     if (request.Scope.empty() || request.OutputDirectory.empty() || request.RemediationBatchId.empty() ||
         request.Entries.empty()) {
         return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
@@ -282,6 +351,9 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
         if (requireRegressionSuite && !IsValidRegressionEntry(entry)) {
             return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
         }
+        if (evaluateAuditGate && !IsValidAuditGateEntry(entry)) {
+            return Result<FieldGuardrailResult>::Failure("FIELD_AUDIT_ARGUMENT_INVALID");
+        }
     }
 
     if (!EnsureOutputDirectory(request.OutputDirectory)) {
@@ -292,7 +364,7 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
     std::set<std::string> seenAssertionKeys;
     for (const FieldGuardrailEntry& entry : request.Entries) {
         const std::vector<std::string> normalizedCoverageMap = NormalizeCoverageMap(entry.RegressionSuite.Stage30CoverageMap);
-        const std::string dedupeKey = BuildDedupeKey(entry, normalizedCoverageMap, requireRegressionSuite);
+        const std::string dedupeKey = BuildDedupeKey(entry, normalizedCoverageMap, requireRegressionSuite, evaluateAuditGate);
         if (seenAssertionKeys.contains(dedupeKey)) {
             continue;
         }
@@ -314,7 +386,12 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
         record.Taxonomy.Lineage.RemediationBatchId = request.RemediationBatchId;
         record.RegressionSuite.SuiteId = entry.RegressionSuite.SuiteId;
         record.RegressionSuite.Stage30CoverageMap = normalizedCoverageMap;
-        record.AssertionId = BuildAssertionId(record);
+        record.AuditPolicy = entry.AuditPolicy;
+        if (evaluateAuditGate) {
+            record.GateDecision = IsBlockingReleaseGateFinding(record.AuditPolicy) ? FieldAuditGateDecision::Block
+                                                                                   : FieldAuditGateDecision::Pass;
+        }
+        record.AssertionId = BuildAssertionId(expectedScope, record);
         record.DeterministicDigest = ComputeRecordDigest(record);
         assertionRecords.push_back(std::move(record));
     }
@@ -339,8 +416,21 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
                 ++result.Summary.RegressionCoverageCorrectionCount;
             }
         }
+        if (evaluateAuditGate && IsBlockingReleaseGateFinding(record.AuditPolicy)) {
+            if (record.AuditPolicy.Severity == FieldAuditSeverity::Critical) {
+                ++result.Summary.UnresolvedCriticalFindingCount;
+            } else if (record.AuditPolicy.Severity == FieldAuditSeverity::High) {
+                ++result.Summary.UnresolvedHighFindingCount;
+            }
+        }
     }
     result.Summary.RegressionSuiteCount = static_cast<uint32_t>(uniqueSuites.size());
+    if (evaluateAuditGate) {
+        result.Summary.ReleaseGateBlocked =
+            result.Summary.UnresolvedCriticalFindingCount > 0u || result.Summary.UnresolvedHighFindingCount > 0u;
+        result.Summary.ReleaseGateDecision =
+            result.Summary.ReleaseGateBlocked ? FieldAuditGateDecision::Block : FieldAuditGateDecision::Pass;
+    }
     result.DeterministicDigest = ComputeResultDigest(result);
     return Result<FieldGuardrailResult>::Success(std::move(result));
 }
@@ -348,11 +438,15 @@ void AddDomainCount(FieldGuardrailSummary& summary, const FieldGuardrailDomain d
 } // namespace
 
 Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailRequest& request) {
-    return BuildGuardrailResult(request, "field-invariant-assertions", false);
+    return BuildGuardrailResult(request, "field-invariant-assertions", false, false);
 }
 
 Result<FieldGuardrailResult> AddFieldContractRegressionSuites(const FieldGuardrailRequest& request) {
-    return BuildGuardrailResult(request, "field-contract-regression-suites", true);
+    return BuildGuardrailResult(request, "field-contract-regression-suites", true, false);
+}
+
+Result<FieldGuardrailResult> AddFieldAuditGateToBuildPipeline(const FieldGuardrailRequest& request) {
+    return BuildGuardrailResult(request, "field-audit-gate-build-pipeline", false, true);
 }
 
 } // namespace Core::Remediation

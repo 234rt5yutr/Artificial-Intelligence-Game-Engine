@@ -6,5 +6,6 @@ namespace Core::Remediation {
 
 Result<FieldGuardrailResult> AddFieldInvariantAssertions(const FieldGuardrailRequest& request);
 Result<FieldGuardrailResult> AddFieldContractRegressionSuites(const FieldGuardrailRequest& request);
+Result<FieldGuardrailResult> AddFieldAuditGateToBuildPipeline(const FieldGuardrailRequest& request);
 
 } // namespace Core::Remediation

@@ -18,6 +18,31 @@ enum class FieldGuardrailDomain : uint8_t {
     Build = 2
 };
 
+enum class FieldAuditSeverity : uint8_t {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Critical = 3
+};
+
+enum class FieldAuditFindingStatus : uint8_t {
+    Resolved = 0,
+    Unresolved = 1
+};
+
+enum class FieldAuditGateDecision : uint8_t {
+    NotEvaluated = 0,
+    Pass = 1,
+    Block = 2
+};
+
+struct FieldGuardrailAuditPolicyMetadata {
+    std::string PolicyId;
+    bool ReleaseLane = false;
+    FieldAuditSeverity Severity = FieldAuditSeverity::Low;
+    FieldAuditFindingStatus FindingStatus = FieldAuditFindingStatus::Resolved;
+};
+
 struct FieldGuardrailLineageMetadata {
     std::string FindingId;
     std::string RuleId;
@@ -48,6 +73,7 @@ struct FieldGuardrailEntry {
     std::string Rationale;
     FieldGuardrailTaxonomyMetadata Taxonomy;
     FieldGuardrailRegressionSuiteMetadata RegressionSuite;
+    FieldGuardrailAuditPolicyMetadata AuditPolicy;
 };
 
 struct FieldGuardrailRequest {
@@ -69,6 +95,8 @@ struct FieldGuardrailRecord {
     std::string Rationale;
     FieldGuardrailTaxonomyMetadata Taxonomy;
     FieldGuardrailRegressionSuiteMetadata RegressionSuite;
+    FieldGuardrailAuditPolicyMetadata AuditPolicy;
+    FieldAuditGateDecision GateDecision = FieldAuditGateDecision::NotEvaluated;
     std::string DeterministicDigest;
 };
 
@@ -80,6 +108,10 @@ struct FieldGuardrailSummary {
     uint32_t RegressionSuiteCount = 0;
     uint32_t RegressionCoverageSignalCount = 0;
     uint32_t RegressionCoverageCorrectionCount = 0;
+    uint32_t UnresolvedHighFindingCount = 0;
+    uint32_t UnresolvedCriticalFindingCount = 0;
+    bool ReleaseGateBlocked = false;
+    FieldAuditGateDecision ReleaseGateDecision = FieldAuditGateDecision::NotEvaluated;
 };
 
 struct FieldGuardrailResult {

@@ -48,6 +48,26 @@ Core::Remediation::FieldGuardrailEntry BuildRegressionEntry(const Core::Remediat
     return entry;
 }
 
+Core::Remediation::FieldGuardrailEntry BuildAuditGateEntry(const Core::Remediation::FieldGuardrailDomain domain,
+                                                           const std::string& stableFieldKey,
+                                                           const std::string& domainPair,
+                                                           const std::string& targetFieldId,
+                                                           const std::string& findingId,
+                                                           const std::string& ruleId,
+                                                           const std::string& owner,
+                                                           const std::string& policyId,
+                                                           const bool isReleaseLane,
+                                                           const Core::Remediation::FieldAuditSeverity severity,
+                                                           const Core::Remediation::FieldAuditFindingStatus status) {
+    Core::Remediation::FieldGuardrailEntry entry =
+        BuildEntry(domain, stableFieldKey, domainPair, targetFieldId, findingId, ruleId, owner);
+    entry.AuditPolicy.PolicyId = policyId;
+    entry.AuditPolicy.ReleaseLane = isReleaseLane;
+    entry.AuditPolicy.Severity = severity;
+    entry.AuditPolicy.FindingStatus = status;
+    return entry;
+}
+
 } // namespace
 
 int main() {
@@ -290,6 +310,157 @@ int main() {
                    first.Value.AssertionRecords[index].RegressionSuite.SuiteId);
             assert(second.Value.AssertionRecords[index].RegressionSuite.Stage30CoverageMap ==
                    first.Value.AssertionRecords[index].RegressionSuite.Stage30CoverageMap);
+            assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId ==
+                   first.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId);
+            assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId ==
+                   first.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId);
+            assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.Owner ==
+                   first.Value.AssertionRecords[index].Taxonomy.Lineage.Owner);
+        }
+    }
+
+    {
+        FieldGuardrailRequest invalidRequest{};
+        const Result<FieldGuardrailResult> result = AddFieldAuditGateToBuildPipeline(invalidRequest);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_ARGUMENT_INVALID");
+    }
+
+    {
+        FieldGuardrailRequest unsupportedScope{};
+        unsupportedScope.Scope = "field-audit-gate-build-pipeline-v2";
+        unsupportedScope.OutputDirectory = root / "audit-gate-unsupported";
+        unsupportedScope.RemediationBatchId = "batch-030403";
+        unsupportedScope.Entries = {BuildAuditGateEntry(FieldGuardrailDomain::Build,
+                                                        "Build::Manifest::Release::Version",
+                                                        "build<->release",
+                                                        "build::Manifest::Release::Version",
+                                                        "guardrail-finding-audit-build-unsupported",
+                                                        "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                                        "build-release",
+                                                        "field-release-lane-critical-high",
+                                                        true,
+                                                        FieldAuditSeverity::Critical,
+                                                        FieldAuditFindingStatus::Unresolved)};
+        const Result<FieldGuardrailResult> result = AddFieldAuditGateToBuildPipeline(unsupportedScope);
+        assert(!result.Ok);
+        assert(result.Error == "FIELD_AUDIT_SCOPE_UNSUPPORTED");
+    }
+
+    {
+        FieldGuardrailRequest request{};
+        request.Scope = "field-audit-gate-build-pipeline";
+        request.OutputDirectory = root / "audit-gate-success";
+        request.RemediationBatchId = "batch-030403";
+        request.Entries = {
+            BuildAuditGateEntry(FieldGuardrailDomain::Build,
+                                "Build::Manifest::Release::Version",
+                                "build<->release",
+                                "build::Manifest::Release::Version",
+                                "guardrail-finding-audit-critical",
+                                "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                "build-release",
+                                "field-release-lane-critical-high",
+                                true,
+                                FieldAuditSeverity::Critical,
+                                FieldAuditFindingStatus::Unresolved),
+            BuildAuditGateEntry(FieldGuardrailDomain::Runtime,
+                                "Runtime::Inventory::Version",
+                                "runtime<->release",
+                                "runtime::Inventory::Version",
+                                "guardrail-finding-audit-high",
+                                "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                "runtime-release",
+                                "field-release-lane-critical-high",
+                                true,
+                                FieldAuditSeverity::High,
+                                FieldAuditFindingStatus::Unresolved),
+            BuildAuditGateEntry(FieldGuardrailDomain::Runtime,
+                                "Runtime::Inventory::Version",
+                                "runtime<->release",
+                                "runtime::Inventory::Version",
+                                "guardrail-finding-audit-high",
+                                "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                "runtime-release",
+                                "field-release-lane-critical-high",
+                                true,
+                                FieldAuditSeverity::High,
+                                FieldAuditFindingStatus::Unresolved),
+            BuildAuditGateEntry(FieldGuardrailDomain::Editor,
+                                "Editor::Inventory::Version",
+                                "editor<->release",
+                                "editor::Inventory::Version",
+                                "guardrail-finding-audit-medium",
+                                "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                "editor-release",
+                                "field-release-lane-critical-high",
+                                true,
+                                FieldAuditSeverity::Medium,
+                                FieldAuditFindingStatus::Unresolved),
+            BuildAuditGateEntry(FieldGuardrailDomain::Build,
+                                "Build::Manifest::Sandbox::Version",
+                                "build<->sandbox",
+                                "build::Manifest::Sandbox::Version",
+                                "guardrail-finding-audit-non-release",
+                                "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                "build-release",
+                                "field-release-lane-critical-high",
+                                false,
+                                FieldAuditSeverity::Critical,
+                                FieldAuditFindingStatus::Unresolved),
+            BuildAuditGateEntry(FieldGuardrailDomain::Build,
+                                "Build::Manifest::Resolved::Version",
+                                "build<->release",
+                                "build::Manifest::Resolved::Version",
+                                "guardrail-finding-audit-resolved",
+                                "FIELD_AUDIT_RULE_RELEASE_GATE_POLICY",
+                                "build-release",
+                                "field-release-lane-critical-high",
+                                true,
+                                FieldAuditSeverity::Critical,
+                                FieldAuditFindingStatus::Resolved)};
+
+        const Result<FieldGuardrailResult> first = AddFieldAuditGateToBuildPipeline(request);
+        assert(first.Ok);
+        assert(first.Value.Scope == request.Scope);
+        assert(first.Value.RemediationBatchId == request.RemediationBatchId);
+        assert(first.Value.Summary.TotalAssertionCount == 5u);
+        assert(first.Value.Summary.UnresolvedHighFindingCount == 1u);
+        assert(first.Value.Summary.UnresolvedCriticalFindingCount == 1u);
+        assert(first.Value.Summary.ReleaseGateDecision == FieldAuditGateDecision::Block);
+        assert(first.Value.Summary.ReleaseGateBlocked);
+        assert(!first.Value.DeterministicDigest.empty());
+
+        bool sawBlockingCritical = false;
+        bool sawBlockingHigh = false;
+        bool sawNonBlocking = false;
+        for (const FieldGuardrailRecord& record : first.Value.AssertionRecords) {
+            assert(!record.DeterministicDigest.empty());
+            assert(record.Taxonomy.Lineage.RemediationBatchId == request.RemediationBatchId);
+            if (record.Taxonomy.Lineage.FindingId == "guardrail-finding-audit-critical") {
+                sawBlockingCritical = true;
+                assert(record.GateDecision == FieldAuditGateDecision::Block);
+            } else if (record.Taxonomy.Lineage.FindingId == "guardrail-finding-audit-high") {
+                sawBlockingHigh = true;
+                assert(record.GateDecision == FieldAuditGateDecision::Block);
+            } else {
+                sawNonBlocking = true;
+                assert(record.GateDecision == FieldAuditGateDecision::Pass);
+            }
+        }
+        assert(sawBlockingCritical);
+        assert(sawBlockingHigh);
+        assert(sawNonBlocking);
+
+        const Result<FieldGuardrailResult> second = AddFieldAuditGateToBuildPipeline(request);
+        assert(second.Ok);
+        assert(second.Value.DeterministicDigest == first.Value.DeterministicDigest);
+        assert(second.Value.AssertionRecords.size() == first.Value.AssertionRecords.size());
+        for (std::size_t index = 0; index < first.Value.AssertionRecords.size(); ++index) {
+            assert(second.Value.AssertionRecords[index].AssertionId == first.Value.AssertionRecords[index].AssertionId);
+            assert(second.Value.AssertionRecords[index].DeterministicDigest ==
+                   first.Value.AssertionRecords[index].DeterministicDigest);
+            assert(second.Value.AssertionRecords[index].GateDecision == first.Value.AssertionRecords[index].GateDecision);
             assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId ==
                    first.Value.AssertionRecords[index].Taxonomy.Lineage.FindingId);
             assert(second.Value.AssertionRecords[index].Taxonomy.Lineage.RuleId ==
