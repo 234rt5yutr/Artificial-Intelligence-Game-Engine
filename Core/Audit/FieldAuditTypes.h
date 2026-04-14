@@ -134,4 +134,28 @@ struct FieldValidationReport {
     std::string DeterministicDigest;
 };
 
+struct FieldAuditPhaseStamp {
+    std::string PhaseId;
+    std::string PhaseLabel;
+    uint32_t PhaseOrdinal = 0;
+    std::string InventoryDigest;
+    std::string ValidationDigest;
+    uint32_t TotalFindingCount = 0;
+    std::string DeterministicPhaseDigest;
+};
+
+struct FieldAuditRunRequest {
+    std::string Scope = "runtime-state";
+    std::filesystem::path OutputDirectory;
+};
+
+struct FieldAuditRunReport {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::vector<FieldAuditPhaseStamp> PhaseStamps;
+    uint32_t TotalPhases = 0;
+    uint32_t TotalFindingCount = 0;
+    std::string DeterministicDigest;
+};
+
 } // namespace Core::Audit

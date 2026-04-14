@@ -243,6 +243,8 @@ add_library(EngineCore
     Core/Audit/FieldInventoryService.cpp
     Core/Audit/FieldValidationService.h
     Core/Audit/FieldValidationService.cpp
+    Core/Audit/FieldAuditRunner.h
+    Core/Audit/FieldAuditRunner.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -508,3 +510,9 @@ add_executable(EngineCoreFieldValidationTests
 )
 target_link_libraries(EngineCoreFieldValidationTests PRIVATE EngineCore)
 add_test(NAME EngineCoreFieldValidationTests COMMAND EngineCoreFieldValidationTests)
+
+add_executable(EngineCoreFieldAuditRunnerTests
+    Core/Tests/Audit/FieldAuditRunnerTests.cpp
+)
+target_link_libraries(EngineCoreFieldAuditRunnerTests PRIVATE EngineCore)
+add_test(NAME EngineCoreFieldAuditRunnerTests COMMAND EngineCoreFieldAuditRunnerTests)
