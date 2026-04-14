@@ -1,0 +1,9 @@
+#pragma once
+
+#include "Core/Remediation/FieldMigrationTypes.h"
+
+namespace Core::Remediation {
+
+Result<FieldMigrationResult> MigrateSceneAndPrefabFieldData(const FieldMigrationRequest& request);
+
+} // namespace Core::Remediation
