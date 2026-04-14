@@ -260,6 +260,9 @@ add_library(EngineCore
     Core/Remediation/RuntimeFieldFixTypes.h
     Core/Remediation/RuntimeFieldFixService.h
     Core/Remediation/RuntimeFieldFixService.cpp
+    Core/Remediation/FieldGuardrailTypes.h
+    Core/Remediation/FieldGuardrailService.h
+    Core/Remediation/FieldGuardrailService.cpp
     Core/Renderer/GPUSkinning.h
     Core/Renderer/GPUSkinning.cpp
     Core/Renderer/VirtualGeometry/VirtualGeometryTypes.h
@@ -567,3 +570,9 @@ add_executable(EngineCoreRuntimeFieldFixTests
 )
 target_link_libraries(EngineCoreRuntimeFieldFixTests PRIVATE EngineCore)
 add_test(NAME EngineCoreRuntimeFieldFixTests COMMAND EngineCoreRuntimeFieldFixTests)
+
+add_executable(EngineCoreFieldGuardrailTests
+    Core/Tests/Remediation/FieldGuardrailTests.cpp
+)
+target_link_libraries(EngineCoreFieldGuardrailTests PRIVATE EngineCore)
+add_test(NAME EngineCoreFieldGuardrailTests COMMAND EngineCoreFieldGuardrailTests)
