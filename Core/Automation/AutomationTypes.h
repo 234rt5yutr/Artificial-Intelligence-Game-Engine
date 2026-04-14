@@ -46,4 +46,56 @@ struct PlayModeSuiteResult {
     std::vector<std::string> Diagnostics;
 };
 
+enum class PerformanceMetricKind : uint8_t {
+    FrameMs = 0,
+    CpuMs = 1,
+    GpuMs = 2,
+    MemoryMb = 3
+};
+
+struct PerformanceMetricBudget {
+    PerformanceMetricKind Metric = PerformanceMetricKind::FrameMs;
+    double Threshold = 0.0;
+};
+
+struct PerformanceMetricSample {
+    PerformanceMetricKind Metric = PerformanceMetricKind::FrameMs;
+    std::vector<double> Samples;
+    double Average = 0.0;
+    double Peak = 0.0;
+};
+
+struct PerformanceMetricResult {
+    PerformanceMetricKind Metric = PerformanceMetricKind::FrameMs;
+    double Threshold = 0.0;
+    double Average = 0.0;
+    double Peak = 0.0;
+    double AverageDelta = 0.0;
+    double PeakDelta = 0.0;
+    bool Passed = false;
+};
+
+struct PerformanceSuiteRequest {
+    std::string ProfileName;
+    std::string ScenarioId;
+    std::string PlatformTier;
+    uint32_t WarmupFrames = 0;
+    uint32_t SampleFrames = 0;
+    std::vector<PerformanceMetricBudget> Budgets;
+};
+
+struct PerformanceSuiteResult {
+    std::string ProfileName;
+    std::string ScenarioId;
+    std::string PlatformTier;
+    uint32_t WarmupFrames = 0;
+    uint32_t SampleFrames = 0;
+    bool Passed = false;
+    std::string GateStatusCode;
+    std::vector<PerformanceMetricSample> MetricSamples;
+    std::vector<PerformanceMetricResult> MetricResults;
+    std::vector<PerformanceMetricResult> FailingMetrics;
+    std::vector<std::string> Diagnostics;
+};
+
 } // namespace Core::Automation
