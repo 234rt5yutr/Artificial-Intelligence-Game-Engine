@@ -214,4 +214,19 @@ struct FieldIssueLedgerReport {
     std::string DeterministicDigest;
 };
 
+struct FieldAuditComplianceReportRequest {
+    std::string Scope = "compliance-report";
+    std::filesystem::path OutputDirectory;
+    std::string Revision;
+    FieldIssueLedgerReport LedgerReport;
+};
+
+struct FieldAuditComplianceReport {
+    std::string Scope;
+    std::filesystem::path OutputDirectory;
+    std::filesystem::path JsonReportPath;
+    std::filesystem::path MarkdownReportPath;
+    std::string DeterministicDigest;
+};
+
 } // namespace Core::Audit

@@ -431,7 +431,7 @@ This roadmap breaks down the engine development into strict, single-action steps
 * [ ] Step 29.4: Generate actionable findings with severity, ownership, and traceable evidence.
   * [x] Sub-step 29.4.1: Implement `GenerateFieldAuditIssueLedger()` with deduplicated issue IDs, first-seen revision, and reproducible evidence pointers. (v0.29.4.1)
   * [x] Sub-step 29.4.2: Implement `ComputeFieldIssueSeverityAndBlastRadius()` with gameplay/runtime/build/release impact scoring heuristics. (v0.29.4.2)
-  * [ ] Sub-step 29.4.3: Implement `ExportFieldAuditComplianceReport()` with machine-readable summaries and human triage views. (v0.29.4.3)
+  * [x] Sub-step 29.4.3: Implement `ExportFieldAuditComplianceReport()` with machine-readable summaries and human triage views. (v0.29.4.3)
   * [ ] Sub-step 29.4.4: Implement `CreateFieldRemediationBacklogFromAudit()` that emits prioritized fix tasks grouped by subsystem ownership. (v0.29.4.4)
 
 ## Phase 30: Field Integrity Remediation, Hardening & Closure (Weeks 88-92)
