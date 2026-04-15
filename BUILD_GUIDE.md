@@ -33,7 +33,13 @@ cmake -S . -B build `
 ### Release
 
 ```powershell
-cmake --build build --config Release
+cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal
+```
+
+Run the Release validation sweep:
+
+```powershell
+ctest --test-dir build -C Release
 ```
 
 ### Debug
@@ -49,6 +55,14 @@ cmake --build build --config Debug
 ```powershell
 .\build\release\AIGameEngine.exe
 ```
+
+### Runtime MCP controls
+
+`AIGameEngine.exe` now starts MCP by default. Optional launch flags:
+
+- `--disable-mcp`
+- `--mcp-host=<host>`
+- `--mcp-port=<port>`
 
 ### Debug executable
 
@@ -138,3 +152,12 @@ To run only the build/packaging workflow tests:
 ctest --test-dir build -C Release -R "EngineCore(BuildPipeline|ArtifactPackaging|DedicatedServerArtifact)Tests"
 ```
 
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.

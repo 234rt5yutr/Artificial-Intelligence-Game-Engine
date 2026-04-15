@@ -1546,3 +1546,12 @@ stateDiagram-v2
 - GDC Navigation Mesh Generation: https://www.gdcvault.com/play/1014514/AI-Navigation
 - Game AI Pro Pathfinding: http://www.gameaipro.com/
 - Mikko Mononen Blog (Recast author): https://digestingduck.blogspot.com/
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.

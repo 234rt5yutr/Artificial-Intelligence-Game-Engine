@@ -64,3 +64,12 @@ A completely abstracted API layer wrapping Vulkan/DX12 concepts:
 *   **Semantic Scene Representation:** Automatic serialization of the 3D scene (entities, transforms, materials, lights) into an optimal text/JSON format for LLM context windows.
 *   **Command Execution Interface:** A secure sandboxed API allowing AI agents to spawn entities, modify components, arrange lighting, and tweak physics parameters in real-time.
 *   **Auto-Generation Tools:** Prompt-based generation of level layouts, procedural entity population, and gameplay rule scripting via the MCP.
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.

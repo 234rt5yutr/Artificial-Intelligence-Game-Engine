@@ -27,12 +27,13 @@ Implemented foundation (code present and wired into build):
 - Physics integration path (Jolt)
 - Networking layer (GameNetworkingSockets) with replication/prediction modules
 - MCP server, HTTP interface, and scene serialization/tool scaffolding
+- Runtime MCP hosting in `Core::Application` (default startup + runtime host/port controls)
 - Runtime UI authoring stack with widget blueprint/layout assets, data bindings, transitions, world-space widgets, localization, and modal focus routing
 
 Roadmap snapshot from `engine_roadmap.md`:
-- Completed: Roadmap phases through **Phase 27** (including Stage 27 UI persistence sub-step `27.3.4`)
-- Latest release milestone: `v0.27.3.4`
-- Current focus: **Phase 28** profiling, automation, and production build pipeline
+- Completed: Roadmap phases through **Phase 30** (Field Integrity Remediation, Hardening & Closure)
+- Latest release milestone: `v0.30.5.4`
+- Current focus: stabilization, release hardening, and regression prevention workflows
 
 ## Architecture Overview
 
@@ -101,7 +102,8 @@ cmake -S . -B build `
   -DCMAKE_TOOLCHAIN_FILE=.\vcpkg\scripts\buildsystems\vcpkg.cmake `
   -DVCPKG_TARGET_TRIPLET=x64-windows
 
-cmake --build build --config Release
+cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal
+ctest --test-dir build -C Release
 .\build\release\AIGameEngine.exe
 ```
 
@@ -122,3 +124,12 @@ This project is an experiment in AI-assisted engine development at scale:
 - To evaluate where human oversight remains critical (stability, validation, security, and final optimization)
 
 If you use this repository, treat it as research code and prototype infrastructure only.
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.

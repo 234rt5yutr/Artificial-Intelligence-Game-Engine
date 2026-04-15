@@ -3123,3 +3123,12 @@ stateDiagram-v2
 - Dialogue Systems in Games: https://www.gamedeveloper.com/design/creating-dialogue-systems
 - Data-Driven AI: http://www.gameaipro.com/
 - GDC AI Summit: https://www.gdcvault.com/browse/gdc-19/play/all/ai
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.

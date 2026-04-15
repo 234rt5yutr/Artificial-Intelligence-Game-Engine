@@ -3,6 +3,7 @@
 #include "Core/CrashHandler.h"
 #include "Core/Application.h"
 
+#include <charconv>
 #include <string_view>
 
 // Subclass Application for the game client
@@ -42,8 +43,29 @@ int main(int argc, char** argv) {
             runtimeOptions.DisableUI = true;
             continue;
         }
+        if (arg == "--disable-mcp") {
+            runtimeOptions.EnableMCPServer = false;
+            continue;
+        }
         if (arg == "--capture-trace") {
             runtimeOptions.CaptureStartupGPUTrace = true;
+            continue;
+        }
+        constexpr std::string_view mcpHostPrefix = "--mcp-host=";
+        if (arg.rfind(mcpHostPrefix, 0) == 0) {
+            runtimeOptions.MCPHost = std::string(arg.substr(mcpHostPrefix.size()));
+            continue;
+        }
+        constexpr std::string_view mcpPortPrefix = "--mcp-port=";
+        if (arg.rfind(mcpPortPrefix, 0) == 0) {
+            const std::string_view portValue = arg.substr(mcpPortPrefix.size());
+            int parsedPort = 0;
+            const char* begin = portValue.data();
+            const char* end = begin + portValue.size();
+            auto [ptr, ec] = std::from_chars(begin, end, parsedPort);
+            if (ec == std::errc() && ptr == end && parsedPort > 0 && parsedPort <= 65535) {
+                runtimeOptions.MCPPort = parsedPort;
+            }
             continue;
         }
         constexpr std::string_view runtimeProfilePrefix = "--runtime-profile=";

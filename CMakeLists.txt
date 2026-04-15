@@ -36,6 +36,7 @@ find_package(EnTT CONFIG REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
 find_package(GameNetworkingSockets CONFIG REQUIRED)
 find_package(httplib CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Lua REQUIRED)
 find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
@@ -463,7 +464,7 @@ add_library(EngineCore
     Core/Editor/Sequencer/TimelineAsset.h
 )
 
-target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui RecastNavigation::Recast RecastNavigation::Detour RecastNavigation::DetourCrowd RecastNavigation::DetourTileCache)
+target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui RecastNavigation::Recast RecastNavigation::Detour RecastNavigation::DetourCrowd RecastNavigation::DetourTileCache)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS} ${LUA_INCLUDE_DIR} ${MINIAUDIO_INCLUDE_DIRS} ${Stb_INCLUDE_DIR})
 
 # Option to enable Tracy profiling

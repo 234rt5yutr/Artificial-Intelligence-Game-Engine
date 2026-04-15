@@ -10,6 +10,7 @@
 #include "Core/UI/UIManager.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/ECS/Scene.h"
+#include "Core/MCP/MCPServer.h"
 #include <thread>
 #include <chrono>
 
@@ -65,12 +66,31 @@ namespace Core {
             m_RuntimeScene->BindUIManager(&UI::UIManager::Get());
             UI::UIManager::Get().SetEditorScene(m_RuntimeScene.get());
         }
+        if (s_RuntimeOptions.EnableMCPServer) {
+            MCP::MCPServerConfig mcpConfig{};
+            mcpConfig.Host = s_RuntimeOptions.MCPHost;
+            mcpConfig.Port = s_RuntimeOptions.MCPPort;
+            m_MCPServer = std::make_unique<MCP::MCPServer>(mcpConfig);
+            m_MCPServer->SetActiveScene(m_RuntimeScene.get());
+            if (!m_MCPServer->Start()) {
+                ENGINE_CORE_ERROR("Failed to start MCP server at {}:{}", mcpConfig.Host, mcpConfig.Port);
+                m_MCPServer.reset();
+            } else {
+                ENGINE_CORE_INFO("MCP server started at {}", m_MCPServer->GetEndpointUrl());
+            }
+        } else {
+            ENGINE_CORE_INFO("MCP server startup disabled via runtime options");
+        }
         ENGINE_CORE_INFO("Stage 27 runtime scene and UISystem initialized");
 
         ApplyRuntimeOptions();
     }
 
     Application::~Application() {
+        if (m_MCPServer) {
+            m_MCPServer->Stop();
+            m_MCPServer.reset();
+        }
         UI::UIManager::Get().Shutdown();
     }
 
@@ -84,6 +104,9 @@ namespace Core {
 
         if (m_HeadlessRuntime) {
             while (m_Running) {
+                if (m_MCPServer) {
+                    m_MCPServer->ProcessPendingRequests();
+                }
                 Asset::HotReload::AssetHotReloadService::Get().PumpFrameSafePoint();
                 if (m_RuntimeScene) {
                     m_RuntimeScene->OnUpdate(0.0f);
@@ -100,6 +123,9 @@ namespace Core {
             PROFILE_SCOPE("Application Loop");
 
             m_Window->OnUpdate();
+            if (m_MCPServer) {
+                m_MCPServer->ProcessPendingRequests();
+            }
             Asset::HotReload::AssetHotReloadService::Get().PumpFrameSafePoint();
 
             auto now = std::chrono::high_resolution_clock::now();

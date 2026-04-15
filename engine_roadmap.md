@@ -461,3 +461,12 @@ This roadmap breaks down the engine development into strict, single-action steps
   * [x] Sub-step 30.5.2: Implement `EnforceZeroCriticalFieldDefectGate()` across runtime, network, persistence, and release artifact domains. (v0.30.5.2)
   * [x] Sub-step 30.5.3: Implement `PublishFieldIntegritySignoffReport()` with unresolved-risk disclosures and ownership acknowledgements. (v0.30.5.3)
   * [x] Sub-step 30.5.4: Implement `FreezeFieldContractVersionForNextPhase()` with policy checkpoints for controlled schema evolution. (v0.30.5.4)
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.

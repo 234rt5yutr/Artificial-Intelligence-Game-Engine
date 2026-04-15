@@ -10,6 +10,7 @@
 namespace Core {
     namespace RHI { class VulkanContext; }
     namespace ECS { class Scene; }
+    namespace MCP { class MCPServer; }
 
 
     class Application {
@@ -29,6 +30,9 @@ namespace Core {
             bool Headless = false;
             bool DisableRenderer = false;
             bool DisableUI = false;
+            bool EnableMCPServer = true;
+            std::string MCPHost = "127.0.0.1";
+            int MCPPort = 3000;
         };
 
         Application();
@@ -55,6 +59,7 @@ namespace Core {
         std::unique_ptr<Core::Window> m_Window;
         std::unique_ptr<RHI::VulkanContext> m_VulkanContext;
         std::unique_ptr<ECS::Scene> m_RuntimeScene;
+        std::unique_ptr<MCP::MCPServer> m_MCPServer;
 
     private:
         bool OnWindowClose(WindowCloseEvent& e);

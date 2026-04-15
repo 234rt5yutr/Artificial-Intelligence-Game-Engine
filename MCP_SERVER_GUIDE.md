@@ -23,13 +23,24 @@ Default server config:
 
 ## 2. Current integration model
 
-The server classes are available in the codebase and are designed to be hosted by the engine process.
+MCP is now bootstrapped by default inside the engine runtime (`Core::Application`):
 
-If your local app entrypoint does not already bootstrap MCP, integrate it in your application startup/shutdown path (example below).
+1. Creates an `MCPServer` with runtime host/port options.
+2. Binds the active runtime scene.
+3. Starts server lifecycle on app startup and pumps pending requests each frame.
+4. Stops MCP on app shutdown.
+
+The runtime bootstrap provides the MCP transport and core JSON-RPC method handlers (`initialize`, `ping`, `tools/list`, `tools/call`, `logging/setLevel`). Custom hosts can register tool families (example below) if you want domain-specific MCP actions active in your build.
+
+Runtime flags:
+
+- `--disable-mcp`
+- `--mcp-host=<host>`
+- `--mcp-port=<port>`
 
 ---
 
-## 3. Starting MCP server in-engine
+## 3. Manual MCP embedding (custom hosts)
 
 ## 3.1 Includes
 
@@ -148,3 +159,12 @@ Implemented by `MCPServer`:
 2. Validate and gate tool exposure in production-like environments.
 3. If tools require scene mutation, ensure `SetActiveScene(...)` is configured.
 4. Prefer explicit allowlists for external clients and requests.
+
+<!-- release-doc-sync:2026-04-15 -->
+
+## Release Sync (2026-04-15)
+
+- Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
+- Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).
+- Confirmed executable composition: `AIGameEngine` links `EngineCore`, and `EngineCore` includes `Core/MCP/HttpServer.cpp` + `Core/MCP/MCPServer.cpp`.
+- Runtime MCP integration is now enabled in `Core::Application` by default; runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`.
