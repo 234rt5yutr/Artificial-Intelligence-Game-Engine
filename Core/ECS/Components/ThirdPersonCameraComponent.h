@@ -3,6 +3,7 @@
 #include "Core/Math/Math.h"
 #include "Core/ECS/Components/FirstPersonCameraComponent.h"
 #include <entt/entt.hpp>
+#include <random>
 
 namespace Core {
 namespace ECS {
@@ -159,10 +160,13 @@ namespace ECS {
         {
             if (ShakeIntensity > 0.001f) {
                 // Generate random shake offset
+                thread_local static std::mt19937 generator(std::random_device{}());
+                std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
+
                 CurrentShakeOffset = Math::Vec3(
-                    (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 2.0f * ShakeIntensity,
-                    (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 2.0f * ShakeIntensity,
-                    (static_cast<float>(rand()) / RAND_MAX - 0.5f) * 2.0f * ShakeIntensity
+                    distribution(generator) * ShakeIntensity,
+                    distribution(generator) * ShakeIntensity,
+                    distribution(generator) * ShakeIntensity
                 );
 
                 // Decay shake
