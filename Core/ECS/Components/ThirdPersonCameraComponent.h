@@ -160,13 +160,13 @@ namespace ECS {
         {
             if (ShakeIntensity > 0.001f) {
                 // Generate random shake offset
-                thread_local std::mt19937 gen(std::random_device{}());
-                std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+                thread_local static std::mt19937 generator(std::random_device{}());
+                std::uniform_real_distribution<float> distribution(-1.0f, 1.0f);
 
                 CurrentShakeOffset = Math::Vec3(
-                    dist(gen) * ShakeIntensity,
-                    dist(gen) * ShakeIntensity,
-                    dist(gen) * ShakeIntensity
+                    distribution(generator) * ShakeIntensity,
+                    distribution(generator) * ShakeIntensity,
+                    distribution(generator) * ShakeIntensity
                 );
 
                 // Decay shake
