@@ -13,6 +13,7 @@
 #include "Core/AI/FSM/FSM.h"
 #include "Core/ECS/Components/BehaviorTreeComponent.h"
 #include "Core/ECS/Components/FSMComponent.h"
+#include <random>
 
 namespace Core {
 namespace MCP {
@@ -72,7 +73,9 @@ namespace MCP {
 
             // Create a temporary injected node
             Dialogue::DialogueNode injectedNode;
-            injectedNode.Id = "_injected_" + std::to_string(std::rand());
+            static thread_local std::mt19937 gen(std::random_device{}());
+            std::uniform_int_distribution<uint32_t> dist;
+            injectedNode.Id = "_injected_" + std::to_string(dist(gen));
             injectedNode.Type = Dialogue::DialogueNodeType::Text;
             injectedNode.Text = text;
             injectedNode.SpeakerName = speakerName;
