@@ -11,6 +11,7 @@
 #include <variant>
 #include <optional>
 #include <nlohmann/json.hpp>
+#include <random>
 
 namespace Core {
 namespace Dialogue {
@@ -790,7 +791,10 @@ namespace Dialogue {
         void ProcessRandomNode(DialogueComponent& comp, const DialogueNode& node) {
             if (node.RandomNodes.empty()) return;
             
-            int32_t index = std::rand() % static_cast<int32_t>(node.RandomNodes.size());
+            static thread_local std::mt19937 gen(std::random_device{}());
+            std::uniform_int_distribution<size_t> dist(0, node.RandomNodes.size() - 1);
+            size_t index = dist(gen);
+
             EnterNode(comp, node.RandomNodes[index]);
         }
 
