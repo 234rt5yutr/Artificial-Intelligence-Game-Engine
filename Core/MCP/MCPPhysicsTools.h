@@ -193,7 +193,6 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            // SECURITY FIX: Use safe entity ID extraction with range validation
             uint32_t entityId;
             std::string error;
             if (!SafeGetEntityId(params, entityId, error)) {
@@ -204,9 +203,7 @@ namespace MCP {
                 return ToolResult::Error("Entity not found");  // Don't reveal ID in error
             }
 
-            // SECURITY FIX: Validate impact point with bounds
             Vec3 impactPoint = ParseVec3(params.value("impactPoint", json::object()), 10000.0f);
-            // SECURITY FIX: Clamp impact force to safe range
             float impactForce = SafeGetFloat(params, "impactForce", 100.0f, 0.0f, 100000.0f);
             bool chainReaction = params.value("chainReaction", false);
 
@@ -280,7 +277,6 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            // SECURITY FIX: Use safe entity ID extraction
             uint32_t entityId;
             std::string error;
             if (!SafeGetEntityId(params, entityId, error)) {
@@ -291,7 +287,6 @@ namespace MCP {
                 return ToolResult::Error("Entity not found");
             }
 
-            // SECURITY FIX: Validate velocity with bounds
             Vec3 initialVelocity = ParseVec3(params.value("initialVelocity", json::object()), 1000.0f);
             float blendTime = SafeGetFloat(params, "blendTime", 0.2f, 0.0f, 2.0f);
 
@@ -363,7 +358,6 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            // SECURITY FIX: Use safe entity ID extraction
             uint32_t entityId;
             std::string error;
             if (!SafeGetEntityId(params, entityId, error)) {
@@ -377,7 +371,6 @@ namespace MCP {
             std::string constraintType = params.value("constraintType", "");
             std::string property = params.value("property", "");
             
-            // SECURITY FIX: Validate constraint value with appropriate bounds
             float value = SafeGetFloat(params, "value", 0.0f, -1e6f, 1e6f);
 
             // Validate constraintType against whitelist
@@ -449,7 +442,6 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            // SECURITY FIX: Use safe entity ID extraction
             uint32_t entityId;
             std::string error;
             if (!SafeGetEntityId(params, entityId, error)) {
@@ -569,7 +561,6 @@ namespace MCP {
                 return ToolResult::Error("No active scene provided");
             }
 
-            // SECURITY FIX: Use safe entity ID extraction
             uint32_t entityId;
             std::string error;
             if (!SafeGetEntityId(params, entityId, error)) {
@@ -580,7 +571,6 @@ namespace MCP {
                 return ToolResult::Error("Entity not found");
             }
 
-            // SECURITY FIX: Validate force with bounds to prevent physics explosion
             constexpr float MAX_FORCE = 100000.0f;  // 100kN max
             Vec3 force = ParseVec3(params.value("force", json::object()), MAX_FORCE);
             
