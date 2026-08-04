@@ -11,6 +11,8 @@
 // ============================================================================
 
 #include "MCPTool.h"
+#include "MCPServer.h"  // Register*Tools() below call MCPServer methods, so the
+                         // forward declaration in MCPTool.h is not enough.
 #include "MCPTypes.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
@@ -32,8 +34,11 @@ namespace MCP {
     // FoliageComponent (inline definition for foliage instance data)
     // ========================================================================
     
-    namespace ECS {
-        
+    // MCP-local descriptor structs used to build tool payloads. Deliberately NOT
+    // named `ECS`: a nested Core::MCP::ECS shadows the real Core::ECS for every
+    // header included after this one inside namespace Core::MCP.
+    namespace WorldToolTypes {
+
         // Instance of a foliage object (tree, grass, rock, etc.)
         struct FoliageInstance {
             glm::vec3 Position{0.0f};
@@ -109,7 +114,7 @@ namespace MCP {
             SkyboxComponent() = default;
         };
 
-    } // namespace ECS
+    } // namespace WorldToolTypes
 
     // ========================================================================
     // GenerateBiome Tool
@@ -294,7 +299,7 @@ namespace MCP {
                     auto& treeTransform = treeEntity.AddComponent<Core::ECS::TransformComponent>();
                     treeTransform.Position = glm::vec3(centerX, 0.0f, centerZ);
 
-                    ECS::FoliageComponent foliage;
+                    WorldToolTypes::FoliageComponent foliage;
                     foliage.FoliageType = "tree";
                     foliage.Density = foliageDensity;
                     foliage.CastShadows = true;
@@ -302,7 +307,7 @@ namespace MCP {
 
                     int treesPerType = treeCount / static_cast<int>(treeTypes.size());
                     for (int i = 0; i < treesPerType; ++i) {
-                        ECS::FoliageInstance instance;
+                        WorldToolTypes::FoliageInstance instance;
                         instance.Position = glm::vec3(
                             centerX + posDist(rng),
                             0.0f,  // Y will be set by terrain height
@@ -317,7 +322,7 @@ namespace MCP {
                     totalFoliageInstances += static_cast<int>(foliage.Instances.size());
                     
                     // Store foliage component (using custom component storage in scene)
-                    // Note: This would typically be added via treeEntity.AddComponent<ECS::FoliageComponent>(foliage);
+                    // Note: This would typically be added via treeEntity.AddComponent<WorldToolTypes::FoliageComponent>(foliage);
                     
                     foliageEntityIds.push_back(treeEntityName);
                 }
@@ -333,7 +338,7 @@ namespace MCP {
                 auto& grassTransform = grassEntity.AddComponent<Core::ECS::TransformComponent>();
                 grassTransform.Position = glm::vec3(centerX, 0.0f, centerZ);
 
-                ECS::FoliageComponent grassFoliage;
+                WorldToolTypes::FoliageComponent grassFoliage;
                 grassFoliage.FoliageType = "grass";
                 grassFoliage.Density = grassDensity;
                 grassFoliage.CastShadows = false;
@@ -345,7 +350,7 @@ namespace MCP {
                 grassClumps = std::min(grassClumps, 10000);  // Cap for performance
 
                 for (int i = 0; i < grassClumps; ++i) {
-                    ECS::FoliageInstance instance;
+                    WorldToolTypes::FoliageInstance instance;
                     instance.Position = glm::vec3(
                         centerX + posDist(rng),
                         0.0f,
@@ -557,7 +562,7 @@ namespace MCP {
             }
 
             // Create or get TimeOfDay component data
-            ECS::TimeOfDayComponent tod;
+            WorldToolTypes::TimeOfDayComponent tod;
             
             // Set time
             if (transitionDuration > 0.0f) {
@@ -666,7 +671,7 @@ namespace MCP {
         }
 
     private:
-        void CalculateSunProperties(ECS::TimeOfDayComponent& tod) const {
+        void CalculateSunProperties(WorldToolTypes::TimeOfDayComponent& tod) const {
             float time = tod.CurrentTime;
             
             // Calculate sun angle based on time (0 = midnight, 12 = noon)

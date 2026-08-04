@@ -156,7 +156,7 @@ namespace Renderer {
     //=========================================================================
 
     bool TerrainGenerator::LoadHeightmap(
-        const std::string& filepath,
+        [[maybe_unused]] const std::string& filepath,
         std::vector<float>& outData,
         uint32_t& outWidth,
         uint32_t& outHeight)
@@ -601,8 +601,8 @@ namespace Renderer {
         uint32_t verticesPerRow = (chunkSize - 1) / lodStep + 1;
 
         for (size_t i = 0; i < chunk.Vertices.size(); ++i) {
-            uint32_t vx = i % verticesPerRow;
-            uint32_t vz = i / verticesPerRow;
+            uint32_t vx = static_cast<uint32_t>(i % verticesPerRow);
+            uint32_t vz = static_cast<uint32_t>(i / verticesPerRow);
 
             // Map back to heightmap coordinates
             uint32_t hx = vx * lodStep;

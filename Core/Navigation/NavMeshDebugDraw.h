@@ -6,7 +6,7 @@
 #include <cstdint>
 
 // Forward declarations
-struct dtNavMesh;
+class dtNavMesh;  // Detour declares this as a class, not a struct
 struct dtNavMeshQuery;
 struct dtCrowd;
 

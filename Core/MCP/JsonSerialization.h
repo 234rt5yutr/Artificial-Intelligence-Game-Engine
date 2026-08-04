@@ -74,6 +74,12 @@ namespace MCP {
         std::string method;
         Json params;
         std::variant<int64_t, std::string> id;
+        // JSON-RPC notifications carry no "id" and must not be answered. Every MCP
+        // client sends `notifications/initialized` right after initialize, so a
+        // parser that rejects id-less messages breaks the handshake.
+        bool HasId = false;
+
+        bool IsNotification() const { return !HasId; }
 
         Json ToJson() const {
             Json j;
@@ -82,30 +88,40 @@ namespace MCP {
             if (!params.is_null()) {
                 j["params"] = params;
             }
-            if (std::holds_alternative<int64_t>(id)) {
-                j["id"] = std::get<int64_t>(id);
-            } else {
-                j["id"] = std::get<std::string>(id);
+            if (HasId) {
+                if (std::holds_alternative<int64_t>(id)) {
+                    j["id"] = std::get<int64_t>(id);
+                } else {
+                    j["id"] = std::get<std::string>(id);
+                }
             }
             return j;
         }
 
         static std::optional<JsonRpcRequest> FromJson(const Json& j) {
-            if (!j.contains("jsonrpc") || !j.contains("method") || !j.contains("id")) {
+            if (!j.is_object() || !j.contains("jsonrpc") || !j.contains("method")) {
                 return std::nullopt;
             }
-            
+            if (!j["jsonrpc"].is_string() || !j["method"].is_string()) {
+                return std::nullopt;
+            }
+
             JsonRpcRequest req;
             req.jsonrpc = j["jsonrpc"].get<std::string>();
             req.method = j["method"].get<std::string>();
             req.params = j.value("params", Json::object());
-            
-            if (j["id"].is_number_integer()) {
-                req.id = j["id"].get<int64_t>();
-            } else {
-                req.id = j["id"].get<std::string>();
+
+            if (j.contains("id") && !j["id"].is_null()) {
+                if (j["id"].is_number_integer()) {
+                    req.id = j["id"].get<int64_t>();
+                } else if (j["id"].is_string()) {
+                    req.id = j["id"].get<std::string>();
+                } else {
+                    return std::nullopt;  // id must be a string or integer
+                }
+                req.HasId = true;
             }
-            
+
             return req;
         }
     };

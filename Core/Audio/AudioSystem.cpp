@@ -9,6 +9,13 @@
 #include <algorithm>
 #include <cstring>
 
+// MINIAUDIO_IMPLEMENTATION drags in the Windows backend headers *after*
+// AudioSystem.h has already undefined the macro, so undo it again here or every
+// definition below compiles under the wrong name.
+#ifdef PlaySound
+    #undef PlaySound
+#endif
+
 namespace Core {
 namespace Audio {
 

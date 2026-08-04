@@ -345,7 +345,7 @@ void IKSystem::ProcessFootIK(IKComponent& ik,
     const auto& settings = ik.FootSettings;
     
     // Get world transform matrix
-    Math::Mat4 worldMatrix = transform.GetWorldMatrix();
+    Math::Mat4 worldMatrix = transform.WorldMatrix;
     
     // Process each leg chain
     float lowestFootDrop = 0.0f;
@@ -479,7 +479,7 @@ bool IKSystem::RaycastGround(const Math::Vec3& footPos,
     );
 
     JPH::RayCastSettings settings;
-    settings.mBackFaceMode = JPH::EBackFaceMode::IgnoreBackFaces;
+    settings.SetBackFaceMode(JPH::EBackFaceMode::IgnoreBackFaces);
 
     JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> collector;
     

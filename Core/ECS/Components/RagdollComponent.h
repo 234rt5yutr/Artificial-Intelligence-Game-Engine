@@ -301,7 +301,7 @@ namespace ECS {
 
             // Resize mask if necessary - assumes we know the bone count
             // The RagdollSystem will validate against actual skeleton
-            const size_t boneCount = Definition->GetBoneCount();
+            const size_t boneCount = Definition->Bones.size();
             BoneMask.assign(boneCount, false);
 
             for (int32_t index : boneIndices)

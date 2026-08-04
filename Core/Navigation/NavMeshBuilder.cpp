@@ -1,12 +1,13 @@
 #include "NavMeshBuilder.h"
 #include "../ECS/Scene.h"
 #include "../ECS/Components/Components.h"
-#include "../Log.h"
+#include "Core/Log.h"
 
 #include <Recast.h>
 #include <DetourNavMesh.h>
 #include <DetourNavMeshBuilder.h>
 #include <chrono>
+#include <variant>
 #include <cstring>
 
 namespace Core {
@@ -28,13 +29,13 @@ void NavMeshContext::doLog(const rcLogCategory category, const char* msg, const 
     std::string message(msg, len);
     switch (category) {
         case RC_LOG_PROGRESS:
-            LOG_DEBUG("[NavMesh] {}", message);
+            ENGINE_CORE_TRACE("[NavMesh] {}", message);
             break;
         case RC_LOG_WARNING:
-            LOG_WARN("[NavMesh] {}", message);
+            ENGINE_CORE_WARN("[NavMesh] {}", message);
             break;
         case RC_LOG_ERROR:
-            LOG_ERROR("[NavMesh] {}", message);
+            ENGINE_CORE_ERROR("[NavMesh] {}", message);
             break;
         default:
             break;
@@ -80,7 +81,7 @@ NavMeshInputGeometry NavMeshBuilder::CollectGeometry(ECS::Scene* scene, uint8_t 
     NavMeshInputGeometry result;
     
     if (!scene) {
-        LOG_ERROR("[NavMeshBuilder] Null scene provided");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Null scene provided");
         return result;
     }
 
@@ -106,14 +107,16 @@ NavMeshInputGeometry NavMeshBuilder::CollectGeometry(ECS::Scene* scene, uint8_t 
 
         // Get collider mesh data
         ColliderData data;
-        data.Transform = transform.GetWorldMatrix();
+        data.Transform = transform.WorldMatrix;
         data.AreaType = areaType;
 
         // Extract vertices based on collider type
         switch (collider.Type) {
             case ECS::ColliderType::Box: {
                 // Generate box vertices
-                glm::vec3 half = collider.BoxHalfExtents;
+                const auto* box = std::get_if<ECS::BoxColliderData>(&collider.ShapeData);
+                if (!box) continue;
+                glm::vec3 half = box->HalfExtents;
                 data.Vertices = {
                     {-half.x, -half.y, -half.z}, {half.x, -half.y, -half.z},
                     {half.x, -half.y, half.z}, {-half.x, -half.y, half.z},
@@ -132,7 +135,9 @@ NavMeshInputGeometry NavMeshBuilder::CollectGeometry(ECS::Scene* scene, uint8_t 
             }
             case ECS::ColliderType::Sphere: {
                 // Generate simple sphere approximation (icosphere)
-                float r = collider.SphereRadius;
+                const auto* sphere = std::get_if<ECS::SphereColliderData>(&collider.ShapeData);
+                if (!sphere) continue;
+                float r = sphere->Radius;
                 float t = (1.0f + std::sqrt(5.0f)) / 2.0f;
                 data.Vertices = {
                     {-1, t, 0}, {1, t, 0}, {-1, -t, 0}, {1, -t, 0},
@@ -152,8 +157,10 @@ NavMeshInputGeometry NavMeshBuilder::CollectGeometry(ECS::Scene* scene, uint8_t 
             }
             case ECS::ColliderType::Capsule: {
                 // Generate capsule approximation
-                float r = collider.CapsuleRadius;
-                float h = collider.CapsuleHeight;
+                const auto* capsule = std::get_if<ECS::CapsuleColliderData>(&collider.ShapeData);
+                if (!capsule) continue;
+                float r = capsule->Radius;
+                float h = capsule->HalfHeight * 2.0f;
                 // Simplified capsule as cylinder
                 const int segments = 8;
                 for (int i = 0; i < segments; ++i) {
@@ -176,8 +183,10 @@ NavMeshInputGeometry NavMeshBuilder::CollectGeometry(ECS::Scene* scene, uint8_t 
             }
             case ECS::ColliderType::Mesh: {
                 // Use mesh collider vertices directly
-                data.Vertices = collider.MeshVertices;
-                data.Indices = collider.MeshIndices;
+                const auto* meshData = std::get_if<ECS::MeshColliderData>(&collider.ShapeData);
+                if (!meshData) continue;
+                data.Vertices = meshData->Vertices;
+                data.Indices = meshData->Indices;
                 break;
             }
             default:
@@ -262,6 +271,31 @@ void NavMeshBuilder::AddGeometry(const NavMeshInputGeometry& geometry) {
     m_InputGeometry.BoundsMax = glm::max(m_InputGeometry.BoundsMax, geometry.BoundsMax);
 }
 
+void NavMeshBuilder::SetGeometry(const std::vector<float>& vertices,
+                                 const std::vector<int32_t>& triangles,
+                                 const std::vector<uint8_t>& areaTypes) {
+    m_InputGeometry.Vertices = vertices;
+    m_InputGeometry.Triangles = triangles;
+    m_InputGeometry.AreaTypes = areaTypes;
+
+    // Recompute bounds from the supplied vertices; callers pass raw arrays with
+    // no bounds of their own.
+    if (vertices.size() >= 3) {
+        glm::vec3 boundsMin(vertices[0], vertices[1], vertices[2]);
+        glm::vec3 boundsMax = boundsMin;
+        for (std::size_t i = 0; i + 2 < vertices.size(); i += 3) {
+            const glm::vec3 v(vertices[i], vertices[i + 1], vertices[i + 2]);
+            boundsMin = glm::min(boundsMin, v);
+            boundsMax = glm::max(boundsMax, v);
+        }
+        m_InputGeometry.BoundsMin = boundsMin;
+        m_InputGeometry.BoundsMax = boundsMax;
+    } else {
+        m_InputGeometry.BoundsMin = glm::vec3(0.0f);
+        m_InputGeometry.BoundsMax = glm::vec3(0.0f);
+    }
+}
+
 void NavMeshBuilder::ClearGeometry() {
     m_InputGeometry = NavMeshInputGeometry{};
 }
@@ -338,14 +372,15 @@ NavMeshBuildResult NavMeshBuilder::Build(const NavMeshConfig& config) {
         result.Success = true;
         // Count polygons
         for (int i = 0; i < m_NavMesh->getMaxTiles(); ++i) {
-            const dtMeshTile* tile = m_NavMesh->getTile(i);
+            // getTile(int) is private; the const overload is the public one.
+            const dtMeshTile* tile = const_cast<const dtNavMesh*>(m_NavMesh)->getTile(i);
             if (tile && tile->header) {
                 result.PolygonCount += tile->header->polyCount;
             }
         }
     }
 
-    LOG_INFO("[NavMeshBuilder] Built NavMesh: {} tiles, {} polygons in {:.2f}ms",
+    ENGINE_CORE_INFO("[NavMeshBuilder] Built NavMesh: {} tiles, {} polygons in {:.2f}ms",
              result.TilesBuilt, result.PolygonCount, result.BuildTimeMs);
 
     return result;
@@ -442,13 +477,13 @@ bool NavMeshBuilder::BuildHeightfield(const NavMeshConfig& config,
 
     m_Heightfield = rcAllocHeightfield();
     if (!m_Heightfield) {
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate heightfield");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate heightfield");
         return false;
     }
 
     if (!rcCreateHeightfield(m_Context.get(), *m_Heightfield, gridWidth, gridHeight,
                              bmin, bmax, config.CellSize, config.CellHeight)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to create heightfield");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to create heightfield");
         return false;
     }
 
@@ -472,7 +507,7 @@ bool NavMeshBuilder::BuildHeightfield(const NavMeshConfig& config,
 
     if (!rcRasterizeTriangles(m_Context.get(), verts, nverts, tris, triAreas.data(),
                               ntris, *m_Heightfield, static_cast<int>(config.AgentMaxClimb / config.CellHeight))) {
-        LOG_ERROR("[NavMeshBuilder] Failed to rasterize triangles");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to rasterize triangles");
         return false;
     }
 
@@ -497,7 +532,7 @@ bool NavMeshBuilder::BuildHeightfield(const NavMeshConfig& config,
 bool NavMeshBuilder::BuildCompactHeightfield(const NavMeshConfig& config) {
     m_CompactHeightfield = rcAllocCompactHeightfield();
     if (!m_CompactHeightfield) {
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate compact heightfield");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate compact heightfield");
         return false;
     }
 
@@ -505,7 +540,7 @@ bool NavMeshBuilder::BuildCompactHeightfield(const NavMeshConfig& config) {
             static_cast<int>(config.AgentHeight / config.CellHeight),
             static_cast<int>(config.AgentMaxClimb / config.CellHeight),
             *m_Heightfield, *m_CompactHeightfield)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to build compact heightfield");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to build compact heightfield");
         return false;
     }
 
@@ -513,7 +548,7 @@ bool NavMeshBuilder::BuildCompactHeightfield(const NavMeshConfig& config) {
     if (!rcErodeWalkableArea(m_Context.get(),
             static_cast<int>(std::ceil(config.AgentRadius / config.CellSize)),
             *m_CompactHeightfield)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to erode walkable area");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to erode walkable area");
         return false;
     }
 
@@ -522,13 +557,13 @@ bool NavMeshBuilder::BuildCompactHeightfield(const NavMeshConfig& config) {
 
 bool NavMeshBuilder::BuildRegions(const NavMeshConfig& config) {
     if (!rcBuildDistanceField(m_Context.get(), *m_CompactHeightfield)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to build distance field");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to build distance field");
         return false;
     }
 
     if (!rcBuildRegions(m_Context.get(), *m_CompactHeightfield, 0,
             static_cast<int>(config.RegionMinSize), static_cast<int>(config.RegionMergeSize))) {
-        LOG_ERROR("[NavMeshBuilder] Failed to build regions");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to build regions");
         return false;
     }
 
@@ -538,28 +573,28 @@ bool NavMeshBuilder::BuildRegions(const NavMeshConfig& config) {
 bool NavMeshBuilder::BuildContours(const NavMeshConfig& config) {
     m_ContourSet = rcAllocContourSet();
     if (!m_ContourSet) {
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate contour set");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate contour set");
         return false;
     }
 
     if (!rcBuildContours(m_Context.get(), *m_CompactHeightfield, config.EdgeMaxError,
             static_cast<int>(config.EdgeMaxLen / config.CellSize), *m_ContourSet)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to build contours");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to build contours");
         return false;
     }
 
     return true;
 }
 
-bool NavMeshBuilder::BuildPolyMesh(const NavMeshConfig& config) {
+bool NavMeshBuilder::BuildPolyMesh([[maybe_unused]] const NavMeshConfig& config) {
     m_PolyMesh = rcAllocPolyMesh();
     if (!m_PolyMesh) {
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate polygon mesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate polygon mesh");
         return false;
     }
 
     if (!rcBuildPolyMesh(m_Context.get(), *m_ContourSet, 6, *m_PolyMesh)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to build polygon mesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to build polygon mesh");
         return false;
     }
 
@@ -569,13 +604,13 @@ bool NavMeshBuilder::BuildPolyMesh(const NavMeshConfig& config) {
 bool NavMeshBuilder::BuildDetailMesh(const NavMeshConfig& config) {
     m_DetailMesh = rcAllocPolyMeshDetail();
     if (!m_DetailMesh) {
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate detail mesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate detail mesh");
         return false;
     }
 
     if (!rcBuildPolyMeshDetail(m_Context.get(), *m_PolyMesh, *m_CompactHeightfield,
             config.DetailSampleDist, config.DetailSampleMaxError, *m_DetailMesh)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to build detail mesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to build detail mesh");
         return false;
     }
 
@@ -615,14 +650,14 @@ bool NavMeshBuilder::CreateDetourNavMesh(const NavMeshConfig& config) {
     int navDataSize = 0;
 
     if (!dtCreateNavMeshData(&params, &navData, &navDataSize)) {
-        LOG_ERROR("[NavMeshBuilder] Failed to create NavMesh data");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to create NavMesh data");
         return false;
     }
 
     m_NavMesh = dtAllocNavMesh();
     if (!m_NavMesh) {
         dtFree(navData);
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate NavMesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate NavMesh");
         return false;
     }
 
@@ -631,7 +666,7 @@ bool NavMeshBuilder::CreateDetourNavMesh(const NavMeshConfig& config) {
         dtFree(navData);
         dtFreeNavMesh(m_NavMesh);
         m_NavMesh = nullptr;
-        LOG_ERROR("[NavMeshBuilder] Failed to initialize NavMesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to initialize NavMesh");
         return false;
     }
 
@@ -653,7 +688,7 @@ bool NavMeshBuilder::CreateTiledNavMesh(const NavMeshConfig& config,
 
     m_NavMesh = dtAllocNavMesh();
     if (!m_NavMesh) {
-        LOG_ERROR("[NavMeshBuilder] Failed to allocate tiled NavMesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to allocate tiled NavMesh");
         return false;
     }
 
@@ -661,7 +696,7 @@ bool NavMeshBuilder::CreateTiledNavMesh(const NavMeshConfig& config,
     if (dtStatusFailed(status)) {
         dtFreeNavMesh(m_NavMesh);
         m_NavMesh = nullptr;
-        LOG_ERROR("[NavMeshBuilder] Failed to initialize tiled NavMesh");
+        ENGINE_CORE_ERROR("[NavMeshBuilder] Failed to initialize tiled NavMesh");
         return false;
     }
 

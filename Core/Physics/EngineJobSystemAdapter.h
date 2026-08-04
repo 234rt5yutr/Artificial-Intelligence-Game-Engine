@@ -2,39 +2,21 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/JobSystem.h>
+#include <Jolt/Core/JobSystemWithBarrier.h>
 #include "Core/JobSystem/JobSystem.h"
 #include "Core/Profile.h"
 #include <atomic>
-#include <mutex>
-#include <condition_variable>
 
 namespace Core {
 namespace Physics {
 
-    // Custom Jolt JobSystem that bridges to the engine's multi-threaded JobSystem
-    class EngineJobSystemAdapter : public JPH::JobSystem {
+    // Custom Jolt JobSystem that bridges to the engine's multi-threaded JobSystem.
+    //
+    // Barriers come from JPH::JobSystemWithBarrier rather than being hand-rolled:
+    // Jolt's version handles the job-already-finished case in Barrier::AddJob and
+    // runs pending barrier jobs on the waiting thread, which a naive counter cannot.
+    class EngineJobSystemAdapter : public JPH::JobSystemWithBarrier {
     public:
-        // Barrier implementation for synchronizing job completion
-        class BarrierImpl : public JPH::JobSystem::Barrier {
-        public:
-            BarrierImpl();
-            virtual ~BarrierImpl() override;
-
-            void AddJob(const JobHandle& inJob) override;
-            void AddJobs(const JobHandle* inHandles, uint32_t inNumHandles) override;
-
-            void Wait();
-            bool IsEmpty() const { return m_NumJobs.load(std::memory_order_acquire) == 0; }
-
-        protected:
-            void OnJobFinished(Job* inJob) override;
-
-        private:
-            std::atomic<uint32_t> m_NumJobs{0};
-            std::mutex m_Mutex;
-            std::condition_variable m_ConditionVariable;
-        };
-
         EngineJobSystemAdapter();
         virtual ~EngineJobSystemAdapter() override;
 
@@ -43,11 +25,8 @@ namespace Physics {
 
         // JPH::JobSystem interface
         int GetMaxConcurrency() const override;
-        JobHandle CreateJob(const char* inName, JPH::ColorArg inColor, 
+        JobHandle CreateJob(const char* inName, JPH::ColorArg inColor,
                            const JobFunction& inJobFunction, uint32_t inNumDependencies = 0) override;
-        Barrier* CreateBarrier() override;
-        void DestroyBarrier(Barrier* inBarrier) override;
-        void WaitForJobs(Barrier* inBarrier) override;
 
     protected:
         void QueueJob(Job* inJob) override;
@@ -55,12 +34,12 @@ namespace Physics {
         void FreeJob(Job* inJob) override;
 
     private:
+        // Jolt allocates barriers up front; one per concurrent PhysicsSystem::Update
+        // plus headroom is plenty for a single physics world.
+        static constexpr uint32_t MAX_BARRIERS = 8;
+
         uint32_t m_MaxConcurrency = 0;
-        
-        // Pool of barriers for reuse
-        std::mutex m_BarrierMutex;
-        std::vector<BarrierImpl*> m_BarrierPool;
-        
+
         // Job execution using engine's job system
         Core::JobSystem::Context m_JobContext;
     };

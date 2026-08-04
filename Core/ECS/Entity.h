@@ -75,6 +75,9 @@ namespace ECS {
 
         // Utility
         entt::entity GetHandle() const { return m_Handle; }
+        // Same value as GetHandle(); named for call sites that treat the entity as
+        // an opaque id (serialization, tool payloads).
+        entt::entity GetID() const { return m_Handle; }
         Scene* GetScene() { return m_Scene; }
         const Scene* GetScene() const { return m_Scene; }
         bool IsValid() const;

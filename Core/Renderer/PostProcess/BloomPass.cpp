@@ -1,5 +1,7 @@
 #include "BloomPass.h"
 #include "Core/ECS/Components/PostProcessComponent.h"
+#include "Core/Renderer/PostProcess/FramebufferChain.h"
+#include <array>
 #include <stdexcept>
 #include <algorithm>
 #include <cstring>
@@ -287,7 +289,6 @@ void BloomPass::DownsamplePass(VkCommandBuffer cmd, int srcMip, int dstMip,
 void BloomPass::UpsamplePass(VkCommandBuffer cmd, int srcMip, int dstMip,
                               const BloomSettings& bloomSettings) {
     VkImage srcImage = m_MipChain[srcMip].image;
-    VkImage dstImage = m_MipChain[dstMip].image;
     VkExtent2D dstExtent = m_MipChain[dstMip].extent;
 
     TransitionImageLayout(cmd, srcImage,

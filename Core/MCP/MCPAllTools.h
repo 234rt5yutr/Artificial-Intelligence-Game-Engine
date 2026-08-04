@@ -11,13 +11,24 @@
 #include "MCPAnimationTools.h"
 #include "MCPParticleTools.h"
 #include "MCPWorldTools.h"
-#include "MCPPostProcessTools.h"
-#include "MCPUITools.h"
-#include "MCPNavigationTools.h"
 #include "MCPGameplayTools.h"
-#include "MCPRayTracingTools.h"
 #include "MCPPhysicsTools.h"
 #include "MCPNetworkTools.h"
+#include "MCPDevTools.h"
+#include "MCPProjectTools.h"
+
+// NOT INCLUDED - these four families do not compile against the current MCPTool
+// base class and are excluded from the build until they are ported:
+//
+//   MCPPostProcessTools.h  - uses ToolInputSchema::SchemaProperty, which does not exist
+//   MCPUITools.h           - uses lowercase ToolInputSchema::{type,properties,required}
+//                            and brace-initialised ToolResult{bool, string}
+//   MCPNavigationTools.h   - derives from an older MCPTool with virtual GetName/
+//                            GetDescription and a different Execute signature
+//   MCPRayTracingTools.h   - written against an AIEngine::Rendering namespace that
+//                            is not present in this codebase
+//
+// Each needs a port to the MCPTool interface in MCPTool.h, not a small patch.
 
 namespace Core {
 namespace MCP {
@@ -75,7 +86,14 @@ namespace MCP {
     // - ModifyConstraint: Modify constraint properties at runtime
     // - QueryPhysicsState: Query physics body state
     // - ApplyForce: Apply force/impulse/torque to physics body
-    inline std::vector<MCPToolPtr> CreateAllMCPTools() {
+    // Declared here, defined in MCPAllTools.cpp. Callers that only need to
+    // register the tools should include this header and link; they do not pay to
+    // instantiate every family's schema templates in their own object file.
+    std::vector<MCPToolPtr> CreateAllMCPTools();
+
+    // Implementation detail: instantiates every family. Only MCPAllTools.cpp
+    // calls this.
+    inline std::vector<MCPToolPtr> CreateAllMCPToolsImpl() {
         std::vector<MCPToolPtr> tools;
 
         // Add scene tools (GetSceneContext, SpawnEntity, ModifyComponent, ExecuteScript)
@@ -102,25 +120,9 @@ namespace MCP {
         auto worldTools = CreateWorldTools();
         tools.insert(tools.end(), worldTools.begin(), worldTools.end());
 
-        // Add post-process tools (SetPostProcessProfile, BlendCameraEffects, GetPostProcessInfo)
-        auto postProcessTools = CreatePostProcessTools();
-        tools.insert(tools.end(), postProcessTools.begin(), postProcessTools.end());
-
-        // Add UI tools (DisplayScreenMessage, UpdateHUD, TriggerSaveState, ShowLoadingScreen)
-        auto uiTools = CreateUITools();
-        tools.insert(tools.end(), uiTools.begin(), uiTools.end());
-
-        // Add navigation tools (RebuildNavMesh, CommandAgentMove, SetPatrolRoute, QueryNavMesh, etc.)
-        auto navigationTools = CreateNavigationTools();
-        tools.insert(tools.end(), navigationTools.begin(), navigationTools.end());
-
         // Add gameplay tools (InjectDialogueNode, UpdateQuestObjective, ModifyInventory, GetGameplayState, SetAIState, StartDialogue)
         auto gameplayTools = CreateGameplayTools();
         tools.insert(tools.end(), gameplayTools.begin(), gameplayTools.end());
-
-        // Add ray tracing tools (ToggleRayTracingFeatures, BakeGlobalIllumination, SetReflectionQuality, QueryRTCapabilities)
-        auto rayTracingTools = CreateRayTracingTools();
-        tools.insert(tools.end(), rayTracingTools.begin(), rayTracingTools.end());
 
         // Add physics tools (TriggerDestruction, SpawnRagdoll, ModifyConstraint, QueryPhysicsState, ApplyForce)
         auto physicsTools = CreatePhysicsTools();
@@ -129,6 +131,16 @@ namespace MCP {
         // Add network product-layer tools (session, discovery, diagnostics)
         auto networkTools = CreateNetworkTools();
         tools.insert(tools.end(), networkTools.begin(), networkTools.end());
+
+        // Add development-control tools (engine status, simulation pause/step,
+        // engine log, play-mode + performance suites, profiler capture)
+        auto devTools = CreateDevTools();
+        tools.insert(tools.end(), devTools.begin(), devTools.end());
+
+        // Add project-control tools (platform builds, scene save/load, project
+        // file listing) so an agent can drive the project loop, not just runtime
+        auto projectTools = CreateProjectTools();
+        tools.insert(tools.end(), projectTools.begin(), projectTools.end());
 
         return tools;
     }

@@ -6,14 +6,13 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 
-// Forward declarations for Recast types
-struct rcContext;
-struct rcHeightfield;
-struct rcCompactHeightfield;
-struct rcContourSet;
-struct rcPolyMesh;
-struct rcPolyMeshDetail;
-struct dtNavMesh;
+// NavMeshContext derives from rcContext and overrides rcLogCategory/rcTimerLabel
+// methods, so the real Recast declarations are required here - a forward
+// declaration cannot serve as a base class.
+#include <Recast.h>
+
+// Forward declarations for types only used behind pointers.
+class dtNavMesh;
 
 namespace Core {
 
@@ -93,6 +92,14 @@ namespace Navigation {
         /// @param geometry Geometry to add
         void AddGeometry(const NavMeshInputGeometry& geometry);
 
+        /// @brief Replace the collected geometry with raw Recast-format arrays
+        /// @param vertices Vertex positions as x,y,z triplets
+        /// @param triangles Triangle indices (3 per triangle)
+        /// @param areaTypes Area type per triangle
+        void SetGeometry(const std::vector<float>& vertices,
+                         const std::vector<int32_t>& triangles,
+                         const std::vector<uint8_t>& areaTypes);
+
         /// @brief Clear all collected geometry
         void ClearGeometry();
 
@@ -100,18 +107,34 @@ namespace Navigation {
         // NavMesh Building
         // =====================================================================
 
+        /// @brief Store a build configuration for the argument-less Build()
+        /// @param config Build configuration retained for later builds
+        void SetConfig(const NavMeshConfig& config) { m_Config = config; }
+
+        /// @brief Configuration most recently passed to SetConfig/Build
+        const NavMeshConfig& GetConfig() const { return m_Config; }
+
         /// @brief Build NavMesh from collected geometry
         /// @param config Build configuration
         /// @return Build result
         NavMeshBuildResult Build(const NavMeshConfig& config);
+
+        /// @brief Build using the configuration set by SetConfig()
+        /// @return Build result
+        NavMeshBuildResult Build() { return Build(m_Config); }
 
         /// @brief Build single tile at specified coordinates
         /// @param config Build configuration
         /// @param tileX Tile X coordinate
         /// @param tileZ Tile Z coordinate
         /// @return Build result
-        NavMeshBuildResult BuildTile(const NavMeshConfig& config, 
+        NavMeshBuildResult BuildTile(const NavMeshConfig& config,
                                       int32_t tileX, int32_t tileZ);
+
+        /// @brief Build a single tile using the configuration set by SetConfig()
+        NavMeshBuildResult BuildTile(int32_t tileX, int32_t tileZ) {
+            return BuildTile(m_Config, tileX, tileZ);
+        }
 
         /// @brief Get the built NavMesh (transfers ownership)
         /// @return NavMesh pointer (caller takes ownership)
@@ -177,6 +200,8 @@ namespace Navigation {
     private:
         std::unique_ptr<NavMeshContext> m_Context;
         NavMeshInputGeometry m_InputGeometry;
+        // Retained by SetConfig() so callers can use the argument-less Build().
+        NavMeshConfig m_Config{};
 
         // Intermediate build data
         rcHeightfield* m_Heightfield = nullptr;

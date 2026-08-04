@@ -1,4 +1,5 @@
 #include "Core/ECS/Systems/TerrainSystem.h"
+#include <cstring>
 
 namespace Core {
 namespace ECS {
@@ -72,7 +73,8 @@ namespace ECS {
             
             if (camera.IsActive) {
                 cameraPos = Math::Vec3(transform.WorldMatrix[3]);
-                viewProjection = camera.GetProjectionMatrix() * camera.GetViewMatrix(transform);
+                camera.CalculateViewMatrixFromWorldMatrix(transform.WorldMatrix);
+                viewProjection = camera.ViewProjectionMatrix;
                 break;
             }
         }
@@ -156,7 +158,6 @@ namespace ECS {
         const auto& chunk = *it->second;
         
         // Convert to local chunk position
-        float chunkWorldSize = terrain.ChunkSize * terrain.HorizontalScale;
         float localX = worldX - chunk.WorldPosition.x;
         float localZ = worldZ - chunk.WorldPosition.z;
 
@@ -493,21 +494,38 @@ namespace ECS {
             return;
         }
 
-        // Create vertex buffer
-        RHI::BufferDesc vertexDesc;
-        vertexDesc.Size = chunk.Vertices.size() * sizeof(Renderer::TerrainVertex);
-        vertexDesc.Usage = RHI::BufferUsage::VertexBuffer;
-        vertexDesc.MemoryType = RHI::MemoryType::DeviceLocal;
+        // RHI::BufferDescriptor is the real descriptor type, and CreateBuffer does
+        // not take initial data - buffers are filled through their mapping.
+        auto uploadBuffer = [this](const void* source, std::size_t byteSize,
+                                   RHI::BufferUsage usage) -> std::shared_ptr<RHI::RHIBuffer> {
+            RHI::BufferDescriptor desc{};
+            desc.size = byteSize;
+            desc.usage = usage;
+            desc.mapped = true;
 
-        chunk.VertexBuffer = m_Device->CreateBuffer(vertexDesc, chunk.Vertices.data());
+            auto buffer = m_Device->CreateBuffer(desc);
+            if (!buffer) {
+                return nullptr;
+            }
 
-        // Create index buffer
-        RHI::BufferDesc indexDesc;
-        indexDesc.Size = chunk.Indices.size() * sizeof(uint32_t);
-        indexDesc.Usage = RHI::BufferUsage::IndexBuffer;
-        indexDesc.MemoryType = RHI::MemoryType::DeviceLocal;
+            void* mappedData = nullptr;
+            buffer->Map(&mappedData);
+            if (mappedData) {
+                std::memcpy(mappedData, source, byteSize);
+            }
+            buffer->Unmap();
+            return buffer;
+        };
 
-        chunk.IndexBuffer = m_Device->CreateBuffer(indexDesc, chunk.Indices.data());
+        chunk.VertexBuffer = uploadBuffer(
+            chunk.Vertices.data(),
+            chunk.Vertices.size() * sizeof(Renderer::TerrainVertex),
+            RHI::BufferUsage::Vertex);
+
+        chunk.IndexBuffer = uploadBuffer(
+            chunk.Indices.data(),
+            chunk.Indices.size() * sizeof(uint32_t),
+            RHI::BufferUsage::Index);
 
         // Optionally clear CPU geometry to save memory
         // chunk.ClearCPUGeometry();

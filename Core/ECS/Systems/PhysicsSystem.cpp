@@ -70,12 +70,15 @@ namespace ECS {
         // Accumulate time for fixed timestep
         m_AccumulatedTime += deltaTime;
 
+        // Rebuild the broadphase only when bodies were added since the last step.
+        if (m_BroadPhaseNeedsOptimize) {
+            m_PhysicsWorld->GetPhysicsSystem().OptimizeBroadPhase();
+            m_BroadPhaseNeedsOptimize = false;
+        }
+
         // Step physics with fixed timestep
         int stepsPerformed = 0;
         while (m_AccumulatedTime >= m_FixedTimestep) {
-            // Optimize broadphase (optional, can be done periodically)
-            m_PhysicsWorld->GetPhysicsSystem().OptimizeBroadPhase();
-
             // Step the simulation
             m_PhysicsWorld->GetPhysicsSystem().Update(
                 m_FixedTimestep,
@@ -165,6 +168,7 @@ namespace ECS {
 
         // Add to world and activate
         bodyInterface.AddBody(rigidBody.BodyID, JPH::EActivation::Activate);
+        m_BroadPhaseNeedsOptimize = true;
 
         // Set initial velocity if specified
         if (glm::length(rigidBody.LinearVelocity) > 0.0f || glm::length(rigidBody.AngularVelocity) > 0.0f) {
@@ -307,6 +311,24 @@ namespace ECS {
                               rigidBody.PendingAngularImpulse.y,
                               rigidBody.PendingAngularImpulse.z));
                 rigidBody.PendingAngularImpulse = Math::Vec3(0.0f);
+            }
+
+            // Forces persist for the upcoming step only; Jolt clears them itself
+            // once the body is simulated.
+            if (glm::length(rigidBody.AccumulatedForce) > 0.0f) {
+                bodyInterface.AddForce(rigidBody.BodyID,
+                    JPH::Vec3(rigidBody.AccumulatedForce.x,
+                              rigidBody.AccumulatedForce.y,
+                              rigidBody.AccumulatedForce.z));
+                rigidBody.AccumulatedForce = Math::Vec3(0.0f);
+            }
+
+            if (glm::length(rigidBody.AccumulatedTorque) > 0.0f) {
+                bodyInterface.AddTorque(rigidBody.BodyID,
+                    JPH::Vec3(rigidBody.AccumulatedTorque.x,
+                              rigidBody.AccumulatedTorque.y,
+                              rigidBody.AccumulatedTorque.z));
+                rigidBody.AccumulatedTorque = Math::Vec3(0.0f);
             }
 
             rigidBody.NeedsSync = false;

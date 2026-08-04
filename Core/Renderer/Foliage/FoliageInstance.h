@@ -72,7 +72,10 @@ namespace Renderer {
         uint32_t MaterialIndex;         // 4 bytes
         uint32_t MaxInstances;          // 4 bytes
         uint32_t RandomSeed;            // 4 bytes
-        float Padding[2];               // 8 bytes
+        // Members above total 304 bytes; pad to the 320-byte block the compute
+        // shader binds. Two floats left the struct 16 bytes short of its own
+        // static_assert, so this never compiled.
+        float Padding[6];               // 24 bytes
 
         FoliageScatterUniforms()
             : ViewProjection(1.0f)
@@ -99,8 +102,9 @@ namespace Renderer {
             for (int i = 0; i < 6; ++i) {
                 FrustumPlanes[i] = Math::Vec4(0.0f);
             }
-            Padding[0] = 0.0f;
-            Padding[1] = 0.0f;
+            for (float& pad : Padding) {
+                pad = 0.0f;
+            }
         }
     };
     static_assert(sizeof(FoliageScatterUniforms) == 320, "FoliageScatterUniforms must be 320 bytes");

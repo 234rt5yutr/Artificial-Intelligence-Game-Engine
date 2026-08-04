@@ -396,7 +396,7 @@ namespace Renderer {
     // Scatter Execution
     //=========================================================================
 
-    void FoliageScatter::ScatterFoliage(std::shared_ptr<RHI::RHICommandList> commandList)
+    void FoliageScatter::ScatterFoliage([[maybe_unused]] std::shared_ptr<RHI::RHICommandList> commandList)
     {
         PROFILE_FUNCTION();
 
@@ -447,8 +447,9 @@ namespace Renderer {
 
             // Calculate dispatch size
             uint32_t estimatedInstances = m_ScatterUniforms.MaxInstances;
-            uint32_t workgroups = (estimatedInstances + FOLIAGE_SCATTER_WORKGROUP_SIZE - 1) 
-                                  / FOLIAGE_SCATTER_WORKGROUP_SIZE;
+            [[maybe_unused]] uint32_t workgroups =
+                (estimatedInstances + FOLIAGE_SCATTER_WORKGROUP_SIZE - 1)
+                / FOLIAGE_SCATTER_WORKGROUP_SIZE;
 
             // Dispatch compute shader
             // commandList->BindComputePipeline(m_ScatterPipeline);
@@ -471,7 +472,7 @@ namespace Renderer {
     }
 
     void FoliageScatter::UpdateWindAnimation(
-        std::shared_ptr<RHI::RHICommandList> commandList,
+        [[maybe_unused]] std::shared_ptr<RHI::RHICommandList> commandList,
         float deltaTime)
     {
         PROFILE_FUNCTION();

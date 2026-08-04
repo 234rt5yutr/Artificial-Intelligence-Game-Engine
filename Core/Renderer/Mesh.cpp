@@ -700,5 +700,97 @@ std::vector<float> ExtractMotionFeatureVector(
     return features;
 }
 
+// ============================================================================
+// GPU Upload
+// ============================================================================
+
+bool Mesh::UploadToGPU(RHI::RHIDevice& device) {
+    // Pick the vertex stream that matches the mesh kind. A skeletal mesh whose
+    // skinnedVertices are empty is a load bug, not something to silently paper
+    // over with the static stream.
+    const void* vertexSource = nullptr;
+    std::size_t vertexBytes = 0;
+    std::size_t vertexCount = 0;
+    std::size_t vertexStride = 0;
+
+    if (m_IsSkeletal) {
+        if (skinnedVertices.empty()) {
+            ENGINE_CORE_ERROR("Mesh::UploadToGPU: skeletal mesh has no skinned vertices");
+            return false;
+        }
+        vertexSource = skinnedVertices.data();
+        vertexCount = skinnedVertices.size();
+        vertexStride = sizeof(SkinnedVertex);
+    } else {
+        if (vertices.empty()) {
+            ENGINE_CORE_ERROR("Mesh::UploadToGPU: mesh has no vertices");
+            return false;
+        }
+        vertexSource = vertices.data();
+        vertexCount = vertices.size();
+        vertexStride = sizeof(Vertex);
+    }
+    vertexBytes = vertexCount * vertexStride;
+
+    if (indices.empty()) {
+        ENGINE_CORE_ERROR("Mesh::UploadToGPU: mesh has no indices");
+        return false;
+    }
+    const std::size_t indexBytes = indices.size() * sizeof(uint32_t);
+
+    // Host-visible buffers: the RHI exposes no staging/transfer submission path
+    // yet (see VulkanDevice - command lists are not routed through the RHI), so a
+    // device-local buffer could not be filled.
+    // ponytail: host-visible upload, switch to a staging copy once the RHI owns
+    // command submission.
+    auto uploadBuffer = [&device](const void* source, std::size_t byteSize,
+                                  RHI::BufferUsage usage)
+        -> std::shared_ptr<RHI::RHIBuffer> {
+        RHI::BufferDescriptor desc{};
+        desc.size = byteSize;
+        desc.usage = usage;
+        desc.mapped = true;
+
+        auto buffer = device.CreateBuffer(desc);
+        if (!buffer) {
+            return nullptr;
+        }
+
+        void* mapped = nullptr;
+        buffer->Map(&mapped);
+        if (!mapped) {
+            buffer->Unmap();
+            return nullptr;
+        }
+        std::memcpy(mapped, source, byteSize);
+        buffer->Unmap();
+        return buffer;
+    };
+
+    auto newVertexBuffer = uploadBuffer(vertexSource, vertexBytes, RHI::BufferUsage::Vertex);
+    if (!newVertexBuffer) {
+        ENGINE_CORE_ERROR("Mesh::UploadToGPU: vertex buffer allocation failed ({} bytes)", vertexBytes);
+        return false;
+    }
+
+    auto newIndexBuffer = uploadBuffer(indices.data(), indexBytes, RHI::BufferUsage::Index);
+    if (!newIndexBuffer) {
+        ENGINE_CORE_ERROR("Mesh::UploadToGPU: index buffer allocation failed ({} bytes)", indexBytes);
+        return false;
+    }
+
+    // Only publish once both succeeded, so a partial failure cannot leave the
+    // mesh looking uploaded.
+    vertexBuffer = std::move(newVertexBuffer);
+    indexBuffer = std::move(newIndexBuffer);
+    m_UploadedVertexStride = static_cast<uint32_t>(vertexStride);
+    m_UploadedVertexCount = static_cast<uint32_t>(vertexCount);
+    m_UploadedIndexCount = static_cast<uint32_t>(indices.size());
+
+    ENGINE_CORE_INFO("Mesh uploaded to GPU: {} vertices ({} B stride), {} indices",
+                     m_UploadedVertexCount, m_UploadedVertexStride, m_UploadedIndexCount);
+    return true;
+}
+
 } // namespace Renderer
 } // namespace Core

@@ -108,6 +108,12 @@ namespace Scripting {
         ScriptLimits m_Limits;
         int m_InstructionCount = 0;
         bool m_TimedOut = false;
+        // Wall-clock deadline for the running script. The instruction hook only
+        // bounded instruction count, so a script that blocks inside a long C call
+        // or stays under the instruction budget could run forever on the main
+        // thread - reachable from the MCP ExecuteScript tool.
+        std::chrono::steady_clock::time_point m_ExecutionStart{};
+        double m_TimeoutMs = 0.0;
 
         // Setup sandboxed environment
         void SetupSandbox();
@@ -300,8 +306,17 @@ namespace Scripting {
 
         engine->m_InstructionCount += 1000;
         if (engine->m_InstructionCount > engine->m_Limits.MaxInstructions) {
-            luaL_error(L, "Script exceeded maximum instruction count (%d)", 
+            luaL_error(L, "Script exceeded maximum instruction count (%d)",
                        engine->m_Limits.MaxInstructions);
+        }
+
+        if (engine->m_TimeoutMs > 0.0) {
+            const double elapsedMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - engine->m_ExecutionStart).count();
+            if (elapsedMs > engine->m_TimeoutMs) {
+                engine->m_TimedOut = true;
+                luaL_error(L, "Script exceeded time limit (%.0f ms)", engine->m_TimeoutMs);
+            }
         }
         
         // SECURITY: Check recursion depth to prevent stack overflow attacks
@@ -406,6 +421,8 @@ namespace Scripting {
 
         m_InstructionCount = 0;
         m_TimedOut = false;
+        m_TimeoutMs = timeoutMs;
+        m_ExecutionStart = std::chrono::steady_clock::now();
 
         auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -959,10 +976,11 @@ namespace Scripting {
         lua_newtable(L);
         int index = 1;
         
-        registry.each([L, &index](auto entity) {
+        // EnTT 3.16 removed registry::each; iterate the entity storage instead.
+        for (auto entity : registry.view<entt::entity>()) {
             lua_pushinteger(L, static_cast<lua_Integer>(static_cast<uint32_t>(entity)));
             lua_rawseti(L, -2, index++);
-        });
+        }
         
         return 1;
     }

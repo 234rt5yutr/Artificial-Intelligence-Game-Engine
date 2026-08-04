@@ -1,5 +1,7 @@
 #include "ColorGradingPass.h"
 #include "Core/ECS/Components/PostProcessComponent.h"
+#include "Core/Renderer/PostProcess/FramebufferChain.h"
+#include <array>
 #include <stdexcept>
 #include <fstream>
 #include <sstream>

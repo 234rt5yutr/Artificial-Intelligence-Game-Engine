@@ -157,12 +157,19 @@ namespace MCP {
             return new httplib::ThreadPool(m_ThreadPoolSize); 
         };
 
-        // Add CORS headers for MCP clients
+        // No wildcard Access-Control-Allow-Origin here: this server listens on
+        // loopback and a wildcard would let any web page the user visits drive the
+        // engine. CORS headers are emitted per-route only for allowed origins.
         m_Server->set_default_headers({
-            {"Access-Control-Allow-Origin", "*"},
-            {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
-            {"Access-Control-Allow-Headers", "Content-Type, Authorization"}
+            {"X-Content-Type-Options", "nosniff"}
         });
+
+        // Bind on the calling thread so a failure (port in use, bad host) is reported
+        // by Start() instead of being swallowed asynchronously on the server thread.
+        if (!m_Server->bind_to_port(m_Host, m_Port)) {
+            LOG_ERROR("Failed to bind HTTP server to {}:{}", m_Host, m_Port);
+            return false;
+        }
 
         m_Running = true;
         m_ServerThread = std::thread(&HttpServer::ServerThread, this);
@@ -172,11 +179,11 @@ namespace MCP {
     }
 
     void HttpServer::Stop() {
-        if (!m_Running) return;
-
         m_Running = false;
         m_Server->stop();
 
+        // Join unconditionally: the server thread can clear m_Running itself when
+        // listen() returns, and leaving it joinable would terminate the process.
         if (m_ServerThread.joinable()) {
             m_ServerThread.join();
         }
@@ -195,11 +202,12 @@ namespace MCP {
 
     void HttpServer::ServerThread() {
         LOG_INFO("HTTP server listening on {}:{}", m_Host, m_Port);
-        
-        if (!m_Server->listen(m_Host, m_Port)) {
-            LOG_ERROR("Failed to start HTTP server on {}:{}", m_Host, m_Port);
-            m_Running = false;
+
+        // Socket is already bound by Start(); this only runs the accept loop.
+        if (!m_Server->listen_after_bind()) {
+            LOG_ERROR("HTTP server accept loop exited with an error on {}:{}", m_Host, m_Port);
         }
+        m_Running = false;
     }
 
     // HttpClient implementation

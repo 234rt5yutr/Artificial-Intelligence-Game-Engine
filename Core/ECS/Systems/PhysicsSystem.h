@@ -69,6 +69,9 @@ namespace ECS {
         float m_FixedTimestep = 1.0f / 60.0f;  // 60 Hz
         int m_CollisionSteps = 1;
         float m_AccumulatedTime = 0.0f;
+        // OptimizeBroadPhase is a full rebuild; Jolt only wants it after bodies are
+        // added in bulk, never once per simulation step.
+        bool m_BroadPhaseNeedsOptimize = false;
 
         // Statistics
         uint32_t m_ActiveBodyCount = 0;

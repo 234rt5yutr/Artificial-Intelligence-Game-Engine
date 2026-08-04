@@ -68,6 +68,16 @@ int main(int argc, char** argv) {
             }
             continue;
         }
+        constexpr std::string_view mcpTokenPrefix = "--mcp-token=";
+        if (arg.rfind(mcpTokenPrefix, 0) == 0) {
+            runtimeOptions.MCPAuthToken = std::string(arg.substr(mcpTokenPrefix.size()));
+            continue;
+        }
+        constexpr std::string_view mcpOriginPrefix = "--mcp-allow-origin=";
+        if (arg.rfind(mcpOriginPrefix, 0) == 0) {
+            runtimeOptions.MCPAllowedOrigins.emplace_back(arg.substr(mcpOriginPrefix.size()));
+            continue;
+        }
         constexpr std::string_view runtimeProfilePrefix = "--runtime-profile=";
         if (arg.rfind(runtimeProfilePrefix, 0) == 0) {
             const std::string_view profileValue = arg.substr(runtimeProfilePrefix.size());

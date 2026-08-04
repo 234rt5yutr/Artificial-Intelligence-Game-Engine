@@ -1,4 +1,5 @@
 #include "TileCacheManager.h"
+#include <cmath>
 #include <DetourTileCache.h>
 #include <DetourTileCacheBuilder.h>
 #include <DetourNavMesh.h>
@@ -225,7 +226,7 @@ namespace Navigation {
 
     ObstacleResult TileCacheManager::AddBoxObstacle(const glm::vec3& center,
                                                      const glm::vec3& halfExtents,
-                                                     float yaw) {
+                                                     [[maybe_unused]] float yaw) {
         ObstacleResult result;
 
         if (!m_TileCache) {
@@ -318,10 +319,16 @@ namespace Navigation {
         dtObstacleRef newRef;
         
         if (obstacle->type == DT_OBSTACLE_CYLINDER) {
-            m_TileCache->addObstacle(pos, obstacle->radius, obstacle->height, &newRef);
+            m_TileCache->addObstacle(pos, obstacle->cylinder.radius,
+                                     obstacle->cylinder.height, &newRef);
         } else {
-            // For box obstacles, approximate with cylinder
-            m_TileCache->addObstacle(pos, obstacle->radius, obstacle->height, &newRef);
+            // Box obstacles carry bmin/bmax; approximate with the enclosing cylinder.
+            const float* bmin = obstacle->box.bmin;
+            const float* bmax = obstacle->box.bmax;
+            const float halfX = (bmax[0] - bmin[0]) * 0.5f;
+            const float halfZ = (bmax[2] - bmin[2]) * 0.5f;
+            const float radius = std::sqrt(halfX * halfX + halfZ * halfZ);
+            m_TileCache->addObstacle(pos, radius, bmax[1] - bmin[1], &newRef);
         }
 
         // Update tracked reference
@@ -395,12 +402,16 @@ namespace Navigation {
         return m_NavMesh;
     }
 
-    bool TileCacheManager::AddTileData(int32_t tileX, int32_t tileZ,
+    bool TileCacheManager::AddTileData([[maybe_unused]] int32_t tileX,
+                                        [[maybe_unused]] int32_t tileZ,
                                         const unsigned char* data, int dataSize) {
         if (!m_TileCache) return false;
 
         dtCompressedTileRef ref;
-        dtStatus status = m_TileCache->addTile(data, dataSize, DT_COMPRESSEDTILE_FREE_DATA, &ref);
+        // addTile takes ownership of the buffer (DT_COMPRESSEDTILE_FREE_DATA), so
+        // it needs a mutable pointer even though this API hands us a const one.
+        dtStatus status = m_TileCache->addTile(const_cast<unsigned char*>(data), dataSize,
+                                               DT_COMPRESSEDTILE_FREE_DATA, &ref);
         
         if (dtStatusFailed(status)) {
             return false;

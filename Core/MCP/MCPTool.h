@@ -35,8 +35,17 @@ namespace MCP {
             def.Name = m_Name;
             def.Description = m_Description;
             def.InputSchema = GetInputSchema();
+            def.Annotations = GetAnnotations();
+            if (def.Annotations.Title.empty()) {
+                def.Annotations.Title = m_Name;
+            }
             return def;
         }
+
+        // Behavioural hints for the host. The default is the conservative one:
+        // not read-only, so a host that auto-permits reads will still prompt for
+        // an unannotated tool rather than assume it is safe.
+        virtual ToolAnnotations GetAnnotations() const { return ToolAnnotations{}; }
 
         // Get the input schema for this tool
         virtual ToolInputSchema GetInputSchema() const = 0;

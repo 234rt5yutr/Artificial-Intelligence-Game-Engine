@@ -12,6 +12,14 @@ namespace Core {
 namespace Asset {
 namespace {
 
+    // Bounds check for a [offset, offset+size) span inside a loaded file buffer.
+    // Widens to uint64_t first: the cooked headers store 32-bit offsets/sizes, so a
+    // plain `offset + size > fileSize` wraps at 2^32 and lets a crafted asset pass
+    // the check and then read far out of bounds.
+    bool SpanWithinFile(uint64_t offset, uint64_t size, size_t fileSize) {
+        return offset <= fileSize && size <= static_cast<uint64_t>(fileSize) - offset;
+    }
+
     LoadedStructuredAsset LoadStructuredAssetInternal(const std::filesystem::path& cookedPath,
                                                       AssetType expectedType) {
         LoadedStructuredAsset result;
@@ -62,7 +70,7 @@ namespace {
             return result;
         }
 
-        if (header.DataOffset + header.DataSize > fileData.size()) {
+        if (!SpanWithinFile(header.DataOffset, header.DataSize, fileData.size())) {
             LOG_ERROR("Structured asset payload out of bounds: {}",
                       Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
@@ -212,8 +220,8 @@ namespace {
         size_t dataOffset = assetHeader.DataOffset;
         size_t dataSize = assetHeader.DataSize;
         
-        if (dataOffset + dataSize > fileData.size()) {
-            LOG_ERROR("Corrupt texture data: {}", 
+        if (!SpanWithinFile(dataOffset, dataSize, fileData.size())) {
+            LOG_ERROR("Corrupt texture data: {}",
                       Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
@@ -264,8 +272,8 @@ namespace {
                     sizeof(CookedMeshHeader));
         
         // Copy vertex data
-        if (result.Header.VertexDataOffset + result.Header.VertexDataSize > fileData.size()) {
-            LOG_ERROR("Corrupt vertex data: {}", 
+        if (!SpanWithinFile(result.Header.VertexDataOffset, result.Header.VertexDataSize, fileData.size())) {
+            LOG_ERROR("Corrupt vertex data: {}",
                       Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
@@ -276,8 +284,8 @@ namespace {
                     result.Header.VertexDataSize);
         
         // Copy index data
-        if (result.Header.IndexDataOffset + result.Header.IndexDataSize > fileData.size()) {
-            LOG_ERROR("Corrupt index data: {}", 
+        if (!SpanWithinFile(result.Header.IndexDataOffset, result.Header.IndexDataSize, fileData.size())) {
+            LOG_ERROR("Corrupt index data: {}",
                       Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
@@ -334,19 +342,27 @@ namespace {
         size_t spirvOffset = assetHeader.DataOffset;
         size_t spirvSize = result.Header.SpirvSize;
         
-        if (spirvOffset + spirvSize > fileData.size()) {
-            LOG_ERROR("Corrupt shader data: {}", 
+        if (!SpanWithinFile(spirvOffset, spirvSize, fileData.size())) {
+            LOG_ERROR("Corrupt shader data: {}",
                       Security::PathValidator::SanitizeForLogging(cookedPath));
             return result;
         }
-        
+
+        // SPIR-V is a stream of 32-bit words. A size that is not word-aligned would
+        // make the destination vector smaller than the memcpy length below.
+        if (spirvSize % sizeof(uint32_t) != 0) {
+            LOG_ERROR("Shader SPIR-V size is not 4-byte aligned ({} bytes): {}", spirvSize,
+                      Security::PathValidator::SanitizeForLogging(cookedPath));
+            return result;
+        }
+
         result.Spirv.resize(spirvSize / sizeof(uint32_t));
         std::memcpy(result.Spirv.data(), fileData.data() + spirvOffset, spirvSize);
-        
+
         // Copy reflection data
         if (result.Header.ReflectionSize > 0) {
             size_t reflectOffset = result.Header.ReflectionOffset;
-            if (reflectOffset + result.Header.ReflectionSize <= fileData.size()) {
+            if (SpanWithinFile(reflectOffset, result.Header.ReflectionSize, fileData.size())) {
                 result.Reflection.assign(
                     reinterpret_cast<const char*>(fileData.data() + reflectOffset),
                     result.Header.ReflectionSize);

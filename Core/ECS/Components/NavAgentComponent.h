@@ -61,7 +61,7 @@ namespace ECS {
         // =====================================================================
 
         /// Path follow mode
-        Navigation::PathFollowMode FollowMode = Navigation::PathFollowMode::FollowPath;
+        Navigation::PathFollowMode FollowMode = Navigation::PathFollowMode::Smooth;
 
         /// Current path waypoints
         std::vector<glm::vec3> CurrentPath;

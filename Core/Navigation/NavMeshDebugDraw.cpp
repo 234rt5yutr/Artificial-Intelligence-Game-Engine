@@ -169,7 +169,8 @@ namespace Navigation {
         if (flags & DRAW_AGENTS) {
             int agentCount = crowd->getAgentCount();
             for (int i = 0; i < agentCount; ++i) {
-                const dtCrowdAgent* agent = crowd->getAgent(i);
+                // getAgent() is non-const in this Detour revision.
+                const dtCrowdAgent* agent = const_cast<dtCrowd*>(crowd)->getAgent(i);
                 if (!agent->active) continue;
 
                 glm::vec3 pos(agent->npos[0], agent->npos[1], agent->npos[2]);
@@ -209,7 +210,6 @@ namespace Navigation {
 
                 // Draw corridor
                 if (flags & DRAW_CORRIDORS) {
-                    const dtPathCorridor& corridor = agent->corridor;
                     int ncorners = agent->ncorners;
                     const float* corners = agent->cornerVerts;
 

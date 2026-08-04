@@ -479,7 +479,8 @@ namespace ECS {
 
             // Start with icosahedron vertices
             const float phi = (1.0f + std::sqrt(5.0f)) / 2.0f;  // Golden ratio
-            const float scale = radius / std::sqrt(1.0f + phi * phi);
+            // Vertices are normalized and scaled by `radius` below, so no separate
+            // circumradius factor is needed here.
 
             // 12 vertices of icosahedron
             std::vector<Math::Vec3> icoVerts = {

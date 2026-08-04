@@ -22,6 +22,7 @@
 #include <condition_variable>
 #include <unordered_set>
 #include <vector>
+#include <optional>
 
 namespace Core {
 
@@ -43,6 +44,20 @@ namespace MCP {
         std::string ServerVersion = "1.0.0";
         bool EnforceCapabilityScopes = false;
         std::vector<std::string> GrantedCapabilities;
+        // How long an HTTP worker waits for the main thread to run a tool before
+        // giving up. Guards against hanging every client if the game loop stalls.
+        int MainThreadDispatchTimeoutMs = 10000;
+
+        // --- Security -------------------------------------------------------
+        // When set, every request must carry `Authorization: Bearer <token>`.
+        std::string AuthToken;
+        // DNS-rebinding protection (required by the MCP spec for local HTTP
+        // servers): a browser on any page can reach 127.0.0.1, so requests that
+        // carry a browser Origin are rejected unless the origin is listed here.
+        // Non-browser clients send no Origin and are unaffected.
+        std::vector<std::string> AllowedOrigins;
+        // Reject oversized bodies before parsing them.
+        size_t MaxRequestBodyBytes = 8u * 1024u * 1024u;
     };
 
     // Connection state for an MCP session
@@ -124,13 +139,25 @@ namespace MCP {
 
         // JSON-RPC method handlers
         JsonRpcResponse HandleJsonRpcRequest(const JsonRpcRequest& request);
+
+        // Runs a request on the main thread and blocks the caller until it completes.
+        // Tool execution mutates the ECS registry, so it must not run concurrently
+        // with the game loop.
+        JsonRpcResponse DispatchOnMainThread(const JsonRpcRequest& request);
         JsonRpcResponse HandleInitialize(const JsonRpcRequest& request);
         JsonRpcResponse HandlePing(const JsonRpcRequest& request);
         JsonRpcResponse HandleToolsList(const JsonRpcRequest& request);
         JsonRpcResponse HandleToolsCall(const JsonRpcRequest& request);
         JsonRpcResponse HandleSetLogLevel(const JsonRpcRequest& request);
+        JsonRpcResponse HandleResourcesList(const JsonRpcRequest& request);
+        JsonRpcResponse HandleResourcesRead(const JsonRpcRequest& request);
+        JsonRpcResponse HandlePromptsList(const JsonRpcRequest& request);
         bool HasGrantedCapability(const std::string& capability) const;
         void RebuildConfigCapabilities();
+
+        // Returns an error response to send verbatim, or nullopt when the request
+        // passes the transport-level checks (auth, origin, body size).
+        std::optional<HttpResponse> RejectRequest(const HttpRequest& request) const;
 
         // Setup HTTP routes
         void SetupRoutes();
@@ -159,6 +186,11 @@ namespace MCP {
         mutable std::mutex m_RequestQueueMutex;
         std::queue<PendingRequest> m_PendingRequests;
         std::condition_variable m_RequestQueueCV;
+        // Set once the game loop has pumped at least one time; until then requests
+        // are executed inline so a host that never calls ProcessPendingRequests()
+        // still works instead of timing out on every call.
+        std::atomic<bool> m_MainThreadPumpSeen{ false };
+        std::atomic<bool> m_AcceptingQueuedRequests{ false };
 
         // Statistics
         std::atomic<size_t> m_RequestCount{ 0 };

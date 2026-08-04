@@ -91,14 +91,14 @@ namespace Navigation {
         NavMeshBuildResult result;
 
         if (!m_Initialized) {
-            result.success = false;
-            result.errorMessage = "NavMeshManager not initialized";
+            result.Success = false;
+            result.ErrorMessage = "NavMeshManager not initialized";
             return result;
         }
 
         if (!scene) {
-            result.success = false;
-            result.errorMessage = "Scene is null";
+            result.Success = false;
+            result.ErrorMessage = "Scene is null";
             return result;
         }
 
@@ -110,7 +110,7 @@ namespace Navigation {
 
         // Build NavMesh
         result = m_Builder->Build();
-        if (!result.success) {
+        if (!result.Success) {
             return result;
         }
 
@@ -126,14 +126,14 @@ namespace Navigation {
         if (m_NavMesh && m_NavMeshQuery) {
             dtStatus status = m_NavMeshQuery->init(m_NavMesh, 2048);
             if (dtStatusFailed(status)) {
-                result.success = false;
-                result.errorMessage = "Failed to init NavMesh query";
+                result.Success = false;
+                result.ErrorMessage = "Failed to init NavMesh query";
                 return result;
             }
         }
 
         spdlog::info("[NavMeshManager] NavMesh built: {} vertices, {} polygons",
-                     result.stats.vertexCount, result.stats.polyCount);
+                     result.TilesBuilt, result.PolygonCount);
         return result;
     }
 
@@ -142,33 +142,40 @@ namespace Navigation {
         NavMeshBuildResult result;
 
         if (!m_Initialized) {
-            result.success = false;
-            result.errorMessage = "NavMeshManager not initialized";
+            result.Success = false;
+            result.ErrorMessage = "NavMeshManager not initialized";
             return result;
         }
 
         // Set geometry manually
         std::vector<float> verts;
-        std::vector<int> tris;
+        std::vector<int32_t> tris;
         std::vector<uint8_t> areas;
 
         for (const auto& collider : colliders) {
             size_t baseIndex = verts.size() / 3;
 
-            // Add vertices
-            verts.insert(verts.end(), collider.vertices.begin(), collider.vertices.end());
+            // Recast wants a flat x,y,z stream; ColliderData stores vec3s, so the
+            // components have to be expanded rather than range-inserted.
+            verts.reserve(verts.size() + collider.Vertices.size() * 3);
+            for (const auto& v : collider.Vertices) {
+                const glm::vec4 transformed = collider.Transform * glm::vec4(v, 1.0f);
+                verts.push_back(transformed.x);
+                verts.push_back(transformed.y);
+                verts.push_back(transformed.z);
+            }
 
             // Add triangles with offset
-            for (size_t i = 0; i < collider.indices.size(); i += 3) {
-                tris.push_back(static_cast<int>(baseIndex) + collider.indices[i]);
-                tris.push_back(static_cast<int>(baseIndex) + collider.indices[i + 1]);
-                tris.push_back(static_cast<int>(baseIndex) + collider.indices[i + 2]);
+            for (size_t i = 0; i < collider.Indices.size(); i += 3) {
+                tris.push_back(static_cast<int32_t>(baseIndex + collider.Indices[i]));
+                tris.push_back(static_cast<int32_t>(baseIndex + collider.Indices[i + 1]));
+                tris.push_back(static_cast<int32_t>(baseIndex + collider.Indices[i + 2]));
             }
 
             // Add area types
-            size_t numTris = collider.indices.size() / 3;
+            size_t numTris = collider.Indices.size() / 3;
             for (size_t i = 0; i < numTris; ++i) {
-                areas.push_back(collider.areaType);
+                areas.push_back(collider.AreaType);
             }
         }
 
@@ -176,7 +183,7 @@ namespace Navigation {
 
         // Build NavMesh
         result = m_Builder->Build();
-        if (!result.success) {
+        if (!result.Success) {
             return result;
         }
 
@@ -192,8 +199,8 @@ namespace Navigation {
         if (m_NavMesh && m_NavMeshQuery) {
             dtStatus status = m_NavMeshQuery->init(m_NavMesh, 2048);
             if (dtStatusFailed(status)) {
-                result.success = false;
-                result.errorMessage = "Failed to init NavMesh query";
+                result.Success = false;
+                result.ErrorMessage = "Failed to init NavMesh query";
                 return result;
             }
         }
@@ -206,14 +213,14 @@ namespace Navigation {
         NavMeshBuildResult result;
 
         if (!m_Initialized || !m_CurrentScene) {
-            result.success = false;
-            result.errorMessage = "Not initialized or no scene";
+            result.Success = false;
+            result.ErrorMessage = "Not initialized or no scene";
             return result;
         }
 
         if (!m_NavMesh) {
-            result.success = false;
-            result.errorMessage = "No NavMesh exists";
+            result.Success = false;
+            result.ErrorMessage = "No NavMesh exists";
             return result;
         }
 
@@ -225,7 +232,7 @@ namespace Navigation {
 
         // Rebuild tile
         result = m_Builder->BuildTile(tileX, tileZ);
-        if (!result.success) {
+        if (!result.Success) {
             return result;
         }
 
@@ -259,7 +266,7 @@ namespace Navigation {
         PathQueryResult result;
 
         if (!m_NavMesh || !m_NavMeshQuery) {
-            result.success = false;
+            result.Found = false;
             return result;
         }
 
@@ -277,7 +284,7 @@ namespace Navigation {
         dtStatus status = m_NavMeshQuery->findNearestPoly(startPos, extents, queryFilter,
                                                           &startRef, nearestStart);
         if (dtStatusFailed(status) || startRef == 0) {
-            result.success = false;
+            result.Found = false;
             return result;
         }
 
@@ -287,7 +294,7 @@ namespace Navigation {
         status = m_NavMeshQuery->findNearestPoly(endPos, extents, queryFilter,
                                                   &endRef, nearestEnd);
         if (dtStatusFailed(status) || endRef == 0) {
-            result.success = false;
+            result.Found = false;
             return result;
         }
 
@@ -299,7 +306,7 @@ namespace Navigation {
         status = m_NavMeshQuery->findPath(startRef, endRef, nearestStart, nearestEnd,
                                            queryFilter, path, &pathCount, MAX_PATH_POLYS);
         if (dtStatusFailed(status) || pathCount == 0) {
-            result.success = false;
+            result.Found = false;
             return result;
         }
 
@@ -315,28 +322,28 @@ namespace Navigation {
                                                    straightPathPolys, &straightPathCount,
                                                    MAX_STRAIGHT_PATH, DT_STRAIGHTPATH_AREA_CROSSINGS);
         if (dtStatusFailed(status) || straightPathCount == 0) {
-            result.success = false;
+            result.Found = false;
             return result;
         }
 
         // Copy result
-        result.waypoints.resize(straightPathCount);
-        result.totalDistance = 0.0f;
+        result.Path.resize(straightPathCount);
+        result.PathLength = 0.0f;
 
         for (int i = 0; i < straightPathCount; ++i) {
-            result.waypoints[i] = glm::vec3(
+            result.Path[i] = glm::vec3(
                 straightPath[i * 3],
                 straightPath[i * 3 + 1],
                 straightPath[i * 3 + 2]
             );
 
             if (i > 0) {
-                result.totalDistance += glm::length(result.waypoints[i] - result.waypoints[i - 1]);
+                result.PathLength += glm::length(result.Path[i] - result.Path[i - 1]);
             }
         }
 
-        result.success = true;
-        result.isPartial = dtStatusDetail(status, DT_PARTIAL_RESULT) != 0;
+        result.Found = true;
+        result.IsPartial = dtStatusDetail(status, DT_PARTIAL_RESULT) != 0;
         return result;
     }
 
@@ -435,25 +442,25 @@ namespace Navigation {
         std::lock_guard<std::mutex> lock(m_Mutex);
 
         OffMeshConnection conn;
-        conn.id = m_NextConnectionId++;
-        conn.start = start;
-        conn.end = end;
-        conn.radius = radius;
-        conn.bidirectional = bidirectional;
-        conn.areaType = areaType;
-        conn.flags = FLAG_WALK;
+        conn.ConnectionId = m_NextConnectionId++;
+        conn.StartPos = start;
+        conn.EndPos = end;
+        conn.Radius = radius;
+        conn.Bidirectional = bidirectional;
+        conn.AreaType = areaType;
+        conn.Flags = FLAG_WALK;
 
         m_OffMeshConnections.push_back(conn);
 
         // Mark affected tiles dirty
-        MarkTileDirty(static_cast<int32_t>(start.x / m_Config.tileSize),
-                      static_cast<int32_t>(start.z / m_Config.tileSize));
+        MarkTileDirty(static_cast<int32_t>(start.x / m_Config.TileSize),
+                      static_cast<int32_t>(start.z / m_Config.TileSize));
         if (!bidirectional) {
-            MarkTileDirty(static_cast<int32_t>(end.x / m_Config.tileSize),
-                          static_cast<int32_t>(end.z / m_Config.tileSize));
+            MarkTileDirty(static_cast<int32_t>(end.x / m_Config.TileSize),
+                          static_cast<int32_t>(end.z / m_Config.TileSize));
         }
 
-        return conn.id;
+        return conn.ConnectionId;
     }
 
     void NavMeshManager::RemoveOffMeshConnection(uint32_t connectionId) {
@@ -461,13 +468,13 @@ namespace Navigation {
 
         auto it = std::find_if(m_OffMeshConnections.begin(), m_OffMeshConnections.end(),
                                [connectionId](const OffMeshConnection& c) {
-                                   return c.id == connectionId;
+                                   return c.ConnectionId == connectionId;
                                });
 
         if (it != m_OffMeshConnections.end()) {
             // Mark tiles dirty
-            MarkTileDirty(static_cast<int32_t>(it->start.x / m_Config.tileSize),
-                          static_cast<int32_t>(it->start.z / m_Config.tileSize));
+            MarkTileDirty(static_cast<int32_t>(it->StartPos.x / m_Config.TileSize),
+                          static_cast<int32_t>(it->StartPos.z / m_Config.TileSize));
             m_OffMeshConnections.erase(it);
         }
     }
@@ -478,8 +485,8 @@ namespace Navigation {
     }
 
     void NavMeshManager::GetTileAt(const glm::vec3& position, int32_t& outX, int32_t& outZ) {
-        outX = static_cast<int32_t>(std::floor(position.x / m_Config.tileSize));
-        outZ = static_cast<int32_t>(std::floor(position.z / m_Config.tileSize));
+        outX = static_cast<int32_t>(std::floor(position.x / m_Config.TileSize));
+        outZ = static_cast<int32_t>(std::floor(position.z / m_Config.TileSize));
     }
 
     void NavMeshManager::MarkTileDirty(int32_t tileX, int32_t tileZ) {
@@ -487,10 +494,10 @@ namespace Navigation {
     }
 
     void NavMeshManager::MarkTilesDirtyInRadius(const glm::vec3& center, float radius) {
-        int32_t minX = static_cast<int32_t>(std::floor((center.x - radius) / m_Config.tileSize));
-        int32_t maxX = static_cast<int32_t>(std::ceil((center.x + radius) / m_Config.tileSize));
-        int32_t minZ = static_cast<int32_t>(std::floor((center.z - radius) / m_Config.tileSize));
-        int32_t maxZ = static_cast<int32_t>(std::ceil((center.z + radius) / m_Config.tileSize));
+        int32_t minX = static_cast<int32_t>(std::floor((center.x - radius) / m_Config.TileSize));
+        int32_t maxX = static_cast<int32_t>(std::ceil((center.x + radius) / m_Config.TileSize));
+        int32_t minZ = static_cast<int32_t>(std::floor((center.z - radius) / m_Config.TileSize));
+        int32_t maxZ = static_cast<int32_t>(std::ceil((center.z + radius) / m_Config.TileSize));
 
         for (int32_t x = minX; x <= maxX; ++x) {
             for (int32_t z = minZ; z <= maxZ; ++z) {
@@ -532,12 +539,12 @@ namespace Navigation {
             const dtMeshTile* tile = mesh->getTile(i);
             if (!tile || !tile->header) continue;
 
-            stats.tileCount++;
-            stats.vertexCount += tile->header->vertCount;
-            stats.polyCount += tile->header->polyCount;
+            stats.TileCount++;
+            stats.VertexCount += tile->header->vertCount;
+            stats.PolygonCount += tile->header->polyCount;
 
             // Estimate memory
-            stats.memoryUsageBytes += tile->dataSize;
+            stats.MemoryUsedBytes += tile->dataSize;
         }
 
         return stats;

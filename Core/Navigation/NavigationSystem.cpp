@@ -72,8 +72,8 @@ namespace Navigation {
         NavMeshBuildResult result;
 
         if (!m_Initialized) {
-            result.success = false;
-            result.errorMessage = "Navigation system not initialized";
+            result.Success = false;
+            result.ErrorMessage = "Navigation system not initialized";
             return result;
         }
 
@@ -81,7 +81,7 @@ namespace Navigation {
 
         // Build NavMesh from scene
         result = NavMeshManager::Get().BuildFromScene(scene);
-        if (!result.success) {
+        if (!result.Success) {
             return result;
         }
 
@@ -451,7 +451,7 @@ namespace Navigation {
         }
     }
 
-    void NavigationSystem::SyncAgentTransforms(entt::registry& registry) {
+    void NavigationSystem::SyncAgentTransforms([[maybe_unused]] entt::registry& registry) {
         // This syncs ECS transforms to crowd - done automatically in UpdateAgents
     }
 

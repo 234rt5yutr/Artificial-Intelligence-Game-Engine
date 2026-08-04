@@ -19,6 +19,15 @@
 #include <functional>
 #include <queue>
 
+// Windows <mmsystem.h> (reached through miniaudio's platform backends) defines
+// PlaySound as a macro expanding to PlaySoundA/PlaySoundW. Left in place it
+// renames this class's method inconsistently: the definition in AudioSystem.cpp
+// compiles as PlaySoundA while callers that never pull in the Windows headers
+// emit a call to PlaySound, producing an unresolved external at link time.
+#ifdef PlaySound
+    #undef PlaySound
+#endif
+
 namespace Core {
 namespace Audio {
 

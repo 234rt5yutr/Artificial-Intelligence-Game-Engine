@@ -9,6 +9,7 @@
 #include "Core/ECS/Components/CameraComponent.h"
 #include "Core/Renderer/Terrain/TerrainChunk.h"
 #include "Core/Renderer/Terrain/TerrainGenerator.h"
+#include "Core/RHI/RHIDevice.h"
 #include "Core/Profile.h"
 #include "Core/Log.h"
 

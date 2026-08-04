@@ -13,8 +13,17 @@
 namespace Core {
 namespace MCP {
 
-    // MCP Protocol version
-    constexpr const char* MCP_PROTOCOL_VERSION = "2024-11-05";
+    // MCP Protocol version advertised when the client does not request one we know.
+    constexpr const char* MCP_PROTOCOL_VERSION = "2025-06-18";
+
+    // Revisions this server can speak. The wire shape used here (initialize,
+    // tools/list, tools/call, logging/setLevel, JSON-RPC notifications) is
+    // unchanged across these, so negotiation is just an echo of a known value.
+    constexpr const char* MCP_SUPPORTED_PROTOCOL_VERSIONS[] = {
+        "2025-06-18",
+        "2025-03-26",
+        "2024-11-05"
+    };
 
     // Server capabilities that can be advertised to clients
     struct ServerCapabilities {
@@ -94,20 +103,57 @@ namespace MCP {
         }
     };
 
+    // Behavioural hints published alongside a tool. Hosts use these to decide
+    // whether a call needs per-invocation confirmation: read-only tools can run
+    // unattended, destructive ones always prompt. A tool that declares nothing is
+    // treated as the most dangerous case, so annotate deliberately.
+    struct ToolAnnotations {
+        std::string Title;                  // Human-readable display name
+        bool ReadOnlyHint = false;          // Does not modify any state
+        bool DestructiveHint = false;       // May overwrite or delete existing state
+        bool IdempotentHint = false;        // Repeating the call has no extra effect
+        bool OpenWorldHint = false;         // Touches systems outside this process
+
+        bool HasAny() const {
+            return !Title.empty() || ReadOnlyHint || DestructiveHint ||
+                   IdempotentHint || OpenWorldHint;
+        }
+
+        Json ToJson() const {
+            Json j = Json::object();
+            if (!Title.empty()) {
+                j["title"] = Title;
+            }
+            j["readOnlyHint"] = ReadOnlyHint;
+            j["destructiveHint"] = DestructiveHint;
+            j["idempotentHint"] = IdempotentHint;
+            j["openWorldHint"] = OpenWorldHint;
+            return j;
+        }
+    };
+
     // Tool definition for listing available tools
     struct ToolDefinition {
         std::string Name;
         std::string Description;
         ToolInputSchema InputSchema;
+        ToolAnnotations Annotations;
 
         Json ToJson() const {
-            return {
+            Json j = {
                 {"name", Name},
                 {"description", Description},
                 {"inputSchema", InputSchema.ToJson()}
             };
+            if (Annotations.HasAny()) {
+                j["annotations"] = Annotations.ToJson();
+            }
+            return j;
         }
     };
+
+    // MCP caps tool names at 64 characters.
+    constexpr size_t MCP_MAX_TOOL_NAME_LENGTH = 64;
 
     // Content types in tool results
     enum class ContentType {
@@ -189,6 +235,18 @@ namespace MCP {
         static ToolResult Success(const std::string& text) {
             ToolResult result;
             result.Content.push_back(ContentItem::TextContent(text));
+            return result;
+        }
+
+        // Human-readable summary plus the machine-readable payload behind it, as
+        // two content items. Agents read the prose; callers that need the values
+        // parse the JSON block instead of scraping the summary.
+        static ToolResult Success(const std::string& text, const Json& data) {
+            ToolResult result;
+            result.Content.push_back(ContentItem::TextContent(text));
+            if (!data.is_null()) {
+                result.Content.push_back(ContentItem::TextContent(data.dump(2)));
+            }
             return result;
         }
 

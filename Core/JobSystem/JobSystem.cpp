@@ -60,7 +60,13 @@ namespace JobSystem {
         PROFILE_FUNCTION();
         if (!isRunning.load()) return;
 
-        isRunning.store(false);
+        // Store under the queue mutex: a worker that has already evaluated its wait
+        // predicate but not yet blocked would otherwise miss the notification and
+        // never wake, hanging the join below.
+        {
+            std::lock_guard<std::mutex> lock(queueMutex);
+            isRunning.store(false);
+        }
         wakeCondition.notify_all();
 
         for (std::thread& thread : threadPool) {
@@ -76,6 +82,14 @@ namespace JobSystem {
         if (!ctx.counter) {
             ctx.counter = std::make_shared<std::atomic<uint32_t>>(0u);
         }
+
+        // No workers exist (Initialize() not called, or already shut down). Queueing
+        // here would leave the counter above zero forever and spin Wait() endlessly.
+        if (!isRunning.load()) {
+            job();
+            return;
+        }
+
         auto counter = ctx.counter;
         counter->fetch_add(1, std::memory_order_relaxed);
 
@@ -102,6 +116,14 @@ namespace JobSystem {
         if (jobCount == 0 || groupSize == 0) return;
         if (!ctx.counter) {
             ctx.counter = std::make_shared<std::atomic<uint32_t>>(0u);
+        }
+
+        // See Execute(): without workers this must run inline or Wait() never returns.
+        if (!isRunning.load()) {
+            for (uint32_t i = 0; i < jobCount; ++i) {
+                job(i);
+            }
+            return;
         }
 
         uint32_t groupCount = (jobCount + groupSize - 1) / groupSize;

@@ -35,6 +35,39 @@ Roadmap snapshot from `engine_roadmap.md`:
 - Latest release milestone: `v0.30.5.4`
 - Current focus: stabilization, release hardening, and regression prevention workflows
 
+### Wiring status (August 2026 audit)
+
+A source audit found that much of the code above compiled but never ran. What
+changed:
+
+- `Scene::OnUpdate` previously ticked only the UI system. A `SystemPipeline`
+  (`Core/ECS/SystemPipeline.h`) now owns and orders the simulation frame: input →
+  character → physics → animation → IK → cameras → transform hierarchy → lighting
+  and render collection.
+- `JobSystem::Initialize()` was never called, so any parallel system would have
+  spun forever in `Wait()`. The pipeline starts and stops it, and the job system
+  now runs work inline rather than hanging when no workers exist.
+- 18 `.cpp` files (all of Navigation, Terrain, Foliage, Skybox, IK, and five
+  post-process passes) were absent from `CMakeLists.txt`. Nine of them turned out
+  not to compile at all — the exclusion had hidden years of API drift against
+  both their own headers and the installed Recast/Detour. All 18 are now fixed
+  and building; no `.cpp` under `Core/` is left out of the build.
+- `NavigationSystem` now ticks inside the frame pipeline, so pathfinding, crowd
+  steering, and patrol routes actually run.
+- `PostProcessManager` now registers its five passes (SSAO, depth of field,
+  motion blur, bloom, color grading); previously the chain was empty at runtime.
+- `RHI::RHIDevice` had no implementation anywhere in the tree, which is why
+  `TerrainSystem`, `FoliageSystem`, and `SkyboxSystem` could not be constructed.
+  `Core/RHI/Vulkan/VulkanDevice` now implements it over the existing
+  `VulkanContext`, and all three run inside the pipeline when a renderer is
+  present (headless runs pass `nullptr` and skip them).
+- No MCP tool family compiled, and `CreateAllMCPTools()` was never called.
+  Ten families now build and are registered at startup; four are quarantined with
+  reasons recorded in `Core/MCP/MCPAllTools.h`.
+
+See [`docs/SOTA_GAP_ANALYSIS.md`](docs/SOTA_GAP_ANALYSIS.md) for what still
+separates this from Unreal 5.7 / Unity 6, in priority order.
+
 ## Architecture Overview
 
 Primary layers in this repository:
@@ -44,7 +77,10 @@ Primary layers in this repository:
 - ECS Gameplay Layer: EnTT scene, components, systems, hierarchy updates
 - Physics Layer: Jolt world setup and ECS synchronization systems
 - Networking Layer: server/client + replication/prediction/reconciliation systems
-- MCP Layer: local AI tool endpoint for scene inspection and manipulation workflows
+- MCP Layer: local AI tool endpoint for scene inspection, manipulation, and
+  development control (pause/step the simulation, read engine logs, run the
+  play-mode and performance suites, capture profiler traces). Connect an agent
+  with the bundled stdio bridge — see [`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md).
 
 ## Technology Stack
 

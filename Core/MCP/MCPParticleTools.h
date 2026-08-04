@@ -10,6 +10,8 @@
 // ============================================================================
 
 #include "MCPTool.h"
+#include "MCPServer.h"  // Register*Tools() below call MCPServer methods, so the
+                         // forward declaration in MCPTool.h is not enough.
 #include "MCPTypes.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
@@ -257,7 +259,7 @@ namespace MCP {
             // Add transform component
             auto& transform = entity.AddComponent<ECS::TransformComponent>();
             transform.Position = position;
-            transform.Rotation = glm::quat(rotation);
+            transform.Rotation = rotation;  // TransformComponent stores euler radians
             transform.Scale = glm::vec3(1.0f);  // Scale applied to particle params, not transform
 
             // Add particle emitter component

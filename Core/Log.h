@@ -1,7 +1,10 @@
 #pragma once
 
 #include <memory>
+#include <string>
+#include <vector>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/ringbuffer_sink.h>
 
 namespace Engine {
     class Log {
@@ -11,9 +14,16 @@ namespace Engine {
         inline static std::shared_ptr<spdlog::logger>& GetCoreLogger() { return s_CoreLogger; }
         inline static std::shared_ptr<spdlog::logger>& GetClientLogger() { return s_ClientLogger; }
 
+        // Most recent formatted log lines, newest last. Backed by an in-memory ring
+        // buffer so tooling (MCP, editor console) can read engine output without
+        // scraping stdout. Returns empty before Init().
+        static std::vector<std::string> GetRecentMessages(size_t count = 200);
+        static size_t GetRecentMessageCapacity();
+
     private:
         static std::shared_ptr<spdlog::logger> s_CoreLogger;
         static std::shared_ptr<spdlog::logger> s_ClientLogger;
+        static std::shared_ptr<spdlog::sinks::ringbuffer_sink_mt> s_RingBuffer;
     };
 }
 

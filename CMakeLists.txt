@@ -18,7 +18,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Add standard compiler flags
 if(MSVC)
-    add_compile_options(/W4 /WX /permissive-)
+    # C4324: "structure was padded due to alignment specifier" - expected and
+    # intended for the alignas(16) GPU uniform/push-constant structs.
+    # /bigobj: the MCP tool factory instantiates many json schema templates
+    # in one object and exceeds the default COFF section limit without it.
+    add_compile_options(/W4 /WX /permissive- /wd4324 /bigobj)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
@@ -90,6 +94,8 @@ add_library(EngineCore
     Core/RHI/Vulkan/VulkanResourceUploader.cpp
     Core/RHI/Vulkan/VulkanContext.h
     Core/RHI/Vulkan/VulkanContext.cpp
+    Core/RHI/Vulkan/VulkanDevice.h
+    Core/RHI/Vulkan/VulkanDevice.cpp
     Core/RHI/Vulkan/VulkanPipelineState.h
     Core/RHI/Vulkan/VulkanPipelineState.cpp
     Core/Renderer/Mesh.h
@@ -164,9 +170,21 @@ add_library(EngineCore
     Core/MCP/ActionValidator.h
     Core/MCP/AutoLevelDesigner.h
     Core/MCP/MCPAllTools.h
+    Core/MCP/MCPAllTools.cpp
+    Core/MCP/MCPToolFactory.h
     Core/MCP/MCPUITools.h
     Core/MCP/MCPAudioTools.h
     Core/MCP/MCPNetworkTools.h
+    Core/MCP/MCPAnimationTools.h
+    Core/MCP/MCPParticleTools.h
+    Core/MCP/MCPWorldTools.h
+    Core/MCP/MCPPostProcessTools.h
+    Core/MCP/MCPNavigationTools.h
+    Core/MCP/MCPGameplayTools.h
+    Core/MCP/MCPRayTracingTools.h
+    Core/MCP/MCPPhysicsTools.h
+    Core/MCP/MCPDevTools.h
+    Core/MCP/MCPProjectTools.h
     Core/State/SceneLoader.h
     Core/State/SceneLoader.cpp
     Core/State/TransitionManager.h
@@ -280,6 +298,8 @@ add_library(EngineCore
     Core/ECS/Entity.cpp
     Core/ECS/ParallelECS.h
     Core/ECS/ParallelECS.cpp
+    Core/ECS/SystemPipeline.h
+    Core/ECS/SystemPipeline.cpp
     Core/ECS/Components/Components.h
     Core/ECS/Components/TransformComponent.h
     Core/ECS/Components/NameComponent.h
@@ -401,6 +421,48 @@ add_library(EngineCore
     Core/Renderer/PostProcess/FramebufferChain.cpp
     Core/Renderer/PostProcess/PostProcessManager.h
     Core/Renderer/PostProcess/PostProcessManager.cpp
+    Core/Renderer/PostProcess/BloomPass.h
+    Core/Renderer/PostProcess/BloomPass.cpp
+    Core/Renderer/PostProcess/SSAOPass.h
+    Core/Renderer/PostProcess/SSAOPass.cpp
+    Core/Renderer/PostProcess/ColorGradingPass.h
+    Core/Renderer/PostProcess/ColorGradingPass.cpp
+    Core/Renderer/PostProcess/DepthOfFieldPass.h
+    Core/Renderer/PostProcess/DepthOfFieldPass.cpp
+    Core/Renderer/PostProcess/MotionBlurPass.h
+    Core/Renderer/PostProcess/MotionBlurPass.cpp
+    # World rendering: terrain, foliage, sky
+    Core/Renderer/Terrain/TerrainChunk.h
+    Core/Renderer/Terrain/TerrainGenerator.h
+    Core/Renderer/Terrain/TerrainGenerator.cpp
+    Core/Renderer/Foliage/FoliageInstance.h
+    Core/Renderer/Foliage/FoliageScatter.h
+    Core/Renderer/Foliage/FoliageScatter.cpp
+    # World rendering: sky
+    Core/Renderer/Skybox/AtmosphericSkybox.h
+    Core/Renderer/Skybox/AtmosphericSkybox.cpp
+    # Navigation (Recast/Detour)
+    Core/Navigation/NavigationConfig.h
+    Core/Navigation/NavMeshBuilder.h
+    Core/Navigation/NavMeshBuilder.cpp
+    Core/Navigation/NavMeshManager.h
+    Core/Navigation/NavMeshManager.cpp
+    Core/Navigation/TileCacheManager.h
+    Core/Navigation/TileCacheManager.cpp
+    Core/Navigation/CrowdManager.h
+    Core/Navigation/CrowdManager.cpp
+    Core/Navigation/NavMeshDebugDraw.h
+    Core/Navigation/NavMeshDebugDraw.cpp
+    Core/Navigation/NavigationSystem.h
+    Core/Navigation/NavigationSystem.cpp
+    Core/ECS/Systems/TerrainSystem.h
+    Core/ECS/Systems/TerrainSystem.cpp
+    Core/ECS/Systems/SkyboxSystem.h
+    Core/ECS/Systems/SkyboxSystem.cpp
+    Core/ECS/Systems/FoliageSystem.h
+    Core/ECS/Systems/FoliageSystem.cpp
+    Core/ECS/Systems/IKSystem.h
+    Core/ECS/Systems/IKSystem.cpp
     # Phase 16: UI Framework
     Core/UI/ImGuiSubsystem.h
     Core/UI/ImGuiSubsystem.cpp
@@ -484,6 +546,12 @@ add_executable(EngineCoreTests
 )
 target_link_libraries(EngineCoreTests PRIVATE EngineCore)
 add_test(NAME EngineCoreTests COMMAND EngineCoreTests)
+
+add_executable(EngineCoreSystemPipelineTests
+    Core/Tests/ECS/SystemPipelineTests.cpp
+)
+target_link_libraries(EngineCoreSystemPipelineTests PRIVATE EngineCore)
+add_test(NAME EngineCoreSystemPipelineTests COMMAND EngineCoreSystemPipelineTests)
 
 add_executable(EngineCoreTraceExportTests
     Core/Tests/Diagnostics/TraceExportTests.cpp

@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include "Core/Math/Math.h"
 #include "Core/RHI/RHIBuffer.h"
+#include "Core/RHI/RHIDevice.h"
 
 namespace Core {
 namespace Renderer {
@@ -201,6 +202,27 @@ namespace Renderer {
         // Load skeletal mesh with skeleton and animations from GLTF
         bool LoadSkeletalGLTF(const std::string& filepath);
 
+        // Upload the CPU vertex/index data to GPU buffers through the RHI.
+        //
+        // Nothing in the engine did this: `vertexBuffer`/`indexBuffer` below were
+        // declared but never written by any code path, so even a fully loaded mesh
+        // had no GPU representation and could not be drawn. Safe to call more than
+        // once; re-uploading replaces the previous buffers.
+        //
+        // Returns false when there is nothing to upload or the device rejects the
+        // allocation. Skeletal meshes upload `skinnedVertices`, static meshes
+        // upload `vertices`.
+        bool UploadToGPU(RHI::RHIDevice& device);
+
+        // True once UploadToGPU has produced both buffers.
+        bool IsUploaded() const { return vertexBuffer != nullptr && indexBuffer != nullptr; }
+
+        // Bytes per vertex actually uploaded; 0 before upload. Callers building a
+        // pipeline need this for the vertex input stride.
+        uint32_t GetUploadedVertexStride() const { return m_UploadedVertexStride; }
+        uint32_t GetUploadedVertexCount() const { return m_UploadedVertexCount; }
+        uint32_t GetUploadedIndexCount() const { return m_UploadedIndexCount; }
+
         // Check if this is a skeletal mesh
         bool IsSkeletal() const { return m_IsSkeletal && m_Skeleton.IsValid(); }
 
@@ -248,6 +270,10 @@ namespace Renderer {
         const VirtualGeometryAssociation& GetVirtualGeometryAssociation() const { return m_VirtualGeometry; }
 
     private:
+        uint32_t m_UploadedVertexStride = 0;
+        uint32_t m_UploadedVertexCount = 0;
+        uint32_t m_UploadedIndexCount = 0;
+
         bool m_IsSkeletal = false;
         Skeleton m_Skeleton;
         std::vector<AnimationClip> m_Animations;

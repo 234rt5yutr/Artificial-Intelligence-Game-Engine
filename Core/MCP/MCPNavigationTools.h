@@ -1,6 +1,8 @@
 #pragma once
 
 #include "MCPTool.h"
+#include "MCPServer.h"  // Register*Tools() below call MCPServer methods, so the
+                         // forward declaration in MCPTool.h is not enough.
 #include "MCPTypes.h"
 #include "../Navigation/NavigationSystem.h"
 #include "../Navigation/NavMeshManager.h"

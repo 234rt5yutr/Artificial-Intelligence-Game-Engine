@@ -187,8 +187,8 @@ namespace ECS {
             auto& camera = cameraView.get<CameraComponent>(entity);
 
             if (camera.IsActive) {
-                Math::Mat4 viewProjection = camera.GetProjectionMatrix() * 
-                                            camera.GetViewMatrix(transform);
+                camera.CalculateViewMatrixFromWorldMatrix(transform.WorldMatrix);
+                Math::Mat4 viewProjection = camera.ViewProjectionMatrix;
                 Math::Vec3 cameraPos = Math::Vec3(transform.WorldMatrix[3]);
 
                 m_FoliageScatter->UpdateCamera(viewProjection, cameraPos);

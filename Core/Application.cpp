@@ -1,5 +1,6 @@
 #include "Application.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
+#include "Core/RHI/Vulkan/VulkanDevice.h"
 #include "Core/Log.h"
 #include "Core/Profile.h"
 #include "Core/Assert.h"
@@ -10,7 +11,9 @@
 #include "Core/UI/UIManager.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/ECS/Scene.h"
+#include "Core/ECS/SystemPipeline.h"
 #include "Core/MCP/MCPServer.h"
+#include "Core/MCP/MCPToolFactory.h"
 #include <thread>
 #include <chrono>
 
@@ -62,6 +65,23 @@ namespace Core {
         }
 
         m_RuntimeScene = std::make_unique<ECS::Scene>("Runtime Scene");
+
+        // Bring up the simulation systems. Previously the scene only ticked its UI,
+        // so physics/animation/cameras/transforms never ran at all.
+        {
+            ECS::SystemPipelineConfig pipelineConfig{};
+            if (m_Window) {
+                pipelineConfig.ScreenWidth = m_Window->GetWidth();
+                pipelineConfig.ScreenHeight = m_Window->GetHeight();
+            }
+            // Terrain/foliage/sky need an RHI device. Headless runs have no Vulkan
+            // context, so they get nullptr and those systems stay off.
+            if (m_VulkanContext) {
+                m_RHIDevice = std::make_shared<RHI::VulkanDevice>(m_VulkanContext.get());
+            }
+            m_RuntimeScene->InitializeSystems(pipelineConfig, m_RHIDevice);
+        }
+
         if (!m_HeadlessRuntime && UI::UIManager::Get().IsInitialized()) {
             m_RuntimeScene->BindUIManager(&UI::UIManager::Get());
             UI::UIManager::Get().SetEditorScene(m_RuntimeScene.get());
@@ -70,8 +90,21 @@ namespace Core {
             MCP::MCPServerConfig mcpConfig{};
             mcpConfig.Host = s_RuntimeOptions.MCPHost;
             mcpConfig.Port = s_RuntimeOptions.MCPPort;
+            mcpConfig.AuthToken = s_RuntimeOptions.MCPAuthToken;
+            mcpConfig.AllowedOrigins = s_RuntimeOptions.MCPAllowedOrigins;
+            if (mcpConfig.Host != "127.0.0.1" && mcpConfig.Host != "localhost" &&
+                mcpConfig.AuthToken.empty()) {
+                ENGINE_CORE_WARN("MCP server is bound to '{}' without an auth token; "
+                                 "anyone who can reach that address can drive the engine. "
+                                 "Pass --mcp-token=<secret>.", mcpConfig.Host);
+            }
             m_MCPServer = std::make_unique<MCP::MCPServer>(mcpConfig);
             m_MCPServer->SetActiveScene(m_RuntimeScene.get());
+            // Without this the runtime server exposes zero tools and only answers
+            // initialize/ping/tools-list.
+            for (auto& tool : MCP::CreateAllMCPTools()) {
+                m_MCPServer->RegisterTool(std::move(tool));
+            }
             if (!m_MCPServer->Start()) {
                 ENGINE_CORE_ERROR("Failed to start MCP server at {}:{}", mcpConfig.Host, mcpConfig.Port);
                 m_MCPServer.reset();
@@ -88,9 +121,16 @@ namespace Core {
 
     Application::~Application() {
         if (m_MCPServer) {
+            // Stop serving before the scene goes away: tools hold a raw Scene pointer.
+            m_MCPServer->SetActiveScene(nullptr);
             m_MCPServer->Stop();
             m_MCPServer.reset();
         }
+        if (m_RuntimeScene) {
+            m_RuntimeScene->ShutdownSystems();
+        }
+        // Released after the systems that hold it, before the Vulkan context it wraps.
+        m_RHIDevice.reset();
         UI::UIManager::Get().Shutdown();
     }
 
@@ -175,6 +215,13 @@ namespace Core {
 
         if (m_VulkanContext) {
             m_VulkanContext->RecreateSwapchain(e.GetWidth(), e.GetHeight());
+        }
+
+        // Keep camera projection aspect ratio in sync with the swapchain.
+        if (m_RuntimeScene) {
+            if (auto* pipeline = m_RuntimeScene->GetSystemPipeline()) {
+                pipeline->SetScreenDimensions(e.GetWidth(), e.GetHeight());
+            }
         }
 
         return true;

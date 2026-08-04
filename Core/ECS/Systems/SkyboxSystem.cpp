@@ -259,11 +259,16 @@ namespace ECS {
     {
         // Get current system time
         std::time_t now = std::time(nullptr);
-        std::tm* localTime = std::localtime(&now);
+        std::tm localTime{};
+#if defined(_WIN32)
+        localtime_s(&localTime, &now);
+#else
+        localtime_r(&now, &localTime);
+#endif
 
-        float hours = static_cast<float>(localTime->tm_hour);
-        float minutes = static_cast<float>(localTime->tm_min) / 60.0f;
-        float seconds = static_cast<float>(localTime->tm_sec) / 3600.0f;
+        float hours = static_cast<float>(localTime.tm_hour);
+        float minutes = static_cast<float>(localTime.tm_min) / 60.0f;
+        float seconds = static_cast<float>(localTime.tm_sec) / 3600.0f;
 
         return hours + minutes + seconds;
     }

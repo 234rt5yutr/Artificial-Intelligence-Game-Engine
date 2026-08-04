@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <vector>
 #include <glm/glm.hpp>
 
 namespace Core {
@@ -29,6 +31,7 @@ namespace Navigation {
     constexpr uint16_t FLAG_DOOR = 0x04;    ///< Can open doors
     constexpr uint16_t FLAG_JUMP = 0x08;    ///< Can use jump links
     constexpr uint16_t FLAG_FLY = 0x10;     ///< Can fly (ignores NavMesh)
+    constexpr uint16_t FLAG_DISABLED = 0x20;///< Area is temporarily blocked; exclude from queries
     constexpr uint16_t FLAG_ALL = 0xFFFF;   ///< All abilities enabled
 
     // =========================================================================
@@ -132,6 +135,9 @@ namespace Navigation {
         std::vector<glm::vec3> Path;        ///< Smoothed path points
         float PathLength = 0.0f;            ///< Total path length
         uint32_t PolygonCount = 0;          ///< Number of polygons traversed
+        /// Detour reached the polygon budget before the goal: Path is valid but
+        /// stops short. Callers must not treat this as arrival.
+        bool IsPartial = false;
     };
 
     // =========================================================================
@@ -162,7 +168,9 @@ namespace Navigation {
         Arriving,       ///< Slowing down near goal
         Stuck,          ///< Cannot make progress
         OffMesh,        ///< Traversing off-mesh connection
-        Waiting         ///< At patrol waypoint
+        Waiting,        ///< At patrol waypoint
+        WaitingForPath, ///< Target set, path query still in flight
+        Disabled        ///< Agent is switched off and must not move
     };
 
     /// Path following mode

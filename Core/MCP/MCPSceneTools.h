@@ -16,6 +16,7 @@
 #include <sstream>
 #include <algorithm>
 #include <memory>
+#include <variant>
 
 namespace Core {
 namespace MCP {
@@ -225,21 +226,21 @@ namespace MCP {
 
             // Entities section
             ss << "【Entities】\n";
-            int entityIndex = 0;
             int shownCount = 0;
 
-            registry.each([&](entt::entity entity) {
+            // EnTT 3.16 removed registry::each; iterate the entity storage instead.
+            for (auto entity : registry.view<entt::entity>()) {
                 // Apply max entities limit
-                if (maxEntities > 0 && shownCount >= maxEntities) return;
+                if (maxEntities > 0 && shownCount >= maxEntities) continue;
 
                 // Apply name filter
                 if (!namePattern.empty()) {
                     if (auto* name = registry.try_get<NameComponent>(entity)) {
                         if (name->Name.find(namePattern) == std::string::npos) {
-                            return;
+                            continue;
                         }
                     } else {
-                        return; // No name, skip if filtering by name
+                        continue; // No name, skip if filtering by name
                     }
                 }
 
@@ -266,13 +267,13 @@ namespace MCP {
                             hasRequiredComponent = true; break;
                         }
                     }
-                    if (!hasRequiredComponent) return;
+                    if (!hasRequiredComponent) continue;
                 }
 
                 // Generate entity text
                 ss << EntityToText(entity, registry, 1);
                 ++shownCount;
-            });
+            }
 
             if (shownCount == 0) {
                 ss << "  (No entities match the specified filters)\n";
@@ -332,17 +333,18 @@ namespace MCP {
             Json entities = Json::array();
             int shownCount = 0;
 
-            registry.each([&](entt::entity entity) {
-                if (maxEntities > 0 && shownCount >= maxEntities) return;
+            // EnTT 3.16 removed registry::each; iterate the entity storage instead.
+            for (auto entity : registry.view<entt::entity>()) {
+                if (maxEntities > 0 && shownCount >= maxEntities) continue;
 
                 // Apply name filter
                 if (!namePattern.empty()) {
                     if (auto* name = registry.try_get<NameComponent>(entity)) {
                         if (name->Name.find(namePattern) == std::string::npos) {
-                            return;
+                            continue;
                         }
                     } else {
-                        return;
+                        continue;
                     }
                 }
 
@@ -369,7 +371,7 @@ namespace MCP {
                             hasRequiredComponent = true; break;
                         }
                     }
-                    if (!hasRequiredComponent) return;
+                    if (!hasRequiredComponent) continue;
                 }
 
                 // Serialize entity
@@ -390,7 +392,7 @@ namespace MCP {
 
                 entities.push_back(entityJson);
                 ++shownCount;
-            });
+            }
 
             result["entities"] = entities;
             result["returnedCount"] = shownCount;
@@ -1101,10 +1103,10 @@ namespace MCP {
                 light.CastShadows = mods["castShadows"].get<bool>();
             }
             if (mods.contains("innerConeAngle")) {
-                light.InnerConeAngle = glm::radians(mods["innerConeAngle"].get<float>());
+                light.InnerCutoff = glm::radians(mods["innerConeAngle"].get<float>());
             }
             if (mods.contains("outerConeAngle")) {
-                light.OuterConeAngle = glm::radians(mods["outerConeAngle"].get<float>());
+                light.OuterCutoff = glm::radians(mods["outerConeAngle"].get<float>());
             }
         }
 
@@ -1133,7 +1135,7 @@ namespace MCP {
                 rb.AngularVelocity = ApplyOpVec3(rb.AngularVelocity, vel, op);
             }
             if (mods.contains("motionType")) {
-                rb.MotionType = StringToMotionType(mods["motionType"].get<std::string>());
+                rb.Type = StringToMotionType(mods["motionType"].get<std::string>());
             }
         }
 
@@ -1154,7 +1156,7 @@ namespace MCP {
                 camera.IsActive = mods["isActive"].get<bool>();
             }
             if (mods.contains("projection")) {
-                camera.ProjectionType = StringToProjectionType(mods["projection"].get<std::string>());
+                camera.Projection = StringToProjectionType(mods["projection"].get<std::string>());
             }
         }
 
@@ -1175,19 +1177,29 @@ namespace MCP {
             if (mods.contains("isSensor")) {
                 collider.IsSensor = mods["isSensor"].get<bool>();
             }
+            // Shape dimensions live in the ShapeData variant, not directly on the
+            // component, so each edit has to go through the active alternative.
             if (mods.contains("halfExtents") && collider.Type == ECS::ColliderType::Box) {
-                Math::Vec3 extents = DeserializeVec3(mods["halfExtents"], Math::Vec3(0.5f));
-                collider.HalfExtents = ApplyOpVec3(collider.HalfExtents, extents, op);
-                collider.HalfExtents = glm::max(collider.HalfExtents, Math::Vec3(0.01f));
+                if (auto* box = std::get_if<ECS::BoxColliderData>(&collider.ShapeData)) {
+                    Math::Vec3 extents = DeserializeVec3(mods["halfExtents"], Math::Vec3(0.5f));
+                    box->HalfExtents = ApplyOpVec3(box->HalfExtents, extents, op);
+                    box->HalfExtents = glm::max(box->HalfExtents, Math::Vec3(0.01f));
+                }
             }
-            if (mods.contains("radius") && 
-                (collider.Type == ECS::ColliderType::Sphere || collider.Type == ECS::ColliderType::Capsule)) {
-                collider.Radius = ApplyOp(collider.Radius, mods["radius"].get<float>(), op);
-                collider.Radius = std::max(0.01f, collider.Radius);
+            if (mods.contains("radius")) {
+                if (auto* sphere = std::get_if<ECS::SphereColliderData>(&collider.ShapeData)) {
+                    sphere->Radius = ApplyOp(sphere->Radius, mods["radius"].get<float>(), op);
+                    sphere->Radius = std::max(0.01f, sphere->Radius);
+                } else if (auto* capsule = std::get_if<ECS::CapsuleColliderData>(&collider.ShapeData)) {
+                    capsule->Radius = ApplyOp(capsule->Radius, mods["radius"].get<float>(), op);
+                    capsule->Radius = std::max(0.01f, capsule->Radius);
+                }
             }
-            if (mods.contains("halfHeight") && collider.Type == ECS::ColliderType::Capsule) {
-                collider.HalfHeight = ApplyOp(collider.HalfHeight, mods["halfHeight"].get<float>(), op);
-                collider.HalfHeight = std::max(0.01f, collider.HalfHeight);
+            if (mods.contains("halfHeight")) {
+                if (auto* capsule = std::get_if<ECS::CapsuleColliderData>(&collider.ShapeData)) {
+                    capsule->HalfHeight = ApplyOp(capsule->HalfHeight, mods["halfHeight"].get<float>(), op);
+                    capsule->HalfHeight = std::max(0.01f, capsule->HalfHeight);
+                }
             }
         }
     };

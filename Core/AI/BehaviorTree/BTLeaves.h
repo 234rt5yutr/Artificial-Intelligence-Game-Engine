@@ -5,7 +5,7 @@
 
 #include "BehaviorTree.h"
 #include "Blackboard.h"
-#include "../Log.h"
+#include "Core/Log.h"
 #include <functional>
 
 namespace Core {
@@ -153,16 +153,16 @@ namespace AI {
             // Log based on level
             switch (m_Level) {
                 case LogLevel::Debug:
-                    LOG_DEBUG("[BT:{}] {}", GetName(), expandedMessage);
+                    ENGINE_CORE_TRACE("[BT:{}] {}", GetName(), expandedMessage);
                     break;
                 case LogLevel::Info:
-                    LOG_INFO("[BT:{}] {}", GetName(), expandedMessage);
+                    ENGINE_CORE_INFO("[BT:{}] {}", GetName(), expandedMessage);
                     break;
                 case LogLevel::Warning:
-                    LOG_WARN("[BT:{}] {}", GetName(), expandedMessage);
+                    ENGINE_CORE_WARN("[BT:{}] {}", GetName(), expandedMessage);
                     break;
                 case LogLevel::Error:
-                    LOG_ERROR("[BT:{}] {}", GetName(), expandedMessage);
+                    ENGINE_CORE_ERROR("[BT:{}] {}", GetName(), expandedMessage);
                     break;
             }
 

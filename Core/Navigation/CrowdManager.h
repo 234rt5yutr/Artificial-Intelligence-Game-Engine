@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "NavigationConfig.h"
 #include <glm/glm.hpp>
 #include <vector>
@@ -8,7 +10,7 @@
 
 // Forward declarations
 struct dtCrowd;
-struct dtNavMesh;
+class dtNavMesh;  // Detour declares this as a class, not a struct
 struct dtNavMeshQuery;
 struct dtCrowdAgentParams;
 

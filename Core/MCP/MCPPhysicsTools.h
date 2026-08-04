@@ -5,6 +5,8 @@
 // Provides AI agents with comprehensive physics manipulation capabilities
 
 #include "MCPTool.h"
+#include "MCPServer.h"  // Register*Tools() below call MCPServer methods, so the
+                         // forward declaration in MCPTool.h is not enough.
 #include "MCPTypes.h"
 #include "../Math/Math.h"
 #include "../ECS/Scene.h"
@@ -210,7 +212,10 @@ namespace MCP {
             float impactForce = SafeGetFloat(params, "impactForce", 100.0f, 0.0f, 100000.0f);
             bool chainReaction = params.value("chainReaction", false);
 
-            auto entity = static_cast<entt::entity>(entityId);
+            const auto entity = static_cast<entt::entity>(entityId);
+            if (!scene->GetRegistry().valid(entity)) {
+                return ToolResult::Error("Invalid entity ID: " + std::to_string(entityId));
+            }
 
             // Check for destructible component
             // Note: Actual component check would depend on your ECS setup
@@ -222,15 +227,18 @@ namespace MCP {
             // Physics::DestructionSystem::Get().TriggerDestruction(entity, impactPoint, impactForce, chainReaction);
 
             json result;
-            result["success"] = true;
+            result["success"] = false;
+            result["implemented"] = false;
             result["entityId"] = entityId;
             result["impactPoint"] = Vec3ToJson(impactPoint);
             result["impactForce"] = impactForce;
             result["chainReaction"] = chainReaction;
-            result["message"] = "Destruction triggered successfully";
+            result["message"] = "NOT APPLIED: destruction backend is not wired up; arguments validated only";
             result["fragmentsGenerated"] = 0; // Would be populated by actual destruction system
 
-            return ToolResult::SuccessJson(result);
+            ToolResult toolResult = ToolResult::SuccessJson(result);
+            toolResult.IsError = true;  // the requested change did not happen
+            return toolResult;
         }
     };
 
@@ -295,7 +303,10 @@ namespace MCP {
             Vec3 initialVelocity = ParseVec3(params.value("initialVelocity", json::object()), 1000.0f);
             float blendTime = SafeGetFloat(params, "blendTime", 0.2f, 0.0f, 2.0f);
 
-            auto entity = static_cast<entt::entity>(entityId);
+            const auto entity = static_cast<entt::entity>(entityId);
+            if (!scene->GetRegistry().valid(entity)) {
+                return ToolResult::Error("Invalid entity ID: " + std::to_string(entityId));
+            }
 
             // Validate entity has required components
             // if (!scene->GetRegistry().all_of<Animation::SkeletalMeshComponent>(entity)) {
@@ -306,15 +317,18 @@ namespace MCP {
             // Physics::RagdollSystem::Get().SpawnRagdoll(entity, initialVelocity, blendTime);
 
             json result;
-            result["success"] = true;
+            result["success"] = false;
+            result["implemented"] = false;
             result["entityId"] = entityId;
             result["initialVelocity"] = Vec3ToJson(initialVelocity);
             result["blendTime"] = blendTime;
             result["ragdollActive"] = true;
             result["boneCount"] = 0; // Would be populated by actual ragdoll system
-            result["message"] = "Ragdoll spawned successfully";
+            result["message"] = "NOT APPLIED: ragdoll backend is not wired up; arguments validated only";
 
-            return ToolResult::SuccessJson(result);
+            ToolResult toolResult = ToolResult::SuccessJson(result);
+            toolResult.IsError = true;  // the requested change did not happen
+            return toolResult;
         }
     };
 
@@ -397,20 +411,26 @@ namespace MCP {
                 return ToolResult::Error("Invalid property name");
             }
 
-            auto entity = static_cast<entt::entity>(entityId);
+            const auto entity = static_cast<entt::entity>(entityId);
+            if (!scene->GetRegistry().valid(entity)) {
+                return ToolResult::Error("Invalid entity ID: " + std::to_string(entityId));
+            }
 
             // Validate and modify constraint through physics system
             // Physics::ConstraintSystem::Get().ModifyConstraint(entity, constraintType, property, value);
 
             json result;
-            result["success"] = true;
+            result["success"] = false;
+            result["implemented"] = false;
             result["entityId"] = entityId;
             result["constraintType"] = constraintType;
             result["property"] = property;
             result["newValue"] = value;
-            result["message"] = "Constraint property modified successfully";
+            result["message"] = "NOT APPLIED: constraint backend is not wired up; arguments validated only";
 
-            return ToolResult::SuccessJson(result);
+            ToolResult toolResult = ToolResult::SuccessJson(result);
+            toolResult.IsError = true;  // the requested change did not happen
+            return toolResult;
         }
     };
 
@@ -470,10 +490,14 @@ namespace MCP {
                 return ToolResult::Error("Invalid query type");
             }
 
-            auto entity = static_cast<entt::entity>(entityId);
+            const auto entity = static_cast<entt::entity>(entityId);
+            if (!scene->GetRegistry().valid(entity)) {
+                return ToolResult::Error("Invalid entity ID: " + std::to_string(entityId));
+            }
 
             json result;
-            result["success"] = true;
+            result["success"] = false;
+            result["implemented"] = false;
             result["entityId"] = entityId;
             result["queryType"] = queryType;
 
@@ -505,8 +529,10 @@ namespace MCP {
                 };
             }
 
-            result["message"] = "Physics state queried successfully";
-            return ToolResult::SuccessJson(result);
+            result["message"] = "NOT APPLIED: physics state backend is not wired up; arguments validated only";
+            ToolResult toolResult = ToolResult::SuccessJson(result);
+            toolResult.IsError = true;  // the requested change did not happen
+            return toolResult;
         }
     };
 
@@ -601,7 +627,10 @@ namespace MCP {
                 return ToolResult::Error("Invalid force type");
             }
 
-            auto entity = static_cast<entt::entity>(entityId);
+            const auto entity = static_cast<entt::entity>(entityId);
+            if (!scene->GetRegistry().valid(entity)) {
+                return ToolResult::Error("Invalid entity ID: " + std::to_string(entityId));
+            }
 
             // Check for physics body component
             // if (!scene->GetRegistry().all_of<Physics::RigidBodyComponent>(entity)) {
@@ -619,7 +648,8 @@ namespace MCP {
             // }
 
             json result;
-            result["success"] = true;
+            result["success"] = false;
+            result["implemented"] = false;
             result["entityId"] = entityId;
             result["force"] = Vec3ToJson(force);
             result["forceType"] = forceType;
@@ -633,8 +663,10 @@ namespace MCP {
                 result["duration"] = SafeGetFloat(params, "duration", 0.0f, 0.0f, 10.0f);
             }
 
-            result["message"] = "Force applied successfully";
-            return ToolResult::SuccessJson(result);
+            result["message"] = "NOT APPLIED: force backend is not wired up; arguments validated only";
+            ToolResult toolResult = ToolResult::SuccessJson(result);
+            toolResult.IsError = true;  // the requested change did not happen
+            return toolResult;
         }
     };
 

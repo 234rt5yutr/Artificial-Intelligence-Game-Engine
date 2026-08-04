@@ -5,6 +5,8 @@
 // and loading screens for dynamic Game Master functionality
 
 #include "MCPTool.h"
+#include "MCPServer.h"  // Register*Tools() below call MCPServer methods, so the
+                         // forward declaration in MCPTool.h is not enough.
 #include "MCPTypes.h"
 #include "Core/UI/Animation/WidgetTransitionService.h"
 #include "Core/UI/Binding/UIBindingService.h"

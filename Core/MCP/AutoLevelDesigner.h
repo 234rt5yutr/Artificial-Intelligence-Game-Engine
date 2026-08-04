@@ -942,7 +942,7 @@ namespace MCP {
             // Add TransformComponent
             ECS::TransformComponent transform;
             transform.Position = elem.Position;
-            transform.Rotation = EulerToQuat(elem.Rotation);
+            transform.Rotation = elem.Rotation;  // TransformComponent stores euler radians
             transform.Scale = elem.Scale;
             registry.emplace<ECS::TransformComponent>(handle, transform);
 
@@ -998,26 +998,27 @@ namespace MCP {
             else if (elem.Template == "physicsBox" || elem.Template == "physicsSphere") {
                 // Add collider
                 ECS::ColliderComponent collider;
+                // Shape dimensions live in the ShapeData variant on the component.
                 if (elem.Template == "physicsBox") {
-                    collider.Shape = ECS::ColliderShape::Box;
-                    collider.HalfExtents = elem.Scale * 0.5f;
+                    collider.Type = ECS::ColliderType::Box;
+                    collider.ShapeData = ECS::BoxColliderData{ elem.Scale * 0.5f };
                 } else {
-                    collider.Shape = ECS::ColliderShape::Sphere;
-                    collider.Radius = elem.Scale.x * 0.5f;
+                    collider.Type = ECS::ColliderType::Sphere;
+                    collider.ShapeData = ECS::SphereColliderData{ elem.Scale.x * 0.5f };
                 }
                 registry.emplace<ECS::ColliderComponent>(handle, collider);
 
                 // Add rigid body
                 ECS::RigidBodyComponent rigidBody;
-                rigidBody.MotionType = ECS::MotionType::Dynamic;
+                rigidBody.Type = ECS::MotionType::Dynamic;
                 rigidBody.Mass = 1.0f;
 
                 if (elem.CustomProperties.contains("rigidBody")) {
                     const auto& rb = elem.CustomProperties["rigidBody"];
                     if (rb.contains("motionType")) {
                         std::string mt = rb["motionType"].get<std::string>();
-                        if (mt == "static") rigidBody.MotionType = ECS::MotionType::Static;
-                        else if (mt == "kinematic") rigidBody.MotionType = ECS::MotionType::Kinematic;
+                        if (mt == "static") rigidBody.Type = ECS::MotionType::Static;
+                        else if (mt == "kinematic") rigidBody.Type = ECS::MotionType::Kinematic;
                     }
                     if (rb.contains("mass")) rigidBody.Mass = rb["mass"].get<float>();
                 }
@@ -1035,7 +1036,7 @@ namespace MCP {
             }
             else if (elem.Template == "camera") {
                 ECS::CameraComponent camera;
-                camera.ProjectionType = ECS::ProjectionType::Perspective;
+                camera.Projection = ECS::ProjectionType::Perspective;
                 camera.FieldOfView = 60.0f;
                 camera.NearPlane = 0.1f;
                 camera.FarPlane = 1000.0f;
@@ -1044,8 +1045,8 @@ namespace MCP {
             }
             else if (elem.Template == "trigger") {
                 ECS::ColliderComponent collider;
-                collider.Shape = ECS::ColliderShape::Box;
-                collider.HalfExtents = elem.Scale * 0.5f;
+                collider.Type = ECS::ColliderType::Box;
+                collider.ShapeData = ECS::BoxColliderData{ elem.Scale * 0.5f };
                 collider.IsSensor = true;
                 registry.emplace<ECS::ColliderComponent>(handle, collider);
             }

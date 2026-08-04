@@ -6,9 +6,10 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Core {
-    namespace RHI { class VulkanContext; }
+    namespace RHI { class VulkanContext; class VulkanDevice; }
     namespace ECS { class Scene; }
     namespace MCP { class MCPServer; }
 
@@ -33,6 +34,13 @@ namespace Core {
             bool EnableMCPServer = true;
             std::string MCPHost = "127.0.0.1";
             int MCPPort = 3000;
+            // Optional bearer token required on every MCP request. Empty means the
+            // loopback binding is the only protection, which is fine locally but not
+            // if MCPHost is widened.
+            std::string MCPAuthToken;
+            // Browser origins permitted to call the MCP endpoint. Empty rejects all
+            // origin-bearing (browser) requests, which is the safe default.
+            std::vector<std::string> MCPAllowedOrigins;
         };
 
         Application();
@@ -58,6 +66,9 @@ namespace Core {
         bool m_Running = true;
         std::unique_ptr<Core::Window> m_Window;
         std::unique_ptr<RHI::VulkanContext> m_VulkanContext;
+        // Concrete RHIDevice over the Vulkan context; handed to the scene so
+        // terrain/foliage/sky can upload GPU resources.
+        std::shared_ptr<RHI::VulkanDevice> m_RHIDevice;
         std::unique_ptr<ECS::Scene> m_RuntimeScene;
         std::unique_ptr<MCP::MCPServer> m_MCPServer;
 

@@ -1,5 +1,11 @@
 #include "PostProcessManager.h"
 #include "Core/ECS/Components/PostProcessComponent.h"
+#include "Core/Renderer/PostProcess/SSAOPass.h"
+#include "Core/Renderer/PostProcess/BloomPass.h"
+#include "Core/Renderer/PostProcess/DepthOfFieldPass.h"
+#include "Core/Renderer/PostProcess/MotionBlurPass.h"
+#include "Core/Renderer/PostProcess/ColorGradingPass.h"
+#include "Core/Log.h"
 #include <stdexcept>
 #include <algorithm>
 #include <cstring>
@@ -23,6 +29,22 @@ namespace Renderer {
         m_FramebufferChain.Initialize(device, physicalDevice, extent,
                                       VK_FORMAT_R16G16B16A16_SFLOAT);
         m_FramebufferChain.CreateFramebuffers(m_RenderPass);
+
+        RegisterDefaultPasses();
+    }
+
+    void PostProcessManager::RegisterDefaultPasses() {
+        // The pass implementations existed but were never instantiated, so the
+        // post-process chain was empty at runtime no matter what the settings said.
+        // Order matters: occlusion and depth-of-field operate on scene depth,
+        // motion blur consumes velocity, bloom adds light, grading is last.
+        AddPass(std::make_unique<SSAOPass>());
+        AddPass(std::make_unique<DepthOfFieldPass>());
+        AddPass(std::make_unique<MotionBlurPass>());
+        AddPass(std::make_unique<BloomPass>());
+        AddPass(std::make_unique<ColorGradingPass>());
+
+        ENGINE_CORE_INFO("PostProcessManager: registered {} passes", m_Passes.size());
     }
 
     void PostProcessManager::CreateRenderPass() {

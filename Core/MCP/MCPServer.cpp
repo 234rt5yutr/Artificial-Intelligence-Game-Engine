@@ -1,5 +1,8 @@
 #include "MCPServer.h"
 #include "Core/Profile.h"
+#include <algorithm>
+#include <chrono>
+#include <future>
 #include <sstream>
 
 namespace Core {
@@ -48,7 +51,15 @@ namespace MCP {
         
         std::lock_guard lock(m_ToolsMutex);
         const auto& name = tool->GetName();
-        
+
+        // MCP caps tool names at 64 characters. Rejecting here surfaces the
+        // problem at startup instead of at a client's tools/list.
+        if (name.empty() || name.size() > MCP_MAX_TOOL_NAME_LENGTH) {
+            ENGINE_CORE_ERROR("MCP: Rejecting tool '{}': name must be 1-{} characters",
+                              name, MCP_MAX_TOOL_NAME_LENGTH);
+            return;
+        }
+
         if (m_Tools.contains(name)) {
             ENGINE_CORE_WARN("MCP: Replacing existing tool '{}'", name);
         }
@@ -120,8 +131,9 @@ namespace MCP {
         }
 
         m_Running = true;
+        m_AcceptingQueuedRequests = true;
         ENGINE_CORE_INFO("MCP Server started at {}", GetEndpointUrl());
-        
+
         return true;
     }
 
@@ -129,7 +141,31 @@ namespace MCP {
         if (!m_Running) return;
 
         m_Running = false;
+        // Stop queueing before tearing down the transport so no worker parks on a
+        // future that will never be completed.
+        m_AcceptingQueuedRequests = false;
         m_HttpServer->Stop();
+
+        // Fail anything still queued rather than dropping it: a dropped promise
+        // would surface to the waiting worker as a broken_promise.
+        std::queue<PendingRequest> abandoned;
+        {
+            std::lock_guard lock(m_RequestQueueMutex);
+            std::swap(abandoned, m_PendingRequests);
+        }
+        while (!abandoned.empty()) {
+            auto& req = abandoned.front();
+            if (req.Callback) {
+                req.Callback(JsonRpcResponse::Error(
+                    req.Request.id,
+                    JsonRpcError::InternalError,
+                    "MCP server is shutting down"
+                ));
+            }
+            abandoned.pop();
+        }
+
+        m_MainThreadPumpSeen.store(false);
 
         // Clear session
         {
@@ -174,8 +210,11 @@ namespace MCP {
     void MCPServer::ProcessPendingRequests() {
         PROFILE_FUNCTION();
 
+        // Tells HTTP workers it is safe to hand work over instead of running it inline.
+        m_MainThreadPumpSeen.store(true);
+
         std::queue<PendingRequest> toProcess;
-        
+
         {
             std::lock_guard lock(m_RequestQueueMutex);
             std::swap(toProcess, m_PendingRequests);
@@ -209,39 +248,103 @@ namespace MCP {
 
         // Health check endpoint
         m_HttpServer->Get("/health", [this](const HttpRequest& req) {
+            if (auto rejection = RejectRequest(req)) {
+                return *rejection;
+            }
             return HandleHealthCheck(req);
         });
 
         // Tools list endpoint (convenience, not standard MCP)
         m_HttpServer->Get("/tools", [this](const HttpRequest& req) {
+            if (auto rejection = RejectRequest(req)) {
+                return *rejection;
+            }
             return HandleListTools(req);
         });
 
-        // CORS preflight handler
-        if (m_Config.EnableCORS) {
-            m_HttpServer->Options("/mcp", [](const HttpRequest&) {
+        // CORS preflight. Only the explicitly allowed origins get an
+        // Access-Control-Allow-Origin back; a wildcard here would hand any web page
+        // a driver's seat on the running engine.
+        if (m_Config.EnableCORS && !m_Config.AllowedOrigins.empty()) {
+            auto preflight = [this](const HttpRequest& req) {
                 HttpResponse resp;
+                auto originIt = req.Headers.find("Origin");
+                if (originIt == req.Headers.end()) {
+                    originIt = req.Headers.find("origin");
+                }
+                const bool allowed = originIt != req.Headers.end() &&
+                    std::find(m_Config.AllowedOrigins.begin(),
+                              m_Config.AllowedOrigins.end(),
+                              originIt->second) != m_Config.AllowedOrigins.end();
+                if (!allowed) {
+                    resp.StatusCode = 403;
+                    resp.Body = Json{{"error", "Origin not allowed"}}.dump();
+                    return resp;
+                }
                 resp.StatusCode = 204;
-                resp.Headers["Access-Control-Allow-Origin"] = "*";
+                resp.Headers["Access-Control-Allow-Origin"] = originIt->second;
+                resp.Headers["Vary"] = "Origin";
                 resp.Headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS";
-                resp.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+                resp.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
                 return resp;
-            });
-            
-            m_HttpServer->Options("/", [](const HttpRequest&) {
-                HttpResponse resp;
-                resp.StatusCode = 204;
-                resp.Headers["Access-Control-Allow-Origin"] = "*";
-                resp.Headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS";
-                resp.Headers["Access-Control-Allow-Headers"] = "Content-Type";
-                return resp;
-            });
+            };
+
+            m_HttpServer->Options("/mcp", preflight);
+            m_HttpServer->Options("/", preflight);
         }
+    }
+
+    std::optional<HttpResponse> MCPServer::RejectRequest(const HttpRequest& request) const {
+        auto deny = [](int status, const std::string& message) {
+            HttpResponse resp;
+            resp.StatusCode = status;
+            resp.ContentType = "application/json";
+            resp.Body = Json{{"error", message}}.dump();
+            return resp;
+        };
+
+        if (request.Body.size() > m_Config.MaxRequestBodyBytes) {
+            return deny(413, "Request body too large");
+        }
+
+        // DNS-rebinding protection. Only browsers attach Origin, so this cannot
+        // break curl/CLI clients, but it does stop a malicious page from driving
+        // the engine through the user's loopback interface.
+        auto originIt = request.Headers.find("Origin");
+        if (originIt == request.Headers.end()) {
+            originIt = request.Headers.find("origin");
+        }
+        if (originIt != request.Headers.end() && !originIt->second.empty()) {
+            const bool allowed = std::find(m_Config.AllowedOrigins.begin(),
+                                           m_Config.AllowedOrigins.end(),
+                                           originIt->second) != m_Config.AllowedOrigins.end();
+            if (!allowed) {
+                ENGINE_CORE_WARN("MCP: rejected request from disallowed origin '{}'", originIt->second);
+                return deny(403, "Origin not allowed");
+            }
+        }
+
+        if (!m_Config.AuthToken.empty()) {
+            auto authIt = request.Headers.find("Authorization");
+            if (authIt == request.Headers.end()) {
+                authIt = request.Headers.find("authorization");
+            }
+            const std::string expected = "Bearer " + m_Config.AuthToken;
+            if (authIt == request.Headers.end() || authIt->second != expected) {
+                return deny(401, "Missing or invalid bearer token");
+            }
+        }
+
+        return std::nullopt;
     }
 
     HttpResponse MCPServer::HandleMCPRequest(const HttpRequest& request) {
         PROFILE_FUNCTION();
         ++m_RequestCount;
+
+        if (auto rejection = RejectRequest(request)) {
+            return *rejection;
+        }
 
         HttpResponse response;
         response.ContentType = "application/json";
@@ -250,7 +353,7 @@ namespace MCP {
         auto jsonOpt = JsonUtils::Parse(request.Body);
         if (!jsonOpt) {
             auto errorResp = JsonRpcResponse::Error(
-                std::variant<int64_t, std::string>(std::string("")), 
+                std::variant<int64_t, std::string>(std::string("")),
                 JsonRpcError::ParseError,
                 "Invalid JSON"
             );
@@ -259,34 +362,136 @@ namespace MCP {
             return response;
         }
 
-        auto rpcRequestOpt = JsonRpcRequest::FromJson(*jsonOpt);
-        if (!rpcRequestOpt) {
-            auto errorResp = JsonRpcResponse::Error(
-                std::variant<int64_t, std::string>(std::string("")),
-                JsonRpcError::InvalidRequest,
-                "Invalid JSON-RPC request"
-            );
-            response.Body = errorResp.ToJson().dump();
-            response.StatusCode = 400;
+        // Dispatches one parsed message; returns nullopt for notifications, which
+        // JSON-RPC forbids answering.
+        auto dispatch = [this](const Json& message) -> std::optional<Json> {
+            auto rpcRequestOpt = JsonRpcRequest::FromJson(message);
+            if (!rpcRequestOpt) {
+                return JsonRpcResponse::Error(
+                    std::variant<int64_t, std::string>(std::string("")),
+                    JsonRpcError::InvalidRequest,
+                    "Invalid JSON-RPC request"
+                ).ToJson();
+            }
+
+            // Tool execution touches the ECS registry and other non-thread-safe
+            // engine state, so it must run on the main thread rather than this HTTP
+            // worker. Everything else only reads mutex-guarded server state.
+            const bool needsMainThread = (rpcRequestOpt->method == MCPMethod::CallTool);
+            auto rpcResponse = needsMainThread
+                ? DispatchOnMainThread(*rpcRequestOpt)
+                : HandleJsonRpcRequest(*rpcRequestOpt);
+
+            if (rpcRequestOpt->IsNotification()) {
+                return std::nullopt;
+            }
+            return rpcResponse.ToJson();
+        };
+
+        // JSON-RPC batch: an array of messages, answered with an array of the
+        // responses that are not notifications.
+        if (jsonOpt->is_array()) {
+            if (jsonOpt->empty()) {
+                response.Body = JsonRpcResponse::Error(
+                    std::variant<int64_t, std::string>(std::string("")),
+                    JsonRpcError::InvalidRequest,
+                    "Empty batch"
+                ).ToJson().dump();
+                response.StatusCode = 400;
+                return response;
+            }
+
+            Json results = Json::array();
+            for (const auto& message : *jsonOpt) {
+                if (auto result = dispatch(message)) {
+                    results.push_back(std::move(*result));
+                }
+            }
+
+            if (results.empty()) {
+                response.StatusCode = 202;  // batch of notifications only
+                response.Body.clear();
+                return response;
+            }
+            response.Body = results.dump();
             return response;
         }
 
-        // Handle the request
-        auto rpcResponse = HandleJsonRpcRequest(*rpcRequestOpt);
-        response.Body = rpcResponse.ToJson().dump();
-        
+        auto result = dispatch(*jsonOpt);
+        if (!result) {
+            response.StatusCode = 202;  // notification accepted, nothing to return
+            response.Body.clear();
+            return response;
+        }
+
+        response.Body = result->dump();
         return response;
+    }
+
+    JsonRpcResponse MCPServer::DispatchOnMainThread(const JsonRpcRequest& request) {
+        // No pump has ever run (embedded host that does not call
+        // ProcessPendingRequests, or a request that beat the first frame).
+        // Running inline is the only way to make progress.
+        if (!m_MainThreadPumpSeen.load() || !m_AcceptingQueuedRequests.load()) {
+            return HandleJsonRpcRequest(request);
+        }
+
+        auto promise = std::make_shared<std::promise<JsonRpcResponse>>();
+        auto future = promise->get_future();
+
+        PendingRequest pending;
+        pending.Request = request;
+        pending.Callback = [promise](JsonRpcResponse response) {
+            promise->set_value(std::move(response));
+        };
+        QueueMainThreadRequest(std::move(pending));
+
+        const auto timeout = std::chrono::milliseconds(
+            m_Config.MainThreadDispatchTimeoutMs > 0 ? m_Config.MainThreadDispatchTimeoutMs : 10000);
+
+        if (future.wait_for(timeout) != std::future_status::ready) {
+            ENGINE_CORE_ERROR("MCP: main-thread dispatch timed out for method '{}'", request.method);
+            return JsonRpcResponse::Error(
+                request.id,
+                JsonRpcError::InternalError,
+                "Timed out waiting for the engine main thread"
+            );
+        }
+
+        try {
+            return future.get();
+        }
+        catch (const std::exception& e) {
+            // Reached if the server shut down and dropped the queued request.
+            return JsonRpcResponse::Error(
+                request.id,
+                JsonRpcError::InternalError,
+                std::string("Request was not completed: ") + e.what()
+            );
+        }
     }
 
     HttpResponse MCPServer::HandleHealthCheck(const HttpRequest&) {
         HttpResponse response;
         response.ContentType = "application/json";
         
+        // Runs on an HTTP worker: both fields are mutated from other threads.
+        bool initialized = false;
+        {
+            std::lock_guard lock(m_SessionMutex);
+            initialized = m_Session.Initialized;
+        }
+        size_t toolCount = 0;
+        {
+            std::lock_guard lock(m_ToolsMutex);
+            toolCount = m_Tools.size();
+        }
+
         Json health = {
             {"status", "ok"},
             {"server", m_ServerInfo.ToJson()},
-            {"initialized", m_Session.Initialized},
-            {"toolCount", m_Tools.size()},
+            {"initialized", initialized},
+            {"toolCount", toolCount},
             {"requestCount", m_RequestCount.load()},
             {"toolCallCount", m_ToolCallCount.load()}
         };
@@ -329,6 +534,22 @@ namespace MCP {
         else if (method == MCPMethod::SetLogLevel) {
             return HandleSetLogLevel(request);
         }
+        else if (method == MCPMethod::ListResources) {
+            return HandleResourcesList(request);
+        }
+        else if (method == MCPMethod::ReadResource) {
+            return HandleResourcesRead(request);
+        }
+        else if (method == MCPMethod::ListPrompts) {
+            return HandlePromptsList(request);
+        }
+        else if (method.rfind("notifications/", 0) == 0) {
+            // Client-side notifications (initialized, cancelled, progress). Nothing
+            // to do beyond accepting them; the caller drops the response because
+            // notifications carry no id.
+            ENGINE_CORE_TRACE("MCP: received notification '{}'", method);
+            return JsonRpcResponse::Success(request.id, Json::object());
+        }
         else {
             // Unknown method
             return JsonRpcResponse::Error(
@@ -337,6 +558,25 @@ namespace MCP {
                 "Method not found: " + method
             );
         }
+    }
+
+    JsonRpcResponse MCPServer::HandleResourcesList(const JsonRpcRequest& request) {
+        // Resources are not backed by an asset registry yet; report an empty list
+        // rather than method-not-found so clients complete discovery cleanly.
+        return JsonRpcResponse::Success(request.id, Json{{"resources", Json::array()}});
+    }
+
+    JsonRpcResponse MCPServer::HandleResourcesRead(const JsonRpcRequest& request) {
+        const std::string uri = request.params.value("uri", std::string());
+        return JsonRpcResponse::Error(
+            request.id,
+            JsonRpcError::InvalidParams,
+            "Unknown resource: " + uri
+        );
+    }
+
+    JsonRpcResponse MCPServer::HandlePromptsList(const JsonRpcRequest& request) {
+        return JsonRpcResponse::Success(request.id, Json{{"prompts", Json::array()}});
     }
 
     JsonRpcResponse MCPServer::HandleInitialize(const JsonRpcRequest& request) {
@@ -375,9 +615,24 @@ namespace MCP {
             capabilitiesArray.push_back(capability);
         }
 
+        // Protocol version negotiation: echo the client's version when we support
+        // it, otherwise answer with ours and let the client decide.
+        std::string negotiatedVersion = MCP_PROTOCOL_VERSION;
+        if (request.params.contains("protocolVersion") && request.params["protocolVersion"].is_string()) {
+            const std::string requested = request.params["protocolVersion"].get<std::string>();
+            if (std::find(std::begin(MCP_SUPPORTED_PROTOCOL_VERSIONS),
+                          std::end(MCP_SUPPORTED_PROTOCOL_VERSIONS),
+                          requested) != std::end(MCP_SUPPORTED_PROTOCOL_VERSIONS)) {
+                negotiatedVersion = requested;
+            } else {
+                ENGINE_CORE_WARN("MCP: client requested unsupported protocol version '{}', offering '{}'",
+                                 requested, negotiatedVersion);
+            }
+        }
+
         // Build response
         Json result = {
-            {"protocolVersion", MCP_PROTOCOL_VERSION},
+            {"protocolVersion", negotiatedVersion},
             {"capabilities", m_Capabilities.ToJson()},
             {"serverInfo", m_ServerInfo.ToJson()},
             {"capabilityScopes", capabilitiesArray},

@@ -48,6 +48,10 @@ namespace Renderer {
         bool IsInitialized() const { return m_Device != VK_NULL_HANDLE; }
 
     private:
+        // Instantiates the built-in pass chain (SSAO, DoF, motion blur, bloom,
+        // color grading) in execution order.
+        void RegisterDefaultPasses();
+
         void CreateRenderPass();
         void CreateSamplers();
 

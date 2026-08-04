@@ -98,6 +98,21 @@ namespace ECS {
             NeedsSync = true;
         }
 
+        // Continuous force/torque, applied for one physics step. Unlike an impulse
+        // this is scaled by the step duration, so it is the right primitive for
+        // thrusters, wind, and scripted pushes.
+        void ApplyForce(const Math::Vec3& force)
+        {
+            AccumulatedForce += force;
+            NeedsSync = true;
+        }
+
+        void ApplyTorque(const Math::Vec3& torque)
+        {
+            AccumulatedTorque += torque;
+            NeedsSync = true;
+        }
+
         void SetLinearVelocity(const Math::Vec3& velocity)
         {
             LinearVelocity = velocity;
@@ -113,6 +128,10 @@ namespace ECS {
         // Pending impulses (applied during physics step)
         Math::Vec3 PendingLinearImpulse{ 0.0f, 0.0f, 0.0f };
         Math::Vec3 PendingAngularImpulse{ 0.0f, 0.0f, 0.0f };
+
+        // Pending forces/torques (applied during physics step)
+        Math::Vec3 AccumulatedForce{ 0.0f, 0.0f, 0.0f };
+        Math::Vec3 AccumulatedTorque{ 0.0f, 0.0f, 0.0f };
     };
 
 } // namespace ECS

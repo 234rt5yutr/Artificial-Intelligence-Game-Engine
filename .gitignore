@@ -86,3 +86,9 @@ imgui.ini
 
 # Research output reports
 modern_engine_missing_functions.md
+
+# Local MCP menu export
+MCP_USER_MENU.tex
+
+# Local release package artifact
+AIGameEngine_Release_Content.zip

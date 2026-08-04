@@ -136,7 +136,7 @@ namespace ECS {
         void RecordExecutionToHistory() {
             auto activePath = TreeInstance->GetActivePath();
             for (auto* node : activePath) {
-                ExecutionHistory.emplace_back(node->GetName(), node->GetStatus());
+                ExecutionHistory.emplace_back(node->GetName(), node->GetLastStatus());
             }
 
             // Trim history if too long

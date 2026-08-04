@@ -11,6 +11,8 @@
 #include "Core/Dialogue/Dialogue.h"
 #include "Core/AI/BehaviorTree/BehaviorTreeContainer.h"
 #include "Core/AI/FSM/FSM.h"
+#include "Core/AI/BehaviorTree/BehaviorTreeManager.h"  // BehaviorTreeManager::Get()
+#include "Core/AI/FSM/FSMBuilder.h"                      // FSMManager::Get()
 #include "Core/ECS/Components/BehaviorTreeComponent.h"
 #include "Core/ECS/Components/FSMComponent.h"
 #include <random>
@@ -47,7 +49,7 @@ namespace MCP {
 
         ToolResult Execute(const Json& args, ECS::Scene* scene) override {
             if (!scene) {
-                return ToolResult{false, "No active scene"};
+                return ToolResult::Error("No active scene");
             }
 
             uint32_t entityId = args.value("entityId", 0u);
@@ -58,17 +60,17 @@ namespace MCP {
 
             auto entity = static_cast<entt::entity>(entityId);
             if (!scene->GetRegistry().valid(entity)) {
-                return ToolResult{false, "Invalid entity ID"};
+                return ToolResult::Error("Invalid entity ID");
             }
 
             if (!scene->GetRegistry().all_of<Dialogue::DialogueComponent>(entity)) {
-                return ToolResult{false, "Entity does not have DialogueComponent"};
+                return ToolResult::Error("Entity does not have DialogueComponent");
             }
 
             auto& dialogueComp = scene->GetRegistry().get<Dialogue::DialogueComponent>(entity);
             
             if (!dialogueComp.ActiveContext.IsActive) {
-                return ToolResult{false, "No active dialogue on entity"};
+                return ToolResult::Error("No active dialogue on entity");
             }
 
             // Create a temporary injected node
@@ -101,7 +103,7 @@ namespace MCP {
             result["injectedNodeId"] = injectedNode.Id;
             result["message"] = "Dialogue node injected successfully";
 
-            return ToolResult{true, result.dump()};
+            return ToolResult::Success(result.dump());
         }
     };
 
@@ -132,7 +134,7 @@ namespace MCP {
 
         ToolResult Execute(const Json& args, ECS::Scene* scene) override {
             if (!scene) {
-                return ToolResult{false, "No active scene"};
+                return ToolResult::Error("No active scene");
             }
 
             uint32_t entityId = args.value("entityId", 0u);
@@ -141,12 +143,12 @@ namespace MCP {
 
             auto entity = static_cast<entt::entity>(entityId);
             if (!scene->GetRegistry().valid(entity)) {
-                return ToolResult{false, "Invalid entity ID"};
+                return ToolResult::Error("Invalid entity ID");
             }
 
             // Check for QuestComponent - we need to check if it exists first
             // Since QuestComponent might not be registered, we'll return an error
-            return ToolResult{false, "QuestComponent not found on entity"};
+            return ToolResult::Error("QuestComponent not found on entity");
         }
     };
 
@@ -178,7 +180,7 @@ namespace MCP {
 
         ToolResult Execute(const Json& args, ECS::Scene* scene) override {
             if (!scene) {
-                return ToolResult{false, "No active scene"};
+                return ToolResult::Error("No active scene");
             }
 
             uint32_t entityId = args.value("entityId", 0u);
@@ -188,29 +190,32 @@ namespace MCP {
 
             auto entity = static_cast<entt::entity>(entityId);
             if (!scene->GetRegistry().valid(entity)) {
-                return ToolResult{false, "Invalid entity ID"};
+                return ToolResult::Error("Invalid entity ID");
             }
 
             Json result;
             result["entityId"] = entityId;
             result["action"] = action;
 
-            if (action == "add" && !itemId.empty()) {
-                // Would add item to inventory
-                result["success"] = true;
-                result["message"] = "Item add operation queued";
-            } else if (action == "remove" && !itemId.empty()) {
-                // Would remove item from inventory
-                result["success"] = true;
-                result["message"] = "Item remove operation queued";
-            } else if (action == "clear") {
-                result["success"] = true;
-                result["message"] = "Inventory clear operation queued";
-            } else {
-                return ToolResult{false, "Invalid action or missing itemId"};
+            if (action != "add" && action != "remove" && action != "clear") {
+                return ToolResult::Error("Invalid action; expected add, remove, or clear");
+            }
+            if ((action == "add" || action == "remove") && itemId.empty()) {
+                return ToolResult::Error("'itemId' is required for add and remove");
             }
 
-            return ToolResult{true, result.dump()};
+            // The inventory backend is not wired to this tool yet. Reporting
+            // success here would tell an agent the inventory changed when it did
+            // not, so the arguments are echoed back as an explicit failure.
+            result["success"] = false;
+            result["implemented"] = false;
+            result["itemId"] = itemId;
+            result["quantity"] = quantity;
+            result["message"] = "NOT APPLIED: inventory backend is not wired up; arguments validated only";
+
+            ToolResult toolResult = ToolResult::Success(result.dump());
+            toolResult.IsError = true;
+            return toolResult;
         }
     };
 
@@ -239,7 +244,7 @@ namespace MCP {
 
         ToolResult Execute(const Json& args, ECS::Scene* scene) override {
             if (!scene) {
-                return ToolResult{false, "No active scene"};
+                return ToolResult::Error("No active scene");
             }
 
             Json result;
@@ -250,8 +255,9 @@ namespace MCP {
                 systems = args["systems"].get<std::vector<std::string>>();
             }
 
-            uint32_t entityId = args.value("entityId", 0u);
-            bool hasEntity = entityId > 0;
+            // Note: this tool reports global system stats; the optional 'entityId'
+            // argument is accepted for forward compatibility but not yet used to
+            // scope the query.
 
             // Item database stats
             if (std::find(systems.begin(), systems.end(), "inventory") != systems.end()) {
@@ -294,7 +300,7 @@ namespace MCP {
                 result["ai"] = aiState;
             }
 
-            return ToolResult{true, result.dump()};
+            return ToolResult::Success(result.dump());
         }
     };
 
@@ -326,7 +332,7 @@ namespace MCP {
 
         ToolResult Execute(const Json& args, ECS::Scene* scene) override {
             if (!scene) {
-                return ToolResult{false, "No active scene"};
+                return ToolResult::Error("No active scene");
             }
 
             uint32_t entityId = args.value("entityId", 0u);
@@ -335,7 +341,7 @@ namespace MCP {
 
             auto entity = static_cast<entt::entity>(entityId);
             if (!scene->GetRegistry().valid(entity)) {
-                return ToolResult{false, "Invalid entity ID"};
+                return ToolResult::Error("Invalid entity ID");
             }
 
             Json result;
@@ -345,7 +351,7 @@ namespace MCP {
 
             if (aiType == "behaviorTree") {
                 if (!scene->GetRegistry().all_of<ECS::BehaviorTreeComponent>(entity)) {
-                    return ToolResult{false, "Entity does not have BehaviorTreeComponent"};
+                    return ToolResult::Error("Entity does not have BehaviorTreeComponent");
                 }
 
                 auto& btComp = scene->GetRegistry().get<ECS::BehaviorTreeComponent>(entity);
@@ -366,7 +372,7 @@ namespace MCP {
                 }
             } else if (aiType == "fsm") {
                 if (!scene->GetRegistry().all_of<ECS::FSMComponent>(entity)) {
-                    return ToolResult{false, "Entity does not have FSMComponent"};
+                    return ToolResult::Error("Entity does not have FSMComponent");
                 }
 
                 auto& fsmComp = scene->GetRegistry().get<ECS::FSMComponent>(entity);
@@ -387,10 +393,10 @@ namespace MCP {
                     result["message"] = "FSM reset";
                 }
             } else {
-                return ToolResult{false, "Invalid aiType. Use 'behaviorTree' or 'fsm'"};
+                return ToolResult::Error("Invalid aiType. Use 'behaviorTree' or 'fsm'");
             }
 
-            return ToolResult{true, result.dump()};
+            return ToolResult::Success(result.dump());
         }
     };
 
@@ -419,7 +425,7 @@ namespace MCP {
 
         ToolResult Execute(const Json& args, ECS::Scene* scene) override {
             if (!scene) {
-                return ToolResult{false, "No active scene"};
+                return ToolResult::Error("No active scene");
             }
 
             uint32_t targetId = args.value("targetEntityId", 0u);
@@ -428,11 +434,11 @@ namespace MCP {
 
             auto targetEntity = static_cast<entt::entity>(targetId);
             if (!scene->GetRegistry().valid(targetEntity)) {
-                return ToolResult{false, "Invalid target entity ID"};
+                return ToolResult::Error("Invalid target entity ID");
             }
 
             if (!scene->GetRegistry().all_of<Dialogue::DialogueComponent>(targetEntity)) {
-                return ToolResult{false, "Target entity does not have DialogueComponent"};
+                return ToolResult::Error("Target entity does not have DialogueComponent");
             }
 
             auto& dialogueComp = scene->GetRegistry().get<Dialogue::DialogueComponent>(targetEntity);
@@ -445,10 +451,10 @@ namespace MCP {
                 result["success"] = true;
                 result["message"] = "Dialogue started";
                 result["treeId"] = treeId;
-                return ToolResult{true, result.dump()};
+                return ToolResult::Success(result.dump());
             }
 
-            return ToolResult{false, "Failed to start dialogue"};
+            return ToolResult::Error("Failed to start dialogue");
         }
     };
 

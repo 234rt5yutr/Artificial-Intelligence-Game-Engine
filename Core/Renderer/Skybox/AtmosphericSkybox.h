@@ -39,8 +39,15 @@ namespace Renderer {
         
         float StarIntensity;
         float MoonPhase;
+        // Members above total 112 bytes; pad to the 128-byte uniform block. Two
+        // padding floats left the struct 16 bytes short of its own static_assert,
+        // so this never compiled.
         float Padding0;
         float Padding1;
+        float Padding2;
+        float Padding3;
+        float Padding4;
+        float Padding5;
 
         AtmosphereUniforms()
             : SunDirection(0.0f, 1.0f, 0.0f)
@@ -61,6 +68,10 @@ namespace Renderer {
             , MoonPhase(0.0f)
             , Padding0(0.0f)
             , Padding1(0.0f)
+            , Padding2(0.0f)
+            , Padding3(0.0f)
+            , Padding4(0.0f)
+            , Padding5(0.0f)
         {}
     };
     static_assert(sizeof(AtmosphereUniforms) == 128, "AtmosphereUniforms must be 128 bytes");
@@ -107,6 +118,9 @@ namespace Renderer {
     private:
         void CreateUniformBuffer();
         void UpdateUniformBuffer();
+        // Writes m_Uniforms through the host-visible mapping. RHIDevice exposes no
+        // UpdateBuffer, so this is how the GPU-side copy is refreshed.
+        void UploadUniforms();
 
         std::shared_ptr<RHI::RHIDevice> m_Device;
         std::shared_ptr<RHI::RHIBuffer> m_UniformBuffer;

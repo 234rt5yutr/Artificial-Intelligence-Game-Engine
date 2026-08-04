@@ -1,4 +1,5 @@
 #include "Core/Renderer/Skybox/AtmosphericSkybox.h"
+#include <cstring>
 #include "Core/Log.h"
 #include "Core/Profile.h"
 
@@ -89,7 +90,7 @@ namespace Renderer {
     }
 
     void AtmosphericSkybox::Render(std::shared_ptr<RHI::RHICommandList> commandList,
-                                    const Math::Mat4& invViewProjection)
+                                    [[maybe_unused]] const Math::Mat4& invViewProjection)
     {
         PROFILE_FUNCTION();
 
@@ -175,12 +176,29 @@ namespace Renderer {
 
         if (!m_Device) return;
 
-        RHI::BufferDesc desc;
-        desc.Size = sizeof(AtmosphereUniforms);
-        desc.Usage = RHI::BufferUsage::UniformBuffer;
-        desc.MemoryType = RHI::MemoryType::HostVisible;
+        // RHI::BufferDescriptor is the actual descriptor type; a host-visible
+        // buffer is requested through `mapped` rather than a MemoryType enum.
+        RHI::BufferDescriptor desc{};
+        desc.size = sizeof(AtmosphereUniforms);
+        desc.usage = RHI::BufferUsage::Uniform;
+        desc.mapped = true;
 
-        m_UniformBuffer = m_Device->CreateBuffer(desc, &m_Uniforms);
+        m_UniformBuffer = m_Device->CreateBuffer(desc);
+        if (m_UniformBuffer) {
+            UploadUniforms();
+        }
+    }
+
+    void AtmosphericSkybox::UploadUniforms()
+    {
+        if (!m_UniformBuffer) return;
+
+        void* mappedData = nullptr;
+        m_UniformBuffer->Map(&mappedData);
+        if (mappedData) {
+            std::memcpy(mappedData, &m_Uniforms, sizeof(AtmosphereUniforms));
+        }
+        m_UniformBuffer->Unmap();
     }
 
     void AtmosphericSkybox::UpdateUniformBuffer()
@@ -189,7 +207,9 @@ namespace Renderer {
 
         if (!m_UniformBuffer || !m_Device) return;
 
-        m_Device->UpdateBuffer(m_UniformBuffer, &m_Uniforms, sizeof(AtmosphereUniforms));
+        // RHIDevice has no UpdateBuffer; the buffer is host-visible, so write
+        // through the mapping instead.
+        UploadUniforms();
         m_NeedsUpdate = false;
     }
 

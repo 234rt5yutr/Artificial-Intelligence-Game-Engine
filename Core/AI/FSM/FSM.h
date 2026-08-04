@@ -73,22 +73,10 @@ namespace AI {
             return m_Transitions;
         }
 
-        // Serialization
-        virtual Json ToJson() const {
-            Json j;
-            j["name"] = m_Name;
-            j["type"] = "FSMState";
-            
-            Json transitionNames = Json::array();
-            for (const auto& t : m_Transitions) {
-                if (t) {
-                    transitionNames.push_back(t->GetName());
-                }
-            }
-            j["transitions"] = transitionNames;
-            
-            return j;
-        }
+        // Serialization.
+        // Defined out-of-line below: the body dereferences FSMTransition, which is
+        // only forward-declared at this point.
+        virtual Json ToJson() const;
 
     protected:
         std::string m_Name;
@@ -156,6 +144,23 @@ namespace AI {
         ConditionFunc m_ConditionFunc;
         ActionFunc m_ActionFunc;
     };
+
+    // FSMState::ToJson, deferred until FSMTransition is a complete type.
+    inline Json FSMState::ToJson() const {
+        Json j;
+        j["name"] = m_Name;
+        j["type"] = "FSMState";
+
+        Json transitionNames = Json::array();
+        for (const auto& t : m_Transitions) {
+            if (t) {
+                transitionNames.push_back(t->GetName());
+            }
+        }
+        j["transitions"] = transitionNames;
+
+        return j;
+    }
 
     // ============================================================================
     // Event-based Transition

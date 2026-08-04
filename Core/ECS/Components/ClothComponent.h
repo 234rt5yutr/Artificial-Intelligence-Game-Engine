@@ -196,9 +196,12 @@ namespace ECS {
             for (uint32_t y = 0; y < rows; ++y) {
                 for (uint32_t x = 0; x < cols; ++x) {
                     uint32_t idx = y * cols + x;
+                    // Convert before negating: -y on an unsigned wraps to a huge
+                    // value, which then becomes a huge float instead of a small
+                    // negative offset.
                     Positions[idx] = Math::Vec3(
-                        x * dx - Width * 0.5f,      // Center horizontally
-                        -y * dy + Height * 0.5f,    // Y goes down, center vertically
+                        static_cast<float>(x) * dx - Width * 0.5f,      // Center horizontally
+                        -(static_cast<float>(y) * dy) + Height * 0.5f,  // Y goes down, center vertically
                         0.0f
                     );
                     PreviousPositions[idx] = Positions[idx];

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "NavigationConfig.h"
 #include <glm/glm.hpp>
 #include <vector>
@@ -12,7 +14,7 @@ struct dtTileCache;
 struct dtTileCacheAlloc;
 struct dtTileCacheCompressor;
 struct dtTileCacheMeshProcess;
-struct dtNavMesh;
+class dtNavMesh;  // Detour declares this as a class, not a struct
 struct dtNavMeshQuery;
 
 namespace Core {
