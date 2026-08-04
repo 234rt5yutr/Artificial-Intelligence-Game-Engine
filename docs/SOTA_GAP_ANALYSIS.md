@@ -35,33 +35,32 @@ game.
 
 ## Tier 1 — structural, blocks everything above it
 
-### 1.1 The renderer is not driven by the scene — and cannot be yet
+### 1.1 The renderer is now scene-driven
 
-`VulkanContext::DrawFrame()` draws a hard-coded 3-vertex triangle
-(`vkCmdDraw(cmd, 3, 1, 0, 0)`) with a vertex-input-less pipeline. It ignores
-`RenderSystem`, which produces draw commands that nothing consumes.
+`VulkanContext::DrawFrame()` used to draw a hard-coded 3-vertex triangle with a
+vertex-input-less pipeline, ignoring `RenderSystem` entirely. Closing this needed
+four things that were all missing:
 
-**The ordering matters, and an earlier revision of this document had it wrong.**
-Consuming the draw list is *not* the first step, because there is no geometry to
-draw:
+- **A depth buffer.** The context had none at all, so 3D geometry would have
+  resolved in submission order rather than by distance. Added a depth image,
+  attachment, and `VK_COMPARE_OP_LESS` depth test, recreated with the swapchain.
+- **A vertex-input pipeline.** The existing pipeline declares
+  `vertexBindingDescriptionCount = 0`. Added a second pipeline whose vertex input
+  matches `Renderer::Vertex` exactly, with an MVP push constant (no descriptor
+  sets, so it needs nothing the RHI does not yet route).
+- **Mesh GPU upload.** `Mesh::vertexBuffer`/`indexBuffer` were declared but never
+  written anywhere. `Mesh::UploadToGPU(RHIDevice&)` fills them.
+- **The hand-off.** `Application` now passes `RenderSystem::GetDrawCommands()` and
+  `CameraSystem::GetViewProjectionMatrix()` to the context each frame.
 
-1. Nothing imports source assets, so no `Mesh` ever gets CPU vertex data
-   (`Mesh::LoadGLTF` exists but nothing calls it, and `AssetCooker` has no
-   importer).
-2. Until this pass, nothing wrote `Mesh::vertexBuffer`/`indexBuffer` either — the
-   fields were declared and never assigned by any code path, so even a populated
-   mesh had no GPU representation. `Mesh::UploadToGPU(RHIDevice&)` now closes
-   that half.
-3. The graphics pipeline has no vertex input state and no push constants, so
-   there is nothing to bind a vertex buffer *to*.
+Draws skip any mesh without GPU buffers rather than issuing a draw against a null
+binding, and an empty draw list falls back to the original triangle so a scene
+with no geometry still shows the renderer is alive.
 
-Wiring `GetDrawCommands()` into `DrawFrame()` before 1 and 3 are done would
-produce a loop that iterates draw commands and renders nothing — the exact
-"exists but does nothing" pattern this audit removed elsewhere.
-
-**Correct order:** glTF import (3.1) → mesh upload (done) → a vertex-input
-pipeline with an MVP push constant → draw-command consumption → double-buffered
-hand-off so simulation can run ahead of the GPU.
+**Still missing:** materials and lighting. The mesh pass is unlit (a hemisphere
+term off the vertex normal) because per-material descriptor sets need the RHI to
+own command submission first. `LightSystem::GetForwardPlusLights()` still has no
+consumer, and `PostProcessManager::Execute` is still not called from the frame.
 
 ### 1.2 No render-thread / simulation-thread split
 
@@ -194,6 +193,9 @@ Done in this pass:
 - ~~Bring Skybox and TerrainSystem back into the build~~ (they used
   `RHI::BufferDesc`/`MemoryType`/`UpdateBuffer`, none of which exist; the real API
   is `RHI::BufferDescriptor` + `CreateBuffer` + `Map`/`Unmap`)
+- ~~Make the renderer scene-driven~~ — depth buffer, vertex-input pipeline with
+  MVP push constant, and the `Application` -> `VulkanContext` draw hand-off.
+  Verified running windowed with no validation errors.
 - ~~Mesh GPU upload~~ — `Mesh::vertexBuffer`/`indexBuffer` were declared but
   never written anywhere in the tree. `Mesh::UploadToGPU(RHIDevice&)` fills them
   from the CPU vertex/index vectors, picking the skinned or static stream by mesh
@@ -210,20 +212,22 @@ Done in this pass:
 
 Remaining, in order:
 
-1. glTF import + BCn texture cook (3.1). This is the true head of the chain:
-   without it there is no geometry for any of the rendering work to move.
-2. A vertex-input pipeline with an MVP push constant, then consume
-   `RenderSystem` draw commands and call `PostProcessManager::Execute`.
+1. Feed lights and materials into the mesh pass, and call
+   `PostProcessManager::Execute` from the frame. The geometry path works; it is
+   unlit.
+2. Wire `Mesh::LoadGLTF` (already implemented with cgltf, but nothing calls it)
+   into the asset pipeline so scenes can reference mesh files, plus BCn texture
+   cook.
 3. Port passes onto the render graph.
 4. Editor viewport with gizmos and play-in-editor.
 5. FSR upscaling wired to existing motion vectors.
 6. Render-thread split.
 7. GPU-driven cluster culling.
 
-Item 1 is now the single gate, and it is an *asset* problem rather than a
-rendering one: every simulation system is constructed and ticking, but the engine
-has no way to get geometry in from disk, so there is nothing for the renderer to
-consume. Items 6–7 are the ones that
+The structural gate is closed: simulation runs, the renderer consumes the scene,
+and every subsystem is constructed. What remains is depth of feature rather than
+missing plumbing — lighting, materials, asset import wiring, and the GPU-driven
+work in Tier 2. Items 6–7 are the ones that
 genuinely approach UE/Unity rendering architecture, and should not be started
 before item 1 makes the frame observable.
 

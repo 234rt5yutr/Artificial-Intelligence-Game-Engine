@@ -6,6 +6,11 @@
 #include "Core/UI/UIManager.h"
 #include "Core/RHI/PipelineCacheManager.h"
 #include "Core/RHI/ShaderCompiler.h"
+#include "Core/RHI/Vulkan/VulkanBuffer.h"
+#include "Core/ECS/Systems/RenderSystem.h"
+#include "Core/Renderer/Mesh.h"
+#include <glm/gtc/type_ptr.hpp>
+#include <cstring>
 
 // SDL extensions support
 #include <SDL3/SDL.h>
@@ -76,6 +81,8 @@ namespace RHI {
             CreateImageViews();
             CreateRenderPass();
             CreateGraphicsPipeline();
+            CreateMeshPipeline();
+            CreateDepthResources();
             CreateFramebuffers();
         }
     }
@@ -92,6 +99,8 @@ namespace RHI {
             vkDestroyImageView(m_Device, imageView, nullptr);
         }
         m_SwapchainImageViews.clear();
+
+        DestroyDepthResources();
 
         if (m_Swapchain) {
             vkDestroySwapchainKHR(m_Device, m_Swapchain, nullptr);
@@ -110,9 +119,17 @@ namespace RHI {
             vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
             m_GraphicsPipeline = VK_NULL_HANDLE;
         }
+        if (m_MeshPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(m_Device, m_MeshPipeline, nullptr);
+            m_MeshPipeline = VK_NULL_HANDLE;
+        }
         if (m_PipelineLayout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
             m_PipelineLayout = VK_NULL_HANDLE;
+        }
+        if (m_MeshPipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(m_Device, m_MeshPipelineLayout, nullptr);
+            m_MeshPipelineLayout = VK_NULL_HANDLE;
         }
         if (m_RenderPass != VK_NULL_HANDLE) {
             vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
@@ -123,6 +140,8 @@ namespace RHI {
         CreateImageViews();
         CreateRenderPass();
         CreateGraphicsPipeline();
+        CreateMeshPipeline();
+        CreateDepthResources();
         CreateFramebuffers();
 
         UI::UIManager::Get().OnResize(width, height);
@@ -137,9 +156,19 @@ namespace RHI {
                 vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
                 m_GraphicsPipeline = VK_NULL_HANDLE;
             }
+            // The mesh pipeline references the render pass, which is rebuilt
+            // below, so it has to go with it.
+            if (m_MeshPipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(m_Device, m_MeshPipeline, nullptr);
+                m_MeshPipeline = VK_NULL_HANDLE;
+            }
             if (m_PipelineLayout != VK_NULL_HANDLE) {
                 vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
                 m_PipelineLayout = VK_NULL_HANDLE;
+            }
+            if (m_MeshPipelineLayout != VK_NULL_HANDLE) {
+                vkDestroyPipelineLayout(m_Device, m_MeshPipelineLayout, nullptr);
+                m_MeshPipelineLayout = VK_NULL_HANDLE;
             }
             if (m_RenderPass != VK_NULL_HANDLE) {
                 vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
@@ -825,23 +854,47 @@ namespace RHI {
         colorAttachmentRef.attachment = 0;
         colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+        // Depth attachment: 3D geometry drawn without one resolves in submission
+        // order rather than by distance, so back faces paint over front faces.
+        m_DepthFormat = FindDepthFormat();
+
+        VkAttachmentDescription depthAttachment{};
+        depthAttachment.format = m_DepthFormat;
+        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthAttachmentRef{};
+        depthAttachmentRef.attachment = 1;
+        depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
+        subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
         VkSubpassDependency dependency{};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                  VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.srcAccessMask = 0;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                  VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                   VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        const VkAttachmentDescription attachments[] = { colorAttachment, depthAttachment };
 
         VkRenderPassCreateInfo renderPassInfo{};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        renderPassInfo.attachmentCount = 1;
-        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.attachmentCount = 2;
+        renderPassInfo.pAttachments = attachments;
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
         renderPassInfo.dependencyCount = 1;
@@ -1007,13 +1060,14 @@ namespace RHI {
 
         for (size_t i = 0; i < m_SwapchainImageViews.size(); i++) {
             VkImageView attachments[] = {
-                m_SwapchainImageViews[i]
+                m_SwapchainImageViews[i],
+                m_DepthImageView
             };
 
             VkFramebufferCreateInfo framebufferInfo{};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.renderPass = m_RenderPass;
-            framebufferInfo.attachmentCount = 1;
+            framebufferInfo.attachmentCount = 2;
             framebufferInfo.pAttachments = attachments;
             framebufferInfo.width = m_SwapchainExtent.width;
             framebufferInfo.height = m_SwapchainExtent.height;
@@ -1059,13 +1113,13 @@ namespace RHI {
         renderPassInfo.renderArea.offset = {0, 0};
         renderPassInfo.renderArea.extent = m_SwapchainExtent;
 
-        VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
-        renderPassInfo.clearValueCount = 1;
-        renderPassInfo.pClearValues = &clearColor;
+        VkClearValue clearValues[2]{};
+        clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        clearValues[1].depthStencil = {1.0f, 0};
+        renderPassInfo.clearValueCount = 2;
+        renderPassInfo.pClearValues = clearValues;
 
         vkCmdBeginRenderPass(m_CommandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -1081,7 +1135,14 @@ namespace RHI {
         scissor.extent = m_SwapchainExtent;
         vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
 
-        vkCmdDraw(m_CommandBuffer, 3, 1, 0, 0);
+        // Scene geometry when the application supplied a draw list this frame,
+        // otherwise the original placeholder triangle so an empty scene still
+        // shows the renderer is alive.
+        RecordSceneDraws(m_CommandBuffer);
+        if (m_LastDrawnMeshCount == 0) {
+            vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
+            vkCmdDraw(m_CommandBuffer, 3, 1, 0, 0);
+        }
 
         vkCmdEndRenderPass(m_CommandBuffer);
 
@@ -1131,6 +1192,306 @@ namespace RHI {
             ENGINE_CORE_ASSERT(false, "failed to present swap chain image!");
         }
     }
+    // ========================================================================
+    // Depth resources
+    // ========================================================================
+
+    VkFormat VulkanContext::FindDepthFormat() const {
+        // Prefer 32-bit float depth; fall back through formats that Vulkan
+        // implementations are required to support for depth attachments.
+        const VkFormat candidates[] = {
+            VK_FORMAT_D32_SFLOAT,
+            VK_FORMAT_D32_SFLOAT_S8_UINT,
+            VK_FORMAT_D24_UNORM_S8_UINT
+        };
+
+        for (VkFormat format : candidates) {
+            VkFormatProperties props{};
+            vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, format, &props);
+            if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+                return format;
+            }
+        }
+
+        ENGINE_CORE_ERROR("No supported depth format found; falling back to D32_SFLOAT");
+        return VK_FORMAT_D32_SFLOAT;
+    }
+
+    void VulkanContext::CreateDepthResources() {
+        DestroyDepthResources();
+
+        if (m_DepthFormat == VK_FORMAT_UNDEFINED) {
+            m_DepthFormat = FindDepthFormat();
+        }
+
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent.width = m_SwapchainExtent.width;
+        imageInfo.extent.height = m_SwapchainExtent.height;
+        imageInfo.extent.depth = 1;
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.format = m_DepthFormat;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+
+        if (vmaCreateImage(m_Allocator, &imageInfo, &allocInfo,
+                           &m_DepthImage, &m_DepthAllocation, nullptr) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("Failed to create depth image");
+            return;
+        }
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_DepthImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = m_DepthFormat;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(m_Device, &viewInfo, nullptr, &m_DepthImageView) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("Failed to create depth image view");
+        }
+    }
+
+    void VulkanContext::DestroyDepthResources() {
+        if (m_DepthImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
+            m_DepthImageView = VK_NULL_HANDLE;
+        }
+        if (m_DepthImage != VK_NULL_HANDLE) {
+            vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthAllocation);
+            m_DepthImage = VK_NULL_HANDLE;
+            m_DepthAllocation = VK_NULL_HANDLE;
+        }
+    }
+
+    // ========================================================================
+    // Mesh pipeline
+    // ========================================================================
+
+    void VulkanContext::CreateMeshPipeline() {
+        // Unlit on purpose: lighting needs descriptor sets the RHI does not
+        // route yet, and a correct unlit pass is more useful than a broken lit
+        // one. Normals feed a hemisphere term so shape still reads.
+        const std::string vertSource =
+            "#version 450\n"
+            "layout(location = 0) in vec3 inPosition;\n"
+            "layout(location = 1) in vec3 inNormal;\n"
+            "layout(location = 2) in vec2 inTexCoord;\n"
+            "layout(location = 3) in vec4 inTangent;\n"
+            "layout(push_constant) uniform Push { mat4 mvp; } push;\n"
+            "layout(location = 0) out vec3 fragNormal;\n"
+            "void main() {\n"
+            "    gl_Position = push.mvp * vec4(inPosition, 1.0);\n"
+            "    fragNormal = inNormal;\n"
+            "}\n";
+
+        const std::string fragSource =
+            "#version 450\n"
+            "layout(location = 0) in vec3 fragNormal;\n"
+            "layout(location = 0) out vec4 outColor;\n"
+            "void main() {\n"
+            "    vec3 n = normalize(fragNormal);\n"
+            "    float hemi = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);\n"
+            "    vec3 base = mix(vec3(0.18, 0.20, 0.24), vec3(0.85, 0.87, 0.92), hemi);\n"
+            "    outColor = vec4(base, 1.0);\n"
+            "}\n";
+
+        auto vertCode = ShaderCompiler::CompileToSPIRV(vertSource, ShaderStage::Vertex, "mesh.vert");
+        auto fragCode = ShaderCompiler::CompileToSPIRV(fragSource, ShaderStage::Fragment, "mesh.frag");
+        if (vertCode.empty() || fragCode.empty()) {
+            ENGINE_CORE_ERROR("Mesh pipeline shader compilation failed; scene geometry will not render");
+            return;
+        }
+
+        VkShaderModule vertModule = CreateShaderModule(vertCode);
+        VkShaderModule fragModule = CreateShaderModule(fragCode);
+
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        stages[0].module = vertModule;
+        stages[0].pName = "main";
+        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[1].module = fragModule;
+        stages[1].pName = "main";
+
+        // Must match Renderer::Vertex exactly.
+        VkVertexInputBindingDescription binding{};
+        binding.binding = 0;
+        binding.stride = sizeof(Renderer::Vertex);
+        binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        VkVertexInputAttributeDescription attributes[4]{};
+        attributes[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Renderer::Vertex, position)};
+        attributes[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Renderer::Vertex, normal)};
+        attributes[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Renderer::Vertex, texCoord)};
+        attributes[3] = {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(Renderer::Vertex, tangent)};
+
+        VkPipelineVertexInputStateCreateInfo vertexInput{};
+        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertexInput.vertexBindingDescriptionCount = 1;
+        vertexInput.pVertexBindingDescriptions = &binding;
+        vertexInput.vertexAttributeDescriptionCount = 4;
+        vertexInput.pVertexAttributeDescriptions = attributes;
+
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo raster{};
+        raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        raster.polygonMode = VK_POLYGON_MODE_FILL;
+        raster.lineWidth = 1.0f;
+        raster.cullMode = VK_CULL_MODE_BACK_BIT;
+        raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkPipelineMultisampleStateCreateInfo multisample{};
+        multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+        VkPipelineColorBlendAttachmentState blendAttachment{};
+        blendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+        VkPipelineColorBlendStateCreateInfo colorBlend{};
+        colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlend.attachmentCount = 1;
+        colorBlend.pAttachments = &blendAttachment;
+
+        const VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo dynamicState{};
+        dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynamicState.dynamicStateCount = 2;
+        dynamicState.pDynamicStates = dynamicStates;
+
+        VkPushConstantRange pushRange{};
+        pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pushRange.offset = 0;
+        pushRange.size = sizeof(float) * 16;
+
+        VkPipelineLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges = &pushRange;
+
+        if (vkCreatePipelineLayout(m_Device, &layoutInfo, nullptr, &m_MeshPipelineLayout) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("Failed to create mesh pipeline layout");
+            DestroyShaderModule(vertModule);
+            DestroyShaderModule(fragModule);
+            return;
+        }
+
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = stages;
+        pipelineInfo.pVertexInputState = &vertexInput;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &raster;
+        pipelineInfo.pMultisampleState = &multisample;
+        pipelineInfo.pDepthStencilState = &depthStencil;
+        pipelineInfo.pColorBlendState = &colorBlend;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = m_MeshPipelineLayout;
+        pipelineInfo.renderPass = m_RenderPass;
+        pipelineInfo.subpass = 0;
+
+        if (vkCreateGraphicsPipelines(m_Device, m_PipelineCache, 1, &pipelineInfo,
+                                      nullptr, &m_MeshPipeline) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("Failed to create mesh pipeline");
+        } else {
+            ENGINE_CORE_INFO("Mesh pipeline created (vertex input + MVP push constant + depth test)");
+        }
+
+        DestroyShaderModule(vertModule);
+        DestroyShaderModule(fragModule);
+    }
+
+    // ========================================================================
+    // Scene draw submission
+    // ========================================================================
+
+    void VulkanContext::SetSceneDrawData(const void* drawCommands, std::size_t drawCommandCount,
+                                         const float* viewProjection) {
+        m_SceneDrawCommands = drawCommands;
+        m_SceneDrawCommandCount = drawCommandCount;
+        if (viewProjection) {
+            std::memcpy(m_SceneViewProjection, viewProjection, sizeof(m_SceneViewProjection));
+        }
+    }
+
+    void VulkanContext::ClearSceneDrawData() {
+        m_SceneDrawCommands = nullptr;
+        m_SceneDrawCommandCount = 0;
+    }
+
+    void VulkanContext::RecordSceneDraws(VkCommandBuffer cmd) {
+        m_LastDrawnMeshCount = 0;
+
+        if (!m_SceneDrawCommands || m_SceneDrawCommandCount == 0 ||
+            m_MeshPipeline == VK_NULL_HANDLE) {
+            return;
+        }
+
+        const auto* commands = static_cast<const ECS::DrawCommand*>(m_SceneDrawCommands);
+        const glm::mat4 viewProj = glm::make_mat4(m_SceneViewProjection);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipeline);
+
+        for (std::size_t i = 0; i < m_SceneDrawCommandCount; ++i) {
+            const ECS::DrawCommand& command = commands[i];
+            const Renderer::Mesh* mesh = command.Mesh;
+            // Skip anything without GPU buffers rather than issuing a draw that
+            // would read from a null binding.
+            if (!mesh || !mesh->IsUploaded() || mesh->GetUploadedIndexCount() == 0) {
+                continue;
+            }
+
+            const auto* vertexBuffer = static_cast<const VulkanBuffer*>(mesh->vertexBuffer.get());
+            const auto* indexBuffer = static_cast<const VulkanBuffer*>(mesh->indexBuffer.get());
+            if (!vertexBuffer || !indexBuffer) {
+                continue;
+            }
+
+            const glm::mat4 mvp = viewProj * command.Transform;
+            vkCmdPushConstants(cmd, m_MeshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                               0, sizeof(glm::mat4), &mvp[0][0]);
+
+            VkBuffer vertexHandle = vertexBuffer->GetBuffer();
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexHandle, &offset);
+            vkCmdBindIndexBuffer(cmd, indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, mesh->GetUploadedIndexCount(), 1, 0, 0, 0);
+
+            ++m_LastDrawnMeshCount;
+        }
+    }
+
 } // namespace RHI
 } // namespace Core
-

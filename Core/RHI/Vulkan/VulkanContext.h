@@ -64,6 +64,16 @@ namespace RHI {
         VkSemaphore GetRenderFinishedSemaphore() const { return m_RenderFinishedSemaphore; }
         VkFence GetInFlightFence() const { return m_InFlightFence; }
 
+        // Scene rendering ---------------------------------------------------
+        // Queue the draw list produced by ECS::RenderSystem for this frame. Held
+        // by pointer for the duration of DrawFrame only; the caller owns it.
+        // Passing an empty list (or never calling this) falls back to the
+        // placeholder triangle so an empty scene is still visibly alive.
+        void SetSceneDrawData(const void* drawCommands, std::size_t drawCommandCount,
+                              const float* viewProjection);
+        void ClearSceneDrawData();
+        uint32_t GetLastDrawnMeshCount() const { return m_LastDrawnMeshCount; }
+
         VkShaderModule CreateShaderModule(const std::vector<uint32_t>& code);
         void DestroyShaderModule(VkShaderModule shaderModule);
 
@@ -101,6 +111,16 @@ namespace RHI {
         void CreateCommandBuffer();
         void CreateSyncObjects();
         void CleanupSwapchain();
+        // Depth buffer: 3D geometry cannot be rendered correctly without one, and
+        // the context had none. Recreated with the swapchain.
+        void CreateDepthResources();
+        void DestroyDepthResources();
+        VkFormat FindDepthFormat() const;
+        // Pipeline that accepts Renderer::Vertex input and an MVP push constant.
+        // The original pipeline has no vertex input at all - it draws a hard-coded
+        // triangle - so scene geometry needs its own.
+        void CreateMeshPipeline();
+        void RecordSceneDraws(VkCommandBuffer cmd);
         bool IsDeviceSuitable(VkPhysicalDevice device);
         bool CheckDeviceExtensionSupport(VkPhysicalDevice device) const;
         QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device) const;
@@ -128,9 +148,24 @@ namespace RHI {
         std::vector<VkImageView> m_SwapchainImageViews;
         std::vector<VkFramebuffer> m_SwapchainFramebuffers;
 
+        VkImage m_DepthImage = VK_NULL_HANDLE;
+        VmaAllocation m_DepthAllocation = VK_NULL_HANDLE;
+        VkImageView m_DepthImageView = VK_NULL_HANDLE;
+        VkFormat m_DepthFormat = VK_FORMAT_UNDEFINED;
+
         VkRenderPass m_RenderPass = VK_NULL_HANDLE;
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_GraphicsPipeline = VK_NULL_HANDLE;
+        VkPipelineLayout m_MeshPipelineLayout = VK_NULL_HANDLE;
+        VkPipeline m_MeshPipeline = VK_NULL_HANDLE;
+
+        // Scene draw list for the current frame, set by the application.
+        const void* m_SceneDrawCommands = nullptr;
+        std::size_t m_SceneDrawCommandCount = 0;
+        float m_SceneViewProjection[16] = {
+            1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
+        };
+        uint32_t m_LastDrawnMeshCount = 0;
         VkPipelineCache m_PipelineCache = VK_NULL_HANDLE;
         PipelineCacheMetadata m_PipelineCacheMetadata{};
         bool m_FrameMarkerEnabled = false;

@@ -12,6 +12,8 @@
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/SystemPipeline.h"
+#include "Core/ECS/Systems/RenderSystem.h"
+#include "Core/ECS/Systems/CameraSystem.h"
 #include "Core/MCP/MCPServer.h"
 #include "Core/MCP/MCPToolFactory.h"
 #include <thread>
@@ -187,7 +189,26 @@ namespace Core {
             }
 
             if (m_VulkanContext) {
+                // Hand this frame's draw list to the renderer. Before this the
+                // renderer drew a hard-coded triangle and RenderSystem's output
+                // had no consumer at all.
+                const auto* pipeline = m_RuntimeScene ? m_RuntimeScene->GetSystemPipeline() : nullptr;
+                const auto* renderSystem = pipeline ? pipeline->GetRenderSystem() : nullptr;
+                const auto* cameraSystem = pipeline ? pipeline->GetCameraSystem() : nullptr;
+
+                if (renderSystem && cameraSystem) {
+                    const auto& drawCommands = renderSystem->GetDrawCommands();
+                    m_VulkanContext->SetSceneDrawData(
+                        drawCommands.data(),
+                        drawCommands.size(),
+                        &cameraSystem->GetViewProjectionMatrix()[0][0]);
+                } else {
+                    m_VulkanContext->ClearSceneDrawData();
+                }
+
                 m_VulkanContext->DrawFrame();
+                // The draw list is owned by RenderSystem and rebuilt next frame.
+                m_VulkanContext->ClearSceneDrawData();
             }
 
             uiManager.EndFrame();

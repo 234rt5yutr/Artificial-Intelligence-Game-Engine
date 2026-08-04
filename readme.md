@@ -56,6 +56,11 @@ changed:
   steering, and patrol routes actually run.
 - `PostProcessManager` now registers its five passes (SSAO, depth of field,
   motion blur, bloom, color grading); previously the chain was empty at runtime.
+- `VulkanContext::DrawFrame` drew a hard-coded triangle and ignored
+  `RenderSystem`. The renderer is now scene-driven: a depth buffer, a
+  vertex-input pipeline with an MVP push constant, `Mesh::UploadToGPU`, and the
+  `Application` -> `VulkanContext` draw hand-off. The mesh pass is unlit; lights
+  and materials are the next step.
 - `RHI::RHIDevice` had no implementation anywhere in the tree, which is why
   `TerrainSystem`, `FoliageSystem`, and `SkyboxSystem` could not be constructed.
   `Core/RHI/Vulkan/VulkanDevice` now implements it over the existing
