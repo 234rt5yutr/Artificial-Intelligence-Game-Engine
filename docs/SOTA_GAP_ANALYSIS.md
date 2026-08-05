@@ -257,8 +257,12 @@ is harmless — the slot keeps its white placeholder and the factor still applie
 
 **Remaining:** skeletons and animations in the file are still ignored. Multi-material
 meshes import every material but the geometry path shades a whole mesh with one
-index, so only the first is applied. No BCn compression (`stb_dxt` is available
-and unused), so textures cost RGBA8. Images embedded as data URIs are skipped
+index, so only the first is applied. Textures are BC3 block compressed when the device supports it
+(a format-feature query, not a device feature - desktop GPUs all have it, plenty
+of mobile ones do not). Compressed images cannot be blitted, so their mip chain
+is built on the CPU with `stb_image_resize2` and compressed per level with
+`stb_dxt`; sRGB data is resampled through the sRGB entry point, because averaging
+gamma-encoded texels darkens every mip. Images embedded as data URIs are skipped
 (GLB buffer-view images and external files both work). No deterministic cook step
 feeding `AssetCooker`'s existing format, and `TerrainGenerator::LoadHeightmap`
 still generates placeholder data rather than reading an image.
@@ -379,8 +383,7 @@ Also done since:
 
 Remaining, in order:
 
-1. BCn texture compression (`stb_dxt` is available and unused), then glTF
-   skeletons and animations.
+1. glTF skeletons and animations, and per-submesh materials on the geometry path.
 2. Port passes onto the render graph (`PostProcessManager::Execute` is still not
    called from the frame).
 3. Skinned geometry through the GPU-driven path, which needs GPU skinning to

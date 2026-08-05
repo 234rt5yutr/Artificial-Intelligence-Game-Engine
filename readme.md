@@ -280,8 +280,8 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
   shadows on it costs more than the memory it saves.
 - Point-light cube shadows are capped at two lights, because the uniform block
   carries six matrices each.
-- No texture compression: images upload as RGBA8 with mips. `stb_dxt` is
-  available for a BCn cook step but nothing calls it.
+- Texture compression is BC3 only. BC7 would look better at the same size but
+  needs a different encoder than the one already vendored.
 - glTF skeletons and animations are ignored. A multi-material mesh imports every
   material, but the geometry path shades a whole mesh with one index, so only the
   first is applied.

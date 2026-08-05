@@ -36,6 +36,9 @@ namespace Renderer {
         // metallic are linear data and must not be gamma-decoded on sample.
         bool SRGB = true;
         uint64_t SizeBytes = 0;
+        // What the source would have cost as RGBA8, so the saving is reportable.
+        uint64_t UncompressedBytes = 0;
+        bool Compressed = false;
     };
 
     struct TextureImportOptions {
@@ -46,12 +49,19 @@ namespace Renderer {
         bool GenerateMips = true;
         // Repeat suits tiling surface maps; clamp suits UI and lookup tables.
         bool Repeat = true;
+        // BC3 block compression: a quarter of the memory of RGBA8 and cheaper to
+        // sample. Ignored when the device does not support BC, which is the case
+        // on most mobile GPUs.
+        bool Compress = true;
     };
 
     struct TextureLibraryStats {
         uint32_t TextureCount = 0;
         uint64_t TotalBytes = 0;
+        uint64_t UncompressedBytes = 0;
+        uint32_t CompressedTextures = 0;
         uint32_t FailedLoads = 0;
+        bool BlockCompressionSupported = false;
     };
 
     class TextureLibrary {
@@ -102,6 +112,10 @@ namespace Renderer {
         // Uploads through a staging buffer and blits the mip chain. Returns
         // false and leaves nothing registered on failure.
         bool UploadTexture(GpuTexture& texture, const uint8_t* pixels, const TextureImportOptions& options);
+        // Compressed textures cannot be blitted, so their mips are built on the
+        // CPU, compressed per level, and uploaded as one staging buffer.
+        bool UploadCompressedTexture(GpuTexture& texture, const uint8_t* pixels,
+                                     const TextureImportOptions& options);
 
         RHI::VulkanContext* m_Context = nullptr;
         std::vector<GpuTexture> m_Textures;
@@ -109,6 +123,7 @@ namespace Renderer {
         VkSampler m_RepeatSampler = VK_NULL_HANDLE;
         VkSampler m_ClampSampler = VK_NULL_HANDLE;
         uint64_t m_Revision = 0;
+        bool m_SupportsBlockCompression = false;
         TextureLibraryStats m_Stats{};
     };
 

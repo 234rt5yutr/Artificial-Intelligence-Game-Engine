@@ -194,6 +194,10 @@ namespace MCP {
             schema.Properties["repeat"] = Json{
                 {"type", "boolean"},
                 {"description", "Repeat addressing for tiling maps; false clamps to edge."}};
+            schema.Properties["compress"] = Json{
+                {"type", "boolean"},
+                {"description", "BC3 block compression: a quarter of the memory of RGBA8. "
+                                "Ignored on devices without BC support."}};
             schema.Required = {"name", "path"};
             return schema;
         }
@@ -226,6 +230,7 @@ namespace MCP {
             options.SRGB = arguments.value("srgb", true);
             options.GenerateMips = arguments.value("generateMips", true);
             options.Repeat = arguments.value("repeat", true);
+            options.Compress = arguments.value("compress", true);
 
             const std::string name = arguments["name"].get<std::string>();
             const uint32_t index = library.LoadFromFile(name, resolved.string(), options);
@@ -243,6 +248,8 @@ namespace MCP {
             state["mipLevels"] = texture->MipLevels;
             state["srgb"] = texture->SRGB;
             state["bytes"] = texture->SizeBytes;
+            state["uncompressedBytes"] = texture->UncompressedBytes;
+            state["compressed"] = texture->Compressed;
             return ToolResult::Success(
                 "Texture imported; materials with a matching slot name rebind next frame", state);
         }
@@ -288,6 +295,8 @@ namespace MCP {
                 entry["mipLevels"] = all[i].MipLevels;
                 entry["srgb"] = all[i].SRGB;
                 entry["bytes"] = all[i].SizeBytes;
+                entry["uncompressedBytes"] = all[i].UncompressedBytes;
+                entry["compressed"] = all[i].Compressed;
                 if (!all[i].SourcePath.empty()) {
                     entry["source"] = all[i].SourcePath;
                 }
@@ -299,6 +308,9 @@ namespace MCP {
             report["initialized"] = library.IsInitialized();
             report["revision"] = library.GetRevision();
             report["totalBytes"] = stats.TotalBytes;
+            report["uncompressedBytes"] = stats.UncompressedBytes;
+            report["compressedTextures"] = stats.CompressedTextures;
+            report["blockCompressionSupported"] = stats.BlockCompressionSupported;
             report["failedLoads"] = stats.FailedLoads;
             report["textures"] = textures;
             return ToolResult::SuccessJson(report);
