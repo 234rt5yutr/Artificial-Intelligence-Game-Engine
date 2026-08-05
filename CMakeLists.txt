@@ -439,6 +439,8 @@ add_library(EngineCore
     Core/Renderer/PostProcess/PostProcessPass.h
     Core/Renderer/PostProcess/FramebufferChain.h
     Core/Renderer/PostProcess/FramebufferChain.cpp
+    Core/Renderer/PostProcess/ComputeBloom.h
+    Core/Renderer/PostProcess/ComputeBloom.cpp
     Core/Renderer/PostProcess/PostProcessManager.h
     Core/Renderer/PostProcess/PostProcessManager.cpp
     Core/Renderer/PostProcess/BloomPass.h

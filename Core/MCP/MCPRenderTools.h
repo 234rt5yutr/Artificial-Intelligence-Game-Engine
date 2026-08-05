@@ -130,6 +130,7 @@ namespace MCP {
             draws["skippedDraws"] = stats.SkippedDraws;
             draws["gpuDrivenActive"] = stats.GPUDrivenActive;
             draws["materialPipelines"] = stats.MaterialPipelines;
+            draws["postProcessActive"] = stats.PostProcessActive;
             report["draws"] = draws;
 
             Json culling;
@@ -699,6 +700,81 @@ namespace MCP {
     };
 
     // ========================================================================
+    // SetPostProcess - bloom
+    // ========================================================================
+    class SetPostProcessTool : public MCPTool {
+    public:
+        SetPostProcessTool()
+            : MCPTool("SetPostProcess",
+                      "Tune post-processing. Bloom runs as compute passes on the HDR scene "
+                      "before upscaling: a soft-knee threshold, then a progressive blur down "
+                      "and back up a mip chain. The older PostProcessManager passes (SSAO, "
+                      "depth of field, motion blur, colour grading) are registered but cannot "
+                      "run - they never write their descriptor sets - so only bloom responds "
+                      "here.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set Post Process";
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["bloom"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Run the bloom chain.");
+            schema.Properties["bloomThreshold"] = RenderToolsDetail::NumberProperty(
+                "Luminance above which a pixel blooms.", 0.0, 16.0);
+            schema.Properties["bloomIntensity"] = RenderToolsDetail::NumberProperty(
+                "How strongly the glow is added back over the scene.", 0.0, 8.0);
+            schema.Properties["bloomSoftKnee"] = RenderToolsDetail::NumberProperty(
+                "Softness of the threshold. 0 is a hard cutoff, which flickers in motion.", 0.0, 1.0);
+            schema.Properties["bloomScatter"] = RenderToolsDetail::NumberProperty(
+                "How far the glow spreads during upsampling.", 0.1, 4.0);
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+            auto& settings = renderer->GetPostProcessSettings();
+
+            if (arguments.contains("bloom") && arguments["bloom"].is_boolean()) {
+                settings.bloomEnabled = arguments["bloom"].get<bool>();
+            }
+            if (arguments.contains("bloomThreshold") && arguments["bloomThreshold"].is_number()) {
+                settings.bloomThreshold = std::clamp(arguments["bloomThreshold"].get<float>(), 0.0f, 16.0f);
+            }
+            if (arguments.contains("bloomIntensity") && arguments["bloomIntensity"].is_number()) {
+                settings.bloomIntensity = std::clamp(arguments["bloomIntensity"].get<float>(), 0.0f, 8.0f);
+            }
+            if (arguments.contains("bloomSoftKnee") && arguments["bloomSoftKnee"].is_number()) {
+                settings.bloomSoftKnee = std::clamp(arguments["bloomSoftKnee"].get<float>(), 0.0f, 1.0f);
+            }
+            if (arguments.contains("bloomScatter") && arguments["bloomScatter"].is_number()) {
+                settings.bloomScatter = std::clamp(arguments["bloomScatter"].get<float>(), 0.1f, 4.0f);
+            }
+
+            const auto& stats = renderer->GetBloom().GetStats();
+            Json state;
+            state["bloom"] = settings.bloomEnabled;
+            state["bloomThreshold"] = settings.bloomThreshold;
+            state["bloomIntensity"] = settings.bloomIntensity;
+            state["bloomSoftKnee"] = settings.bloomSoftKnee;
+            state["bloomScatter"] = settings.bloomScatter;
+            state["mipCount"] = stats.MipCount;
+            state["active"] = stats.Active;
+            return ToolResult::Success("Post-process settings updated", state);
+        }
+    };
+
+    // ========================================================================
     // ListMaterials
     // ========================================================================
     class ListMaterialsTool : public MCPTool {
@@ -1028,6 +1104,7 @@ namespace MCP {
         tools.push_back(std::make_shared<SetGlobalIlluminationTool>());
         tools.push_back(std::make_shared<SetUpscalerTool>());
         tools.push_back(std::make_shared<SetShadowsTool>());
+        tools.push_back(std::make_shared<SetPostProcessTool>());
         tools.push_back(std::make_shared<ListMaterialsTool>());
         tools.push_back(std::make_shared<SetMaterialGraphTool>());
         tools.push_back(std::make_shared<GetMaterialGraphTool>());

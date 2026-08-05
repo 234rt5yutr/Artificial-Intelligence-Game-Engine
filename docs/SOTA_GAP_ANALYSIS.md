@@ -106,7 +106,7 @@ placement and transient-memory aliasing.
 **Missing:** port each pass to `RegisterRenderGraphPass` and execute one graph per
 frame.
 
-### 1.4 Post-process passes are now registered
+### 1.4 Post-process passes: registered, and mostly unable to run
 
 `BloomPass`, `SSAOPass`, `DepthOfFieldPass`, `MotionBlurPass`, and
 `ColorGradingPass` compiled but `PostProcessManager` never instantiated any of
@@ -114,8 +114,31 @@ them, so the chain was empty at runtime regardless of settings.
 `PostProcessManager::RegisterDefaultPasses()` now builds the chain in execution
 order (occlusion -> depth of field -> motion blur -> bloom -> grading).
 
-Remaining: the passes are registered but `PostProcessManager::Execute` is not yet
-called from the frame, because the renderer is still not scene-driven (1.1).
+Calling `PostProcessManager::Execute` from the frame was tried, and it segfaults
+on the first frame. The reason is structural, not a small bug:
+
+- `SSAOPass`, `BloomPass`, `DepthOfFieldPass`, and `MotionBlurPass` contain **no
+  `vkUpdateDescriptorSets` call anywhere**. Their descriptor sets are allocated
+  and never written, and binding an unwritten set is what crashes. Only
+  `ColorGradingPass` writes one.
+- SSAO and depth of field could not work even with that fixed: `PostProcessPass`
+  has no parameter through which to receive the depth buffer. `SSAOPass` has a
+  `SetDepthView` that nothing calls, and `PostProcessManager::Execute` explicitly
+  discards the `sceneDepthInput` it is handed (`(void)sceneDepthInput;`).
+
+Bloom - the one effect that needs only scene colour - is instead implemented as
+compute passes in the path the rest of the frame uses
+(`Core/Renderer/PostProcess/ComputeBloom.*`): soft-knee threshold, 13-tap
+downsample down a five-mip chain, tent-filter upsample back up, composited into a
+separate output so the scene image is never both read and written. It runs before
+upscaling, because bloom is a scene-space effect and running it after FSR would
+cost more and smear what FSR just reconstructed.
+
+**Remaining:** SSAO, depth of field, motion blur, and colour grading. All four
+need `PostProcessPass` widened to receive scene inputs, and all four need their
+descriptor sets written. The G-buffer already carries the depth and normals SSAO
+and DoF want; motion blur additionally needs a velocity buffer, which nothing
+produces.
 
 ---
 

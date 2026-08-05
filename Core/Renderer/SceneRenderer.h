@@ -24,7 +24,9 @@
 #include "Core/Renderer/GI/DynamicGlobalIllumination.h"
 #include "Core/Renderer/GPUDriven/GPUDrivenCuller.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
+#include "Core/ECS/Components/PostProcessComponent.h"
 #include "Core/Renderer/Lighting/ClusteredLightCuller.h"
+#include "Core/Renderer/PostProcess/ComputeBloom.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
 #include "Core/Renderer/Textures/TextureLibrary.h"
 #include "Core/Renderer/Upscaling/FSRUpscaler.h"
@@ -52,6 +54,10 @@ namespace Renderer {
         Math::Vec3 CameraPosition{0.0f};
         float TimeSeconds = 0.0f;
         uint64_t FrameIndex = 0;
+        // Copied from the scene's active post-process volume, or left at its
+        // defaults when the scene has none.
+        ECS::PostProcessSettings PostProcess{};
+        bool PostProcessEnabled = true;
 
         void Clear() {
             DrawCommands.clear();
@@ -70,6 +76,8 @@ namespace Renderer {
         uint32_t DirectDraws = 0;        // meshes that fell back to a per-mesh draw
         uint32_t SkippedDraws = 0;
         uint32_t MaterialPipelines = 0;
+        uint32_t PostProcessPasses = 0;
+        bool PostProcessActive = false;
         uint32_t DirectionalLights = 0;
         uint32_t PointLights = 0;
         uint32_t SpotLights = 0;
@@ -111,6 +119,12 @@ namespace Renderer {
 
         ShadowRenderer& GetShadowRenderer() { return m_Shadows; }
         ClusteredLightCuller& GetLightCuller() { return m_LightCuller; }
+        ComputeBloom& GetBloom() { return m_Bloom; }
+        // Renderer-owned rather than per-frame: nothing in the ECS drives these
+        // yet, and a tool that sets them should not have its change overwritten
+        // by the next frame packet.
+        ECS::PostProcessSettings& GetPostProcessSettings() { return m_PostProcessSettings; }
+        const ECS::PostProcessSettings& GetPostProcessSettings() const { return m_PostProcessSettings; }
         GPUScene& GetGPUScene() { return m_GPUScene; }
         GPUDrivenCuller& GetCuller() { return m_Culler; }
         DynamicGlobalIllumination& GetGlobalIllumination() { return m_GI; }
@@ -239,6 +253,13 @@ namespace Renderer {
         GPUDrivenCuller m_Culler;
         ShadowRenderer m_Shadows;
         ClusteredLightCuller m_LightCuller;
+        ComputeBloom m_Bloom;
+        ECS::PostProcessSettings m_PostProcessSettings{};
+        // False until the chain runs at least once; the upscaler reads the
+        // resolved image directly until then.
+        bool m_PostProcessRanThisFrame = false;
+        // What the upscaler and composite should read this frame.
+        VkImageView m_UpscaleSourceView = VK_NULL_HANDLE;
         // Rebuilt each frame from the frame's point and spot lights, already
         // carrying their shadow slots, then uploaded to the cull pass.
         std::vector<GpuPunctualLight> m_PunctualLights;

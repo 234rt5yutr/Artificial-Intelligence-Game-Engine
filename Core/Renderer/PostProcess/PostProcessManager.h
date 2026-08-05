@@ -41,6 +41,11 @@ namespace Renderer {
         VkSampler GetLinearSampler() const { return m_LinearSampler; }
         VkSampler GetNearestSampler() const { return m_NearestSampler; }
 
+        // Whether the last Execute ran any pass at all. Without this a caller
+        // cannot tell "the chain produced an image" from "every pass was
+        // disabled and the chain handed back an untouched buffer".
+        bool RanAnyPass() const { return m_RanAnyPass; }
+
         // Query
         size_t GetPassCount() const { return m_Passes.size(); }
         PostProcessPass* GetPass(size_t index) const;
@@ -55,6 +60,7 @@ namespace Renderer {
         void CreateRenderPass();
         void CreateSamplers();
 
+        bool m_RanAnyPass = false;
         VkDevice m_Device = VK_NULL_HANDLE;
         VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
         VkExtent2D m_Extent{};

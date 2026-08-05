@@ -547,6 +547,10 @@ void main() {
             m_GPUDrivenEnabled = false;
         }
 
+        if (!m_Bloom.Initialize(context)) {
+            ENGINE_CORE_WARN("Compute bloom unavailable; the frame presents without it");
+        }
+
         if (!m_LightCuller.Initialize(context)) {
             ENGINE_CORE_WARN("Clustered light culling unavailable; punctual lights will not render");
         }
@@ -1087,6 +1091,11 @@ void main() {
 
         m_Culler.Resize(renderWidth, renderHeight);
         m_LightCuller.Resize(renderWidth, renderHeight);
+
+        // Post-processing runs at render resolution, before upscaling: bloom is a
+        // scene-space effect, and running it after the upscale would both cost
+        // more and smear what FSR just reconstructed.
+        m_Bloom.Resize(renderWidth, renderHeight);
         m_GI.Resize(renderWidth, renderHeight);
         m_FSR.Resize(renderWidth, renderHeight, m_DisplayWidth, m_DisplayHeight);
 
@@ -2044,9 +2053,33 @@ void main() {
             RHI::TransitionImage(cmd, m_Resolved, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
+        // Bloom, in the compute path the rest of the frame uses.
+        //
+        // `PostProcess/PostProcessManager` registers five passes and none of
+        // them can run: SSAOPass, BloomPass, DepthOfFieldPass, and
+        // MotionBlurPass contain no vkUpdateDescriptorSets call at all, so their
+        // descriptor sets are never written, and binding one crashes. SSAO and
+        // DoF could not work regardless - PostProcessPass has no way to receive
+        // the depth buffer, and the manager discards the sceneDepthInput it is
+        // handed. Wiring that chain in was tried and segfaulted on the first
+        // frame; fixing it is a port of five never-run passes, recorded in the
+        // gap analysis rather than half-done here.
+        m_PostProcessRanThisFrame = false;
+        VkImageView upscaleSource = m_Resolved.View;
+        if (m_Bloom.IsInitialized() && m_PostProcessSettings.bloomEnabled) {
+            m_Bloom.Render(cmd, m_Resolved, m_PostProcessSettings);
+            if (m_Bloom.GetStats().Active) {
+                upscaleSource = m_Bloom.GetOutputView();
+                m_PostProcessRanThisFrame = true;
+            }
+        }
+        m_Stats.PostProcessActive = m_PostProcessRanThisFrame;
+        m_Stats.PostProcessPasses = m_PostProcessRanThisFrame ? 1u : 0u;
+        m_UpscaleSourceView = upscaleSource;
+
         if (m_FSR.IsInitialized() && m_FSR.GetSettings().Enabled &&
             m_FSR.GetSettings().Quality != FSRQualityMode::Off) {
-            m_FSR.Render(cmd, m_Resolved.View, m_LinearSampler);
+            m_FSR.Render(cmd, upscaleSource, m_LinearSampler);
         }
 
         m_PreviousViewProjection = m_Frame.ViewProjection;
@@ -2056,7 +2089,9 @@ void main() {
         if (m_FSR.GetStats().Active) {
             return m_FSR.GetOutputView();
         }
-        return m_Resolved.View;
+        // With the upscaler off, the composite reads whatever the post chain
+        // last wrote - or the resolved image when it did nothing.
+        return m_UpscaleSourceView != VK_NULL_HANDLE ? m_UpscaleSourceView : m_Resolved.View;
     }
 
     void SceneRenderer::RecordComposite(VkCommandBuffer cmd) {
@@ -2121,6 +2156,7 @@ void main() {
         VkDevice device = m_Context->GetDevice();
         vkDeviceWaitIdle(device);
 
+        m_Bloom.Shutdown();
         m_FSR.Shutdown();
         m_GI.Shutdown();
         m_Shadows.Shutdown();

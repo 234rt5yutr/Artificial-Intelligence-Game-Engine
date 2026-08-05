@@ -177,11 +177,13 @@ namespace Renderer {
 
         m_FramebufferChain.SetExternalInput(sceneColorInput);
         m_FramebufferChain.ResetIndex();
+        m_RanAnyPass = false;
 
         for (auto& pass : m_Passes) {
             if (pass->IsEnabled(settings)) {
                 pass->Execute(cmd, m_FramebufferChain, settings);
                 m_FramebufferChain.Swap();
+                m_RanAnyPass = true;
             }
         }
     }
