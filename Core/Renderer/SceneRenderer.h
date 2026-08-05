@@ -24,6 +24,7 @@
 #include "Core/Renderer/GI/DynamicGlobalIllumination.h"
 #include "Core/Renderer/GPUDriven/GPUDrivenCuller.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
+#include "Core/Renderer/Lighting/ClusteredLightCuller.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
 #include "Core/Renderer/Textures/TextureLibrary.h"
 #include "Core/Renderer/Upscaling/FSRUpscaler.h"
@@ -72,6 +73,7 @@ namespace Renderer {
         uint32_t DirectionalLights = 0;
         uint32_t PointLights = 0;
         uint32_t SpotLights = 0;
+        uint32_t PunctualLights = 0;
         bool GPUDrivenActive = false;
     };
 
@@ -108,6 +110,7 @@ namespace Renderer {
         VkSampler GetViewportSampler() const { return m_LinearSampler; }
 
         ShadowRenderer& GetShadowRenderer() { return m_Shadows; }
+        ClusteredLightCuller& GetLightCuller() { return m_LightCuller; }
         GPUScene& GetGPUScene() { return m_GPUScene; }
         GPUDrivenCuller& GetCuller() { return m_Culler; }
         DynamicGlobalIllumination& GetGlobalIllumination() { return m_GI; }
@@ -133,23 +136,21 @@ namespace Renderer {
             Math::Vec4 AmbientColor;
             Math::Vec4 DirectionalDirection[4];
             Math::Vec4 DirectionalColor[4];
-            Math::Vec4 PointPositionRadius[16];
-            Math::Vec4 PointColorIntensity[16];
             Math::UVec4 LightCounts;
             float TimeSeconds;
             float Pad0;
             float Pad1;
             float Pad2;
-            Math::Vec4 SpotPositionRadius[kMaxSpotShadows];
-            Math::Vec4 SpotDirectionInner[kMaxSpotShadows];   // xyz dir, w cos(inner)
-            Math::Vec4 SpotColorOuter[kMaxSpotShadows];       // rgb colour, w cos(outer)
-            // x = intensity, y = atlas slot (-1 = lit but unshadowed)
-            Math::Vec4 SpotIntensitySlot[kMaxSpotShadows];
+            // Punctual lights moved to a storage buffer culled per froxel; only
+            // the shadow matrices, which are few and indexed by slot, stay here.
             Math::Mat4 SpotShadowMatrix[kMaxSpotShadows];
             // Six faces per point light, laid out flat. x of PointBaseTile is
             // the first atlas tile of the cube, y is -1 when the light has none.
             Math::Mat4 PointShadowMatrix[kMaxPointShadows * kCubeFaceCount];
-            Math::Vec4 PointShadowSlotInfo[16];   // x = base tile, y = matrix base, z = has shadow
+            // xyz = grid dimensions, w = tile size
+            Math::Vec4 LightGridParams;
+            // x = z-slice scale, y = z-slice bias, z = near, w = far
+            Math::Vec4 LightDepthParams;
             // xy = atlas size, z = tile size, w = 1 / atlas size
             Math::Vec4 AtlasParams;
             Math::Mat4 CascadeViewProjection[kMaxShadowCascades];
@@ -237,6 +238,10 @@ namespace Renderer {
         GPUScene m_GPUScene;
         GPUDrivenCuller m_Culler;
         ShadowRenderer m_Shadows;
+        ClusteredLightCuller m_LightCuller;
+        // Rebuilt each frame from the frame's point and spot lights, already
+        // carrying their shadow slots, then uploaded to the cull pass.
+        std::vector<GpuPunctualLight> m_PunctualLights;
         DynamicGlobalIllumination m_GI;
         FSRUpscaler m_FSR;
 

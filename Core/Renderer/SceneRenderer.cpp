@@ -37,20 +37,15 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     vec4 AmbientColor;
     vec4 DirectionalDirection[4];
     vec4 DirectionalColor[4];
-    vec4 PointPositionRadius[16];
-    vec4 PointColorIntensity[16];
     uvec4 LightCounts;
     float TimeSeconds;
     float Pad0;
     float Pad1;
     float Pad2;
-    vec4 SpotPositionRadius[8];
-    vec4 SpotDirectionInner[8];
-    vec4 SpotColorOuter[8];
-    vec4 SpotIntensitySlot[8];
     mat4 SpotShadowMatrix[8];
     mat4 PointShadowMatrix[12];
-    vec4 PointShadowSlotInfo[16];
+    vec4 LightGridParams;
+    vec4 LightDepthParams;
     vec4 AtlasParams;
     mat4 CascadeViewProjection[4];
     vec4 CascadeSplits;
@@ -128,6 +123,18 @@ layout(set = 1, binding = 0) uniform sampler2D uMaterialTextures[8];
 layout(set = 0, binding = 2) uniform sampler2DArrayShadow uCascadeShadow;
 layout(set = 0, binding = 3) uniform sampler2DShadow uShadowAtlas;
 
+// Punctual lights live in a storage buffer culled into froxels, so the shader
+// has no fixed light cap and each pixel tests only the lights that reach it.
+struct PunctualLight {
+    vec4 positionRadius;
+    vec4 colorIntensity;
+    vec4 directionCosInner;
+    vec4 coneShadowParams;   // x cos(outer), y type, z shadow slot, w cube matrix base
+};
+layout(std430, set = 0, binding = 4) readonly buffer Lights  { PunctualLight uLights[]; };
+layout(std430, set = 0, binding = 5) readonly buffer Grid    { uvec2 uLightGrid[]; };
+layout(std430, set = 0, binding = 6) readonly buffer Indices { uint uLightIndices[]; };
+
 // One atlas tile lookup, shared by spot and point-cube shadows: project, clamp
 // inside the tile, then PCF. The projection differs; everything after it does
 // not.
@@ -184,9 +191,9 @@ float SampleSpotShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightDirection
 // A point light casts in every direction, so it owns six contiguous tiles. The
 // face is picked by the major axis of the light-to-fragment vector, which is
 // uniform across most of a triangle and so costs little despite being a branch.
-float SamplePointShadow(int lightIndex, vec3 worldPos, vec3 normal, vec3 lightPosition) {
-    vec4 info = uMaterial.PointShadowSlotInfo[lightIndex];
-    if (info.z < 0.5) {
+float SamplePointShadow(int baseTile, int matrixBase, vec3 worldPos, vec3 normal,
+                       vec3 lightPosition) {
+    if (baseTile < 0) {
         return 1.0;
     }
 
@@ -202,8 +209,8 @@ float SamplePointShadow(int lightIndex, vec3 worldPos, vec3 normal, vec3 lightPo
     }
 
     vec3 lightDirection = normalize(-toFragment);
-    return SampleAtlasTile(uMaterial.PointShadowMatrix[int(info.y) + face],
-                           int(info.x) + face,
+    return SampleAtlasTile(uMaterial.PointShadowMatrix[matrixBase + face],
+                           baseTile + face,
                            ShadowOffsetPosition(worldPos, normal, lightDirection));
 }
 
@@ -338,51 +345,61 @@ void main() {
         float shadow = (int(i) == shadowLight) ? SampleShadow(inWorldPos, n, l) : 1.0;
         direct += ShadeLight(n, v, l, radiance, surf, f0) * shadow;
     }
-    for (uint i = 0u; i < min(uMaterial.LightCounts.y, 16u); ++i) {
-        vec3 toLight = uMaterial.PointPositionRadius[i].xyz - inWorldPos;
-        float distance = length(toLight);
-        float radius = max(uMaterial.PointPositionRadius[i].w, 1e-3);
-        if (distance > radius) {
-            continue;
+    // Froxel lookup: map this fragment to its cluster, then walk only that
+    // cluster's light list. This is what removes the fixed light cap - the loop
+    // bound is now how many lights actually reach this pixel.
+    {
+        float viewDepth = -(uMaterial.View * vec4(inWorldPos, 1.0)).z;
+        uvec3 gridSize = uvec3(uMaterial.LightGridParams.xyz);
+        float tileSize = max(uMaterial.LightGridParams.w, 1.0);
+
+        uint slice = uint(clamp(log(max(viewDepth, 1e-4)) * uMaterial.LightDepthParams.x +
+                                uMaterial.LightDepthParams.y,
+                                0.0, float(gridSize.z) - 1.0));
+        uvec2 tile = uvec2(clamp(gl_FragCoord.xy / tileSize,
+                                 vec2(0.0), vec2(gridSize.xy) - vec2(1.0)));
+        uint cluster = tile.x + tile.y * gridSize.x + slice * gridSize.x * gridSize.y;
+
+        uvec2 gridEntry = uLightGrid[cluster];
+        for (uint entry = 0u; entry < gridEntry.y; ++entry) {
+            PunctualLight light = uLights[uLightIndices[gridEntry.x + entry]];
+
+            vec3 toLight = light.positionRadius.xyz - inWorldPos;
+            float distance = length(toLight);
+            float radius = max(light.positionRadius.w, 1e-3);
+            if (distance > radius) {
+                continue;
+            }
+            vec3 l = toLight / max(distance, 1e-5);
+
+            // Inverse-square with a smooth window at the radius, so a light
+            // never pops when an object crosses its bound.
+            float attenuation = 1.0 / max(distance * distance, 1e-4);
+            float window = clamp(1.0 - pow(distance / radius, 4.0), 0.0, 1.0);
+            float falloff = attenuation * window * window;
+
+            int shadowSlot = int(light.coneShadowParams.z);
+            float shadow = 1.0;
+
+            if (light.coneShadowParams.y > 0.5) {
+                // Spot: cone falloff between the inner and outer half-angles.
+                float cosAngle = dot(-l, normalize(light.directionCosInner.xyz));
+                float cosInner = light.directionCosInner.w;
+                float cosOuter = light.coneShadowParams.x;
+                float cone = clamp((cosAngle - cosOuter) / max(cosInner - cosOuter, 1e-4), 0.0, 1.0);
+                if (cone <= 0.0) {
+                    continue;
+                }
+                falloff *= cone * cone;
+                shadow = SampleSpotShadow(shadowSlot, inWorldPos, n, l);
+            } else {
+                shadow = SamplePointShadow(shadowSlot, int(light.coneShadowParams.w),
+                                           inWorldPos, n, light.positionRadius.xyz);
+            }
+
+            vec3 radiance = light.colorIntensity.rgb * light.colorIntensity.w * falloff;
+            direct += ShadeLight(n, v, l, radiance, surf, f0) * shadow;
         }
-        // Inverse-square with a smooth window at the radius, so a light never
-        // pops when an object crosses its bound.
-        float attenuation = 1.0 / max(distance * distance, 1e-4);
-        float window = clamp(1.0 - pow(distance / radius, 4.0), 0.0, 1.0);
-        vec3 radiance = uMaterial.PointColorIntensity[i].rgb *
-                        uMaterial.PointColorIntensity[i].w * attenuation * window * window;
-        float shadow = SamplePointShadow(int(i), inWorldPos, n,
-                                         uMaterial.PointPositionRadius[i].xyz);
-        direct += ShadeLight(n, v, toLight / max(distance, 1e-5), radiance, surf, f0) * shadow;
-    }
-
-    // Spot lights were collected by LightSystem and never uploaded, so they
-    // emitted nothing at all until now.
-    for (uint i = 0u; i < min(uMaterial.LightCounts.z, 8u); ++i) {
-        vec3 toLight = uMaterial.SpotPositionRadius[i].xyz - inWorldPos;
-        float distance = length(toLight);
-        float radius = max(uMaterial.SpotPositionRadius[i].w, 1e-3);
-        if (distance > radius) {
-            continue;
-        }
-        vec3 l = toLight / max(distance, 1e-5);
-
-        // Cone falloff, smooth between the inner and outer half-angles.
-        float cosAngle = dot(-l, normalize(uMaterial.SpotDirectionInner[i].xyz));
-        float cosInner = uMaterial.SpotDirectionInner[i].w;
-        float cosOuter = uMaterial.SpotColorOuter[i].w;
-        float cone = clamp((cosAngle - cosOuter) / max(cosInner - cosOuter, 1e-4), 0.0, 1.0);
-        if (cone <= 0.0) {
-            continue;
-        }
-
-        float attenuation = 1.0 / max(distance * distance, 1e-4);
-        float window = clamp(1.0 - pow(distance / radius, 4.0), 0.0, 1.0);
-        vec3 radiance = uMaterial.SpotColorOuter[i].rgb * uMaterial.SpotIntensitySlot[i].x *
-                        attenuation * window * window * cone * cone;
-
-        float shadow = SampleSpotShadow(int(uMaterial.SpotIntensitySlot[i].y), inWorldPos, n, l);
-        direct += ShadeLight(n, v, l, radiance, surf, f0) * shadow;
     }
 
     // A small constant ambient keeps unlit scenes readable. Indirect light is
@@ -530,6 +547,10 @@ void main() {
             m_GPUDrivenEnabled = false;
         }
 
+        if (!m_LightCuller.Initialize(context)) {
+            ENGINE_CORE_WARN("Clustered light culling unavailable; punctual lights will not render");
+        }
+
         if (!TextureLibrary::Get().Initialize(context)) {
             ENGINE_CORE_WARN("Texture library unavailable; materials keep the white placeholder");
         }
@@ -591,7 +612,7 @@ void main() {
         }
 
         // Set 0: scene uniforms + the instance transforms the indirect draws index.
-        VkDescriptorSetLayoutBinding sceneBindings[4]{};
+        VkDescriptorSetLayoutBinding sceneBindings[7]{};
         sceneBindings[0].binding = 0;
         sceneBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         sceneBindings[0].descriptorCount = 1;
@@ -608,10 +629,18 @@ void main() {
         sceneBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         sceneBindings[3].descriptorCount = 1;
         sceneBindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        // The clustered light list: lights, the per-froxel grid, and the index
+        // list the grid points into.
+        for (uint32_t binding = 4; binding <= 6; ++binding) {
+            sceneBindings[binding].binding = binding;
+            sceneBindings[binding].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            sceneBindings[binding].descriptorCount = 1;
+            sceneBindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        }
 
         VkDescriptorSetLayoutCreateInfo sceneLayoutInfo{};
         sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        sceneLayoutInfo.bindingCount = 4;
+        sceneLayoutInfo.bindingCount = 7;
         sceneLayoutInfo.pBindings = sceneBindings;
         if (vkCreateDescriptorSetLayout(device, &sceneLayoutInfo, nullptr, &m_SceneSetLayout) != VK_SUCCESS) {
             return false;
@@ -662,7 +691,7 @@ void main() {
 
         const VkDescriptorPoolSize poolSizes[] = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8},
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxMaterialTextures + 12},
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2},
         };
@@ -1057,6 +1086,7 @@ void main() {
         }
 
         m_Culler.Resize(renderWidth, renderHeight);
+        m_LightCuller.Resize(renderWidth, renderHeight);
         m_GI.Resize(renderWidth, renderHeight);
         m_FSR.Resize(renderWidth, renderHeight, m_DisplayWidth, m_DisplayHeight);
 
@@ -1493,47 +1523,21 @@ void main() {
             uniforms.DirectionalColor[i] = Math::Vec4(light.Color, light.Intensity);
         }
 
-        const uint32_t pointCount =
-            std::min<uint32_t>(16, static_cast<uint32_t>(frame.PointLights.size()));
-        for (uint32_t i = 0; i < pointCount; ++i) {
-            const auto& light = frame.PointLights[i];
-            uniforms.PointPositionRadius[i] = Math::Vec4(light.Position, light.Radius);
-            uniforms.PointColorIntensity[i] = Math::Vec4(light.Color, light.Intensity);
-        }
-        const uint32_t spotCount =
-            std::min<uint32_t>(kMaxSpotShadows, static_cast<uint32_t>(frame.SpotLights.size()));
-        // Which spot lights got an atlas tile this frame. Lights without one are
-        // still lit, just unshadowed.
-        int32_t slotForLight[kMaxSpotShadows];
-        std::fill(std::begin(slotForLight), std::end(slotForLight), -1);
-        const auto& spotSlots = m_Shadows.GetSpotSlots();
-        for (std::size_t slot = 0; slot < spotSlots.size(); ++slot) {
-            const int32_t lightIndex = spotSlots[slot].LightIndex;
-            if (lightIndex >= 0 && lightIndex < static_cast<int32_t>(kMaxSpotShadows)) {
-                slotForLight[lightIndex] = static_cast<int32_t>(slot);
-                uniforms.SpotShadowMatrix[slot] = spotSlots[slot].ViewProjection;
-            }
-        }
+        // Punctual lights are packed for the cull pass rather than into fixed
+        // uniform arrays, which is what lifts the old 16-point/8-spot ceiling.
+        // Shadow slots are resolved first so each light carries its own.
+        constexpr uint32_t kShadowSlotLookup = 64;
+        int32_t pointTileForLight[kShadowSlotLookup];
+        int32_t pointMatrixForLight[kShadowSlotLookup];
+        int32_t spotTileForLight[kShadowSlotLookup];
+        std::fill(std::begin(pointTileForLight), std::end(pointTileForLight), -1);
+        std::fill(std::begin(pointMatrixForLight), std::end(pointMatrixForLight), 0);
+        std::fill(std::begin(spotTileForLight), std::end(spotTileForLight), -1);
 
-        for (uint32_t i = 0; i < spotCount; ++i) {
-            const auto& light = frame.SpotLights[i];
-            uniforms.SpotPositionRadius[i] = Math::Vec4(light.Position, light.Radius);
-            // Cutoffs arrive as half-angles; the shader compares cosines.
-            uniforms.SpotDirectionInner[i] = Math::Vec4(light.Direction, std::cos(light.InnerCutoff));
-            uniforms.SpotColorOuter[i] = Math::Vec4(light.Color, std::cos(light.OuterCutoff));
-            uniforms.SpotIntensitySlot[i] =
-                Math::Vec4(light.Intensity, static_cast<float>(slotForLight[i]), 0.0f, 0.0f);
-        }
-        // Point cube slots. Default every entry to "no shadow" so a light
-        // without a tile takes the early out rather than indexing a stale
-        // matrix from a previous frame.
-        for (auto& info : uniforms.PointShadowSlotInfo) {
-            info = Math::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
-        }
         const auto& pointSlots = m_Shadows.GetPointSlots();
         for (std::size_t slot = 0; slot < pointSlots.size(); ++slot) {
             const int32_t lightIndex = pointSlots[slot].LightIndex;
-            if (lightIndex < 0 || lightIndex >= 16) {
+            if (lightIndex < 0 || lightIndex >= static_cast<int32_t>(kShadowSlotLookup)) {
                 continue;
             }
             const uint32_t matrixBase = static_cast<uint32_t>(slot) * kCubeFaceCount;
@@ -1541,10 +1545,53 @@ void main() {
                 uniforms.PointShadowMatrix[matrixBase + face] =
                     pointSlots[slot].FaceViewProjection[face];
             }
-            uniforms.PointShadowSlotInfo[lightIndex] =
-                Math::Vec4(static_cast<float>(pointSlots[slot].BaseTile),
-                           static_cast<float>(matrixBase), 1.0f, 0.0f);
+            pointTileForLight[lightIndex] = static_cast<int32_t>(pointSlots[slot].BaseTile);
+            pointMatrixForLight[lightIndex] = static_cast<int32_t>(matrixBase);
         }
+
+        const auto& spotSlots = m_Shadows.GetSpotSlots();
+        for (std::size_t slot = 0; slot < spotSlots.size(); ++slot) {
+            const int32_t lightIndex = spotSlots[slot].LightIndex;
+            if (lightIndex < 0 || lightIndex >= static_cast<int32_t>(kShadowSlotLookup)) {
+                continue;
+            }
+            spotTileForLight[lightIndex] = static_cast<int32_t>(spotSlots[slot].Tile);
+            uniforms.SpotShadowMatrix[slot] = spotSlots[slot].ViewProjection;
+        }
+
+        m_PunctualLights.clear();
+        m_PunctualLights.reserve(frame.PointLights.size() + frame.SpotLights.size());
+
+        const uint32_t pointCount = static_cast<uint32_t>(frame.PointLights.size());
+        for (uint32_t i = 0; i < pointCount; ++i) {
+            const auto& light = frame.PointLights[i];
+            GpuPunctualLight packed{};
+            packed.PositionRadius = Math::Vec4(light.Position, light.Radius);
+            packed.ColorIntensity = Math::Vec4(light.Color, light.Intensity);
+            packed.ConeShadowParams = Math::Vec4(
+                0.0f, 0.0f,
+                static_cast<float>(i < kShadowSlotLookup ? pointTileForLight[i] : -1),
+                static_cast<float>(i < kShadowSlotLookup ? pointMatrixForLight[i] : 0));
+            m_PunctualLights.push_back(packed);
+        }
+
+        const uint32_t spotCount = static_cast<uint32_t>(frame.SpotLights.size());
+        for (uint32_t i = 0; i < spotCount; ++i) {
+            const auto& light = frame.SpotLights[i];
+            GpuPunctualLight packed{};
+            packed.PositionRadius = Math::Vec4(light.Position, light.Radius);
+            packed.ColorIntensity = Math::Vec4(light.Color, light.Intensity);
+            // Cutoffs arrive as half-angles; the shader compares cosines.
+            packed.DirectionCosInner = Math::Vec4(light.Direction, std::cos(light.InnerCutoff));
+            packed.ConeShadowParams = Math::Vec4(
+                std::cos(light.OuterCutoff), 1.0f,
+                static_cast<float>(i < kShadowSlotLookup ? spotTileForLight[i] : -1), 0.0f);
+            m_PunctualLights.push_back(packed);
+        }
+
+        m_LightCuller.SetLights(m_PunctualLights);
+        uniforms.LightGridParams = m_LightCuller.GetGridParams();
+        uniforms.LightDepthParams = m_LightCuller.GetDepthParams();
 
         uniforms.AtlasParams = m_Shadows.IsInitialized() ? m_Shadows.GetAtlasParams()
                                                          : Math::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -1577,10 +1624,13 @@ void main() {
         m_Stats.DirectionalLights = directionalCount;
         m_Stats.PointLights = pointCount;
         m_Stats.SpotLights = spotCount;
-        if (frame.DirectionalLights.size() > 4 || frame.PointLights.size() > 16) {
-            ENGINE_CORE_WARN("Light list exceeds the forward shader's caps ({} directional, {} point); "
+        m_Stats.PunctualLights = static_cast<uint32_t>(m_PunctualLights.size());
+        // Only directional lights still have a fixed cap; punctual lights are
+        // bounded by the cull pass's buffer, which warns for itself.
+        if (frame.DirectionalLights.size() > 4) {
+            ENGINE_CORE_WARN("{} directional lights exceeds the shader's cap of 4; "
                              "the surplus is dropped this frame",
-                             frame.DirectionalLights.size(), frame.PointLights.size());
+                             frame.DirectionalLights.size());
         }
     }
 
@@ -1643,7 +1693,7 @@ void main() {
         VkDescriptorBufferInfo uniformInfo{m_SceneUniformBuffer.Buffer, 0, sizeof(SceneUniforms)};
         VkBuffer instanceBuffer = m_GPUScene.IsInitialized() ? m_GPUScene.GetInstanceBuffer()
                                                              : VK_NULL_HANDLE;
-        VkWriteDescriptorSet writes[4]{};
+        VkWriteDescriptorSet writes[8]{};
         uint32_t writeCount = 1;
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_SceneSet;
@@ -1697,6 +1747,29 @@ void main() {
             writes[writeCount].descriptorCount = 1;
             writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             writes[writeCount].pImageInfo = &atlasInfo;
+            ++writeCount;
+        }
+
+        // The lit shader references all three unconditionally, so they are bound
+        // whenever the culler allocated them - which it does at Resize, before
+        // any frame records.
+        VkBuffer lightBuffers[3] = {
+            m_LightCuller.GetLightBuffer(),
+            m_LightCuller.GetLightGridBuffer(),
+            m_LightCuller.GetLightIndexBuffer(),
+        };
+        VkDescriptorBufferInfo lightInfos[3]{};
+        for (uint32_t i = 0; i < 3; ++i) {
+            if (lightBuffers[i] == VK_NULL_HANDLE) {
+                continue;
+            }
+            lightInfos[i] = {lightBuffers[i], 0, VK_WHOLE_SIZE};
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].dstSet = m_SceneSet;
+            writes[writeCount].dstBinding = 4 + i;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[writeCount].pBufferInfo = &lightInfos[i];
             ++writeCount;
         }
 
@@ -1833,8 +1906,9 @@ void main() {
             m_DummyInitialized = true;
         }
 
-        // Shadow cascades first: the lit pass samples them, so they have to be
-        // resolved before any geometry shades.
+        // Both of these feed the lit pass, so they have to resolve before any
+        // geometry shades.
+        m_LightCuller.Render(cmd, m_Frame);
         m_Shadows.Render(cmd, m_GPUScene);
 
         GpuCullView cullView{};
@@ -2050,6 +2124,7 @@ void main() {
         m_FSR.Shutdown();
         m_GI.Shutdown();
         m_Shadows.Shutdown();
+        m_LightCuller.Shutdown();
         m_Culler.Shutdown();
         m_GPUScene.Shutdown();
 

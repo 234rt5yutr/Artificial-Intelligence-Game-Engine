@@ -38,7 +38,6 @@ namespace ECS {
         m_DirectionalLights.clear();
         m_PointLights.clear();
         m_SpotLights.clear();
-        m_ForwardPlusLights.clear();
         m_LightRoutingHints.clear();
 
         auto view = scene.View<TransformComponent, LightComponent>();
@@ -79,12 +78,6 @@ namespace ECS {
                     pointLight.Color = light.Color;
                     pointLight.Intensity = light.Intensity;
                     m_PointLights.push_back(pointLight);
-
-                    // Also add to Forward+ compatible format
-                    Renderer::PointLight fpLight;
-                    fpLight.positionAndRadius = Math::Vec4(pointLight.Position, light.Radius);
-                    fpLight.colorAndIntensity = Math::Vec4(light.Color, light.Intensity);
-                    m_ForwardPlusLights.push_back(fpLight);
                     break;
                 }
 

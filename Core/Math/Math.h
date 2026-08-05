@@ -17,6 +17,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 
+#include <cmath>
+
 namespace Core {
 namespace Math {
 
@@ -39,6 +41,28 @@ namespace Math {
 
     // Quaternion
     using Quat = glm::quat;
+
+    // Recovers the near and far planes from a perspective projection built for
+    // Vulkan's [0, 1] depth range. Sub-pixel jitter only touches [2][0] and
+    // [2][1], so it does not disturb this.
+    //
+    // Both the shadow cascades and the clustered light grid need the camera's
+    // depth range, and neither is handed it - they get a projection matrix.
+    inline bool ExtractNearFar(const Mat4& projection, float& nearPlane, float& farPlane) {
+        const float p22 = projection[2][2];
+        const float p32 = projection[3][2];
+        if (std::abs(p22) < 1e-6f || std::abs(p22 + 1.0f) < 1e-6f) {
+            return false;
+        }
+        const float recoveredNear = p32 / p22;
+        const float recoveredFar = p32 / (p22 + 1.0f);
+        if (!(recoveredNear > 0.0f) || !(recoveredFar > recoveredNear)) {
+            return false;
+        }
+        nearPlane = recoveredNear;
+        farPlane = recoveredFar;
+        return true;
+    }
 
 } // namespace Math
 } // namespace Core

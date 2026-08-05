@@ -597,17 +597,9 @@ void main() {
     void ShadowRenderer::FitCascades(const FrameRenderData& frame, const Math::Vec3& lightDirection) {
         const uint32_t cascades = std::clamp(m_Settings.CascadeCount, 1u, kMaxShadowCascades);
 
-        // Recover the camera's near and far from the projection. Jitter only
-        // touches [2][0] and [2][1], so it does not disturb this.
-        const float p22 = frame.Projection[2][2];
-        const float p32 = frame.Projection[3][2];
         float nearPlane = 0.1f;
         float farPlane = 1000.0f;
-        if (std::abs(p22) > 1e-6f && std::abs(p22 + 1.0f) > 1e-6f) {
-            nearPlane = p32 / p22;
-            farPlane = p32 / (p22 + 1.0f);
-        }
-        if (!(nearPlane > 0.0f) || !(farPlane > nearPlane)) {
+        if (!Math::ExtractNearFar(frame.Projection, nearPlane, farPlane)) {
             nearPlane = 0.1f;
             farPlane = 1000.0f;
         }

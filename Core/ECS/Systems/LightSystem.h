@@ -3,7 +3,6 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Components/TransformComponent.h"
 #include "Core/ECS/Components/LightComponent.h"
-#include "Core/Renderer/ForwardPlus.h"
 #include "Core/Profile.h"
 #include "Core/Log.h"
 #include <vector>
@@ -77,8 +76,6 @@ namespace ECS {
         const std::vector<PointLightData>& GetPointLights() const { return m_PointLights; }
         const std::vector<SpotLightData>& GetSpotLights() const { return m_SpotLights; }
 
-        // Get Forward+ compatible point light data
-        const std::vector<Renderer::PointLight>& GetForwardPlusLights() const { return m_ForwardPlusLights; }
         const std::vector<LightRoutingHint>& GetLightRoutingHints() const { return m_LightRoutingHints; }
 
         // Statistics
@@ -91,7 +88,6 @@ namespace ECS {
         std::vector<DirectionalLightData> m_DirectionalLights;
         std::vector<PointLightData> m_PointLights;
         std::vector<SpotLightData> m_SpotLights;
-        std::vector<Renderer::PointLight> m_ForwardPlusLights;
         std::vector<LightRoutingHint> m_LightRoutingHints;
     };
 

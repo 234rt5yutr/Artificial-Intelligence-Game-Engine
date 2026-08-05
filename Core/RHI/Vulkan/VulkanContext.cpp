@@ -1136,6 +1136,7 @@ namespace RHI {
         // counters are complete rather than a torn read of live GPU writes.
         if (m_SceneRenderer) {
             m_SceneRenderer->GetCuller().RefreshStats();
+            m_SceneRenderer->GetLightCuller().RefreshStats();
         }
 
         uint32_t imageIndex;

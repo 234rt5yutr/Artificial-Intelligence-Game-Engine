@@ -205,8 +205,6 @@ add_library(EngineCore
     Core/Audio/PhysicsAudioIntegration.h
     Core/Audio/PhysicsAudioIntegration.cpp
     Core/Audio/ReverbZoneSystem.h
-    Core/Renderer/ForwardPlus.h
-    Core/Renderer/ForwardPlus.cpp
     Core/Renderer/ZPrepass.h
     Core/Renderer/ZPrepass.cpp
     Core/Renderer/RenderGraph/RenderGraphTypes.h
@@ -245,6 +243,8 @@ add_library(EngineCore
     Core/Renderer/GPUDriven/GPUScene.h
     Core/Renderer/GPUDriven/GPUScene.cpp
     Core/Renderer/GPUDriven/ClusterCullShader.h
+    Core/Renderer/Lighting/ClusteredLightCuller.h
+    Core/Renderer/Lighting/ClusteredLightCuller.cpp
     Core/Renderer/Textures/TextureLibrary.h
     Core/Renderer/Textures/TextureLibrary.cpp
     Core/Renderer/Shadows/ShadowRenderer.h

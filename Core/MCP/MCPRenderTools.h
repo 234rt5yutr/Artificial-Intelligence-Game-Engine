@@ -183,7 +183,23 @@ namespace MCP {
             lights["directional"] = stats.DirectionalLights;
             lights["point"] = stats.PointLights;
             lights["spot"] = stats.SpotLights;
+            lights["punctualUploaded"] = stats.PunctualLights;
             report["lights"] = lights;
+
+            const auto& grid = renderer->GetLightCuller().GetStats();
+            Json clustered;
+            clustered["active"] = grid.Active;
+            clustered["gridX"] = grid.GridX;
+            clustered["gridY"] = grid.GridY;
+            clustered["gridZ"] = grid.GridZ;
+            clustered["clusterCount"] = grid.ClusterCount;
+            clustered["lightCount"] = grid.LightCount;
+            // Total light-to-froxel assignments last frame, and the worst single
+            // froxel. A max at the 256 ceiling means lights are being dropped.
+            clustered["visibleAssignments"] = grid.VisibleAssignments;
+            clustered["maxLightsInCluster"] = grid.MaxLightsInCluster;
+            clustered["overflowedClusters"] = grid.OverflowedClusters;
+            report["clusteredLighting"] = clustered;
 
             const auto& shadows = renderer->GetShadowRenderer().GetStats();
             const auto& shadowSettings = renderer->GetShadowRenderer().GetSettings();
