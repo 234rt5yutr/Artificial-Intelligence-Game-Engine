@@ -3,6 +3,15 @@
 #ifndef GLM_ENABLE_EXPERIMENTAL
 #define GLM_ENABLE_EXPERIMENTAL
 #endif
+// Vulkan clips depth to [0, 1]; GLM defaults to OpenGL's [-1, 1]. Without this
+// every glm::perspective in the engine produced clip-space z that put the near
+// half of the frustum behind z = 0, where Vulkan clips it away - and the HZB,
+// occlusion, and GI reprojection all read that z back assuming [0, 1].
+// Also set as a compile definition in CMakeLists.txt so translation units that
+// include glm without going through this header agree.
+#ifndef GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#endif
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>

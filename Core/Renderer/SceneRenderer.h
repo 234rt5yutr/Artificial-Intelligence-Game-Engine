@@ -24,6 +24,7 @@
 #include "Core/Renderer/GI/DynamicGlobalIllumination.h"
 #include "Core/Renderer/GPUDriven/GPUDrivenCuller.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
+#include "Core/Renderer/Shadows/ShadowRenderer.h"
 #include "Core/Renderer/Upscaling/FSRUpscaler.h"
 
 #include <cstdint>
@@ -102,6 +103,7 @@ namespace Renderer {
         VkImageView GetViewportImageView() const;
         VkSampler GetViewportSampler() const { return m_LinearSampler; }
 
+        ShadowRenderer& GetShadowRenderer() { return m_Shadows; }
         GPUScene& GetGPUScene() { return m_GPUScene; }
         GPUDrivenCuller& GetCuller() { return m_Culler; }
         DynamicGlobalIllumination& GetGlobalIllumination() { return m_GI; }
@@ -134,6 +136,11 @@ namespace Renderer {
             float Pad0;
             float Pad1;
             float Pad2;
+            Math::Mat4 CascadeViewProjection[kMaxShadowCascades];
+            Math::Vec4 CascadeSplits;
+            // x = cascade count, y = PCF texel step, z = normal bias,
+            // w = index of the shadow-casting directional light (-1 for none)
+            Math::Vec4 ShadowParams;
         };
 
         struct MaterialPipeline {
@@ -149,6 +156,7 @@ namespace Renderer {
         bool CreateCompositePipeline();
         bool CreateResolvePipeline();
         bool CreateDummyTexture();
+        bool CreateDummyShadow();
         void EnsureMaterialPipelines();
         VkPipeline GetPipelineForMaterial(uint32_t materialIndex);
         void RecordGeometry(VkCommandBuffer cmd, bool latePhase);
@@ -168,10 +176,15 @@ namespace Renderer {
         RHI::GpuImage m_Resolved{};      // direct + GI, pre-upscale
 
         RHI::GpuImage m_DummyWhite{};
+        // The lit shader statically references the cascade sampler, so its
+        // descriptor must be valid even when shadows are off or failed to
+        // initialize. A 1x1 depth array costs nothing and keeps that true.
+        RHI::GpuImage m_DummyShadow{};
         bool m_DummyInitialized = false;
 
         VkSampler m_LinearSampler = VK_NULL_HANDLE;
         VkSampler m_PointSampler = VK_NULL_HANDLE;
+        VkSampler m_ShadowFallbackSampler = VK_NULL_HANDLE;
 
         VkDescriptorSetLayout m_SceneSetLayout = VK_NULL_HANDLE;
         VkDescriptorSetLayout m_MaterialTextureSetLayout = VK_NULL_HANDLE;
@@ -196,6 +209,7 @@ namespace Renderer {
 
         GPUScene m_GPUScene;
         GPUDrivenCuller m_Culler;
+        ShadowRenderer m_Shadows;
         DynamicGlobalIllumination m_GI;
         FSRUpscaler m_FSR;
 

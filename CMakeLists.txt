@@ -215,8 +215,6 @@ add_library(EngineCore
     Core/Renderer/RenderGraph/RenderGraphExecutor.cpp
     Core/Renderer/RenderGraph/TransientResourceAllocator.h
     Core/Renderer/RenderGraph/TransientResourceAllocator.cpp
-    Core/Renderer/ShadowPass.h
-    Core/Renderer/ShadowPass.cpp
     Core/Renderer/RTShadowPass.h
     Core/Renderer/RTShadowPass.cpp
     Core/Renderer/RTReflectionPass.h
@@ -245,6 +243,9 @@ add_library(EngineCore
     Core/Renderer/Material/MaterialGraph.cpp
     Core/Renderer/GPUDriven/GPUScene.h
     Core/Renderer/GPUDriven/GPUScene.cpp
+    Core/Renderer/GPUDriven/ClusterCullShader.h
+    Core/Renderer/Shadows/ShadowRenderer.h
+    Core/Renderer/Shadows/ShadowRenderer.cpp
     Core/Renderer/GPUDriven/GPUDrivenCuller.h
     Core/Renderer/GPUDriven/GPUDrivenCuller.cpp
     Core/Renderer/GI/DynamicGlobalIllumination.h
@@ -546,6 +547,11 @@ add_library(EngineCore
 )
 
 target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui RecastNavigation::Recast RecastNavigation::Detour RecastNavigation::DetourCrowd RecastNavigation::DetourTileCache)
+
+# Vulkan depth range. Must be global and PUBLIC: a translation unit that sees a
+# different value builds a differently-shaped glm::mat4 for the same projection,
+# and the mismatch only shows up as geometry silently vanishing.
+target_compile_definitions(EngineCore PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_ENABLE_EXPERIMENTAL)
 target_include_directories(EngineCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CGLTF_INCLUDE_DIRS} ${LUA_INCLUDE_DIR} ${MINIAUDIO_INCLUDE_DIRS} ${Stb_INCLUDE_DIR})
 
 # Option to enable Tracy profiling

@@ -40,6 +40,9 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     float Pad0;
     float Pad1;
     float Pad2;
+    mat4 CascadeViewProjection[4];
+    vec4 CascadeSplits;
+    vec4 ShadowParams;
 } uMaterial;
 )GLSL";
 
@@ -107,6 +110,60 @@ layout(location = 2) out vec4 outNormal;
 %SCENE_UNIFORMS%
 
 layout(set = 1, binding = 0) uniform sampler2D uMaterialTextures[8];
+
+// Comparison sampler: one tap is already 2x2 hardware PCF, so the loop below
+// widens an already-filtered result rather than doing the filtering itself.
+layout(set = 0, binding = 2) uniform sampler2DArrayShadow uCascadeShadow;
+
+int SelectCascade(float viewDepth) {
+    int count = int(uMaterial.ShadowParams.x);
+    for (int i = 0; i < count - 1; ++i) {
+        if (viewDepth <= uMaterial.CascadeSplits[i]) {
+            return i;
+        }
+    }
+    return max(count - 1, 0);
+}
+
+float SampleShadow(vec3 worldPos, vec3 normal, vec3 lightDirection) {
+    if (uMaterial.ShadowParams.x < 0.5) {
+        return 1.0;
+    }
+
+    float viewDepth = -(uMaterial.View * vec4(worldPos, 1.0)).z;
+    int cascade = SelectCascade(viewDepth);
+
+    // Offset along the normal before projecting. Depth bias alone cannot fix
+    // acne on surfaces at a grazing angle to the light without introducing
+    // peter-panning; scaling the offset by the grazing angle does.
+    float grazing = 1.0 - abs(dot(normal, lightDirection));
+    vec3 offsetPos = worldPos + normal * uMaterial.ShadowParams.z * (1.0 + grazing * 2.0);
+
+    vec4 lightClip = uMaterial.CascadeViewProjection[cascade] * vec4(offsetPos, 1.0);
+    if (lightClip.w <= 1e-6) {
+        return 1.0;
+    }
+    vec3 projected = lightClip.xyz / lightClip.w;
+    vec2 uv = projected.xy * 0.5 + 0.5;
+    // Past the last cascade, or outside this one: unshadowed rather than a
+    // hard black edge where the cascade ends.
+    if (projected.z > 1.0 || projected.z < 0.0 ||
+        any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+        return 1.0;
+    }
+
+    float step = uMaterial.ShadowParams.y;
+    float sum = 0.0;
+    int taps = 0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 offset = vec2(float(x), float(y)) * step;
+            sum += texture(uCascadeShadow, vec4(uv + offset, float(cascade), projected.z));
+            ++taps;
+        }
+    }
+    return sum / float(taps);
+}
 
 struct MaterialSurface {
     vec3 BaseColor;
@@ -182,10 +239,12 @@ void main() {
     vec3 f0 = mix(vec3(0.04), surf.BaseColor, surf.Metallic);
 
     vec3 direct = vec3(0.0);
+    int shadowLight = int(uMaterial.ShadowParams.w);
     for (uint i = 0u; i < min(uMaterial.LightCounts.x, 4u); ++i) {
         vec3 l = normalize(-uMaterial.DirectionalDirection[i].xyz);
         vec3 radiance = uMaterial.DirectionalColor[i].rgb * uMaterial.DirectionalColor[i].w;
-        direct += ShadeLight(n, v, l, radiance, surf, f0);
+        float shadow = (int(i) == shadowLight) ? SampleShadow(inWorldPos, n, l) : 1.0;
+        direct += ShadeLight(n, v, l, radiance, surf, f0) * shadow;
     }
     for (uint i = 0u; i < min(uMaterial.LightCounts.y, 16u); ++i) {
         vec3 toLight = uMaterial.PointPositionRadius[i].xyz - inWorldPos;
@@ -348,6 +407,10 @@ void main() {
             m_GPUDrivenEnabled = false;
         }
 
+        if (m_GPUDrivenEnabled && !m_Shadows.Initialize(context, m_GPUScene.GetLimits().MaxClusterSlots)) {
+            ENGINE_CORE_WARN("Shadow renderer unavailable; the frame renders unshadowed");
+        }
+
         if (!m_GI.Initialize(context)) {
             ENGINE_CORE_WARN("Dynamic GI unavailable; the frame renders direct lighting only");
         }
@@ -375,6 +438,24 @@ void main() {
             return false;
         }
 
+        // A comparison sampler for the placeholder cascade array. The shader's
+        // sampler2DArrayShadow needs compareEnable even when it samples nothing
+        // real; a plain sampler here is a validation error.
+        VkSamplerCreateInfo shadowFallback{};
+        shadowFallback.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        shadowFallback.magFilter = VK_FILTER_NEAREST;
+        shadowFallback.minFilter = VK_FILTER_NEAREST;
+        shadowFallback.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        shadowFallback.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        shadowFallback.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        shadowFallback.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        shadowFallback.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        shadowFallback.compareEnable = VK_TRUE;
+        shadowFallback.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        if (vkCreateSampler(device, &shadowFallback, nullptr, &m_ShadowFallbackSampler) != VK_SUCCESS) {
+            return false;
+        }
+
         if (!RHI::CreateGpuBuffer(m_Context->GetAllocator(), sizeof(SceneUniforms),
                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true, m_SceneUniformBuffer) ||
             !RHI::CreateGpuBuffer(m_Context->GetAllocator(), sizeof(Math::Vec4) * 2,
@@ -383,7 +464,7 @@ void main() {
         }
 
         // Set 0: scene uniforms + the instance transforms the indirect draws index.
-        VkDescriptorSetLayoutBinding sceneBindings[2]{};
+        VkDescriptorSetLayoutBinding sceneBindings[3]{};
         sceneBindings[0].binding = 0;
         sceneBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         sceneBindings[0].descriptorCount = 1;
@@ -392,10 +473,14 @@ void main() {
         sceneBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         sceneBindings[1].descriptorCount = 1;
         sceneBindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        sceneBindings[2].binding = 2;
+        sceneBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sceneBindings[2].descriptorCount = 1;
+        sceneBindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         VkDescriptorSetLayoutCreateInfo sceneLayoutInfo{};
         sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        sceneLayoutInfo.bindingCount = 2;
+        sceneLayoutInfo.bindingCount = 3;
         sceneLayoutInfo.pBindings = sceneBindings;
         if (vkCreateDescriptorSetLayout(device, &sceneLayoutInfo, nullptr, &m_SceneSetLayout) != VK_SUCCESS) {
             return false;
@@ -447,7 +532,7 @@ void main() {
         const VkDescriptorPoolSize poolSizes[] = {
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4},
             {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxMaterialTextures + 8},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxMaterialTextures + 12},
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2},
         };
         VkDescriptorPoolCreateInfo poolInfo{};
@@ -495,7 +580,53 @@ void main() {
             return false;
         }
 
-        return CreateDummyTexture();
+        return CreateDummyTexture() && CreateDummyShadow();
+    }
+
+    bool SceneRenderer::CreateDummyShadow() {
+        VkDevice device = m_Context->GetDevice();
+
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent = {1, 1, 1};
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = kMaxShadowCascades;
+        imageInfo.format = m_Context->GetDepthFormat();
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        m_DummyShadow = RHI::GpuImage{};
+        if (vmaCreateImage(m_Context->GetAllocator(), &imageInfo, &allocInfo,
+                           &m_DummyShadow.Image, &m_DummyShadow.Allocation, nullptr) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("SceneRenderer: placeholder shadow array allocation failed");
+            return false;
+        }
+        m_DummyShadow.Format = imageInfo.format;
+        m_DummyShadow.Extent = {1, 1};
+        m_DummyShadow.MipLevels = 1;
+        m_DummyShadow.Aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        m_DummyShadow.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_DummyShadow.Image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+        viewInfo.format = imageInfo.format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = kMaxShadowCascades;
+        if (vkCreateImageView(device, &viewInfo, nullptr, &m_DummyShadow.View) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("SceneRenderer: placeholder shadow view creation failed");
+            return false;
+        }
+        return true;
     }
 
     bool SceneRenderer::CreateDummyTexture() {
@@ -1101,6 +1232,25 @@ void main() {
         }
         uniforms.LightCounts = Math::UVec4(directionalCount, pointCount, 0, 0);
 
+        // Cascades were fitted in BeginFrame, before this runs.
+        const bool shadowsActive = m_Shadows.IsInitialized() && m_Shadows.GetShadowLightIndex() >= 0;
+        if (shadowsActive) {
+            const Math::Mat4* cascades = m_Shadows.GetCascadeMatrices();
+            for (uint32_t i = 0; i < kMaxShadowCascades; ++i) {
+                uniforms.CascadeViewProjection[i] = cascades[i];
+            }
+            uniforms.CascadeSplits = m_Shadows.GetCascadeSplits();
+            uniforms.ShadowParams = Math::Vec4(
+                static_cast<float>(m_Shadows.GetStats().CascadeCount),
+                m_Shadows.GetTexelSize(),
+                m_Shadows.GetSettings().NormalBias,
+                static_cast<float>(m_Shadows.GetShadowLightIndex()));
+        } else {
+            // Cascade count 0 makes SampleShadow return fully lit without
+            // touching the placeholder array.
+            uniforms.ShadowParams = Math::Vec4(0.0f, 0.0f, 0.0f, -1.0f);
+        }
+
         if (m_SceneUniformBuffer.Mapped) {
             std::memcpy(m_SceneUniformBuffer.Mapped, &uniforms, sizeof(uniforms));
         }
@@ -1121,7 +1271,6 @@ void main() {
 
         m_Frame = frame;
         EnsureMaterialPipelines();
-        UpdateSceneUniforms(m_Frame);
 
         // Split the draw list: anything the GPU scene accepted goes through the
         // indirect path, the rest keeps a direct draw so it still appears.
@@ -1130,7 +1279,13 @@ void main() {
 
         if (m_GPUDrivenEnabled && m_GPUScene.IsInitialized()) {
             m_GPUScene.BeginFrame(m_Frame.DrawCommands.data(), m_Frame.DrawCommands.size());
+            // Shadow cascades cull against the same cluster slots the GPU scene
+            // just published, so this has to follow it.
+            m_Shadows.BeginFrame(m_Frame, m_GPUScene);
         }
+
+        // After the shadow fit, so the uniforms carry this frame's cascades.
+        UpdateSceneUniforms(m_Frame);
 
         for (const auto& command : m_Frame.DrawCommands) {
             const Mesh* mesh = command.Mesh;
@@ -1167,7 +1322,7 @@ void main() {
         VkDescriptorBufferInfo uniformInfo{m_SceneUniformBuffer.Buffer, 0, sizeof(SceneUniforms)};
         VkBuffer instanceBuffer = m_GPUScene.IsInitialized() ? m_GPUScene.GetInstanceBuffer()
                                                              : VK_NULL_HANDLE;
-        VkWriteDescriptorSet writes[2]{};
+        VkWriteDescriptorSet writes[3]{};
         uint32_t writeCount = 1;
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_SceneSet;
@@ -1185,6 +1340,26 @@ void main() {
             writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[1].pBufferInfo = &instanceInfo;
             writeCount = 2;
+        }
+
+        // The shader references this sampler unconditionally, so it points at
+        // the placeholder array whenever the real cascades are unavailable.
+        const bool cascadesReady = m_Shadows.IsInitialized() &&
+                                   m_Shadows.GetCascadeArrayView() != VK_NULL_HANDLE &&
+                                   m_Shadows.GetShadowLightIndex() >= 0;
+        VkDescriptorImageInfo shadowInfo{};
+        shadowInfo.sampler = m_Shadows.IsInitialized() ? m_Shadows.GetComparisonSampler()
+                                                       : m_ShadowFallbackSampler;
+        shadowInfo.imageView = cascadesReady ? m_Shadows.GetCascadeArrayView() : m_DummyShadow.View;
+        shadowInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        if (shadowInfo.sampler != VK_NULL_HANDLE && shadowInfo.imageView != VK_NULL_HANDLE) {
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].dstSet = m_SceneSet;
+            writes[writeCount].dstBinding = 2;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[writeCount].pImageInfo = &shadowInfo;
+            ++writeCount;
         }
         vkUpdateDescriptorSets(m_Context->GetDevice(), writeCount, writes, 0, nullptr);
     }
@@ -1305,8 +1480,15 @@ void main() {
             vkCmdClearColorImage(cmd, m_DummyWhite.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                  &white, 1, &range);
             RHI::TransitionImage(cmd, m_DummyWhite, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            // The placeholder cascade array is never rendered into, so nothing
+            // else would ever move it out of UNDEFINED.
+            RHI::TransitionImage(cmd, m_DummyShadow, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
             m_DummyInitialized = true;
         }
+
+        // Shadow cascades first: the lit pass samples them, so they have to be
+        // resolved before any geometry shades.
+        m_Shadows.Render(cmd, m_GPUScene);
 
         GpuCullView cullView{};
         cullView.View = m_Frame.View;
@@ -1520,6 +1702,7 @@ void main() {
 
         m_FSR.Shutdown();
         m_GI.Shutdown();
+        m_Shadows.Shutdown();
         m_Culler.Shutdown();
         m_GPUScene.Shutdown();
 
@@ -1533,6 +1716,7 @@ void main() {
 
         DestroyTargets();
         RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_DummyWhite);
+        RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_DummyShadow);
         m_DummyInitialized = false;
 
         RHI::DestroyComputePipeline(device, m_ResolvePipeline);
@@ -1563,7 +1747,7 @@ void main() {
                 *layout = VK_NULL_HANDLE;
             }
         }
-        for (VkSampler* sampler : {&m_LinearSampler, &m_PointSampler}) {
+        for (VkSampler* sampler : {&m_LinearSampler, &m_PointSampler, &m_ShadowFallbackSampler}) {
             if (*sampler != VK_NULL_HANDLE) {
                 vkDestroySampler(device, *sampler, nullptr);
                 *sampler = VK_NULL_HANDLE;

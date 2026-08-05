@@ -91,6 +91,7 @@ namespace MCP {
     // - SetGPUCulling: Toggle GPU-driven cluster culling, HZB occlusion, cone culling, two-phase
     // - SetGlobalIllumination: Tune the dynamic GI screen traces and world radiance cache
     // - SetUpscaler: Set the FSR quality mode, sharpening, and jitter
+    // - SetShadows: Tune the directional cascaded shadow maps
     // - ListMaterials / GetMaterialGraph / SetMaterialGraph: Author material node graphs
     // - SetEditorViewport: Drive the editor camera, gizmo, and play/pause/step
     // Declared here, defined in MCPAllTools.cpp. Callers that only need to

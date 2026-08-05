@@ -14,7 +14,10 @@ namespace ECS {
     // GPU-ready light data structures
     struct DirectionalLightData {
         Math::Vec3 Direction;
-        float _pad0;
+        // Was padding. The shadow renderer needs to know which directional light
+        // to fit its cascades to, and that decision belongs with the light data
+        // rather than in a parallel array the two systems have to keep in step.
+        float CastShadows;
         Math::Vec3 Color;
         float Intensity;
     };

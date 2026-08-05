@@ -184,6 +184,31 @@ namespace MCP {
             lights["point"] = stats.PointLights;
             report["lights"] = lights;
 
+            const auto& shadows = renderer->GetShadowRenderer().GetStats();
+            const auto& shadowSettings = renderer->GetShadowRenderer().GetSettings();
+            Json shadowJson;
+            shadowJson["enabled"] = shadowSettings.Enabled;
+            shadowJson["active"] = shadows.Active;
+            // -1 means no directional light in the scene is casting, which is
+            // the usual reason a scene renders unshadowed.
+            shadowJson["shadowLightIndex"] = shadows.ShadowLightIndex;
+            shadowJson["cascadeCount"] = shadows.CascadeCount;
+            shadowJson["resolution"] = shadows.Resolution;
+            shadowJson["clusterSlots"] = shadows.ClusterSlots;
+            shadowJson["maxShadowDistance"] = shadowSettings.MaxShadowDistance;
+            shadowJson["splitLambda"] = shadowSettings.CascadeSplitLambda;
+            shadowJson["depthBias"] = shadowSettings.DepthBias;
+            shadowJson["slopeBias"] = shadowSettings.SlopeBias;
+            shadowJson["normalBias"] = shadowSettings.NormalBias;
+            shadowJson["pcfRadius"] = shadowSettings.PcfRadius;
+            shadowJson["stabilizeCascades"] = shadowSettings.StabilizeCascades;
+            Json splits = Json::array();
+            for (uint32_t i = 0; i < shadows.CascadeCount && i < Renderer::kMaxShadowCascades; ++i) {
+                splits.push_back(shadows.CascadeSplits[i]);
+            }
+            shadowJson["cascadeSplits"] = splits;
+            report["shadows"] = shadowJson;
+
             if (auto* application = Application::TryGet()) {
                 if (auto* renderThread = application->GetRenderThread()) {
                     const auto threadStats = renderThread->GetStats();
@@ -455,6 +480,127 @@ namespace MCP {
             state["displayWidth"] = stats.DisplayWidth;
             state["displayHeight"] = stats.DisplayHeight;
             return ToolResult::Success("Upscaler updated", state);
+        }
+    };
+
+    // ========================================================================
+    // SetShadows - control the cascaded shadow maps
+    // ========================================================================
+    class SetShadowsTool : public MCPTool {
+    public:
+        SetShadowsTool()
+            : MCPTool("SetShadows",
+                      "Tune the directional cascaded shadow maps: enable them, set the cascade "
+                      "count and resolution, the distance they cover, the split distribution, "
+                      "depth/slope/normal bias, PCF kernel radius, and cascade stabilisation. "
+                      "Changing the cascade count or resolution rebuilds the shadow array. "
+                      "Only a directional light with castShadows set produces shadows; check "
+                      "shadows.shadowLightIndex in GetRenderStats to see whether one was found.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set Shadows";
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["enabled"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Render the shadow cascades at all.");
+            schema.Properties["cascadeCount"] = RenderToolsDetail::NumberProperty(
+                "Number of cascades (1-4). Each is a full depth pass.", 1, 4);
+            schema.Properties["resolution"] = RenderToolsDetail::NumberProperty(
+                "Per-cascade shadow map resolution in pixels.", 256, 8192);
+            schema.Properties["maxShadowDistance"] = RenderToolsDetail::NumberProperty(
+                "How far the directional light casts, in metres.", 5.0, 5000.0);
+            schema.Properties["splitLambda"] = RenderToolsDetail::NumberProperty(
+                "0 = uniform cascade splits, 1 = fully logarithmic.", 0.0, 1.0);
+            schema.Properties["depthBias"] = RenderToolsDetail::NumberProperty(
+                "Constant depth bias applied during the shadow pass.", 0.0, 32.0);
+            schema.Properties["slopeBias"] = RenderToolsDetail::NumberProperty(
+                "Slope-scaled depth bias.", 0.0, 32.0);
+            schema.Properties["normalBias"] = RenderToolsDetail::NumberProperty(
+                "World-space offset along the surface normal before the shadow lookup.", 0.0, 1.0);
+            schema.Properties["pcfRadius"] = RenderToolsDetail::NumberProperty(
+                "PCF kernel half-width in texels. Higher is softer and slower.", 0, 8);
+            schema.Properties["stabilizeCascades"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Snap cascades to a texel grid so shadow edges stop crawling as the camera moves.");
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+            auto& shadows = renderer->GetShadowRenderer();
+            if (!shadows.IsInitialized()) {
+                return ToolResult::Error("The shadow renderer failed to initialize on this device");
+            }
+
+            auto& settings = shadows.GetSettings();
+            bool rebuild = false;
+
+            if (arguments.contains("enabled") && arguments["enabled"].is_boolean()) {
+                settings.Enabled = arguments["enabled"].get<bool>();
+            }
+            if (arguments.contains("cascadeCount") && arguments["cascadeCount"].is_number()) {
+                const uint32_t value = std::clamp(arguments["cascadeCount"].get<uint32_t>(),
+                                                  1u, Renderer::kMaxShadowCascades);
+                rebuild = rebuild || value != settings.CascadeCount;
+                settings.CascadeCount = value;
+            }
+            if (arguments.contains("resolution") && arguments["resolution"].is_number()) {
+                const uint32_t value = std::clamp(arguments["resolution"].get<uint32_t>(), 256u, 8192u);
+                rebuild = rebuild || value != settings.CascadeResolution;
+                settings.CascadeResolution = value;
+            }
+            if (arguments.contains("maxShadowDistance") && arguments["maxShadowDistance"].is_number()) {
+                settings.MaxShadowDistance = std::clamp(arguments["maxShadowDistance"].get<float>(), 5.0f, 5000.0f);
+            }
+            if (arguments.contains("splitLambda") && arguments["splitLambda"].is_number()) {
+                settings.CascadeSplitLambda = std::clamp(arguments["splitLambda"].get<float>(), 0.0f, 1.0f);
+            }
+            if (arguments.contains("depthBias") && arguments["depthBias"].is_number()) {
+                settings.DepthBias = std::clamp(arguments["depthBias"].get<float>(), 0.0f, 32.0f);
+            }
+            if (arguments.contains("slopeBias") && arguments["slopeBias"].is_number()) {
+                settings.SlopeBias = std::clamp(arguments["slopeBias"].get<float>(), 0.0f, 32.0f);
+            }
+            if (arguments.contains("normalBias") && arguments["normalBias"].is_number()) {
+                settings.NormalBias = std::clamp(arguments["normalBias"].get<float>(), 0.0f, 1.0f);
+            }
+            if (arguments.contains("pcfRadius") && arguments["pcfRadius"].is_number()) {
+                settings.PcfRadius = std::clamp(arguments["pcfRadius"].get<uint32_t>(), 0u, 8u);
+            }
+            if (arguments.contains("stabilizeCascades") && arguments["stabilizeCascades"].is_boolean()) {
+                settings.StabilizeCascades = arguments["stabilizeCascades"].get<bool>();
+            }
+
+            // Only a count or resolution change reallocates; that stalls the
+            // device, so it is not paid for a bias tweak.
+            if (rebuild && !shadows.ApplySettings()) {
+                return ToolResult::Error("Failed to rebuild the shadow cascade array");
+            }
+
+            const auto& stats = shadows.GetStats();
+            Json state;
+            state["enabled"] = settings.Enabled;
+            state["cascadeCount"] = settings.CascadeCount;
+            state["resolution"] = stats.Resolution;
+            state["maxShadowDistance"] = settings.MaxShadowDistance;
+            state["splitLambda"] = settings.CascadeSplitLambda;
+            state["depthBias"] = settings.DepthBias;
+            state["slopeBias"] = settings.SlopeBias;
+            state["normalBias"] = settings.NormalBias;
+            state["pcfRadius"] = settings.PcfRadius;
+            state["stabilizeCascades"] = settings.StabilizeCascades;
+            state["shadowLightIndex"] = stats.ShadowLightIndex;
+            return ToolResult::Success("Shadow settings updated", state);
         }
     };
 
@@ -787,6 +933,7 @@ namespace MCP {
         tools.push_back(std::make_shared<SetGPUCullingTool>());
         tools.push_back(std::make_shared<SetGlobalIlluminationTool>());
         tools.push_back(std::make_shared<SetUpscalerTool>());
+        tools.push_back(std::make_shared<SetShadowsTool>());
         tools.push_back(std::make_shared<ListMaterialsTool>());
         tools.push_back(std::make_shared<SetMaterialGraphTool>());
         tools.push_back(std::make_shared<GetMaterialGraphTool>());

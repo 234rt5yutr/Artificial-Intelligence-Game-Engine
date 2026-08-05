@@ -64,6 +64,7 @@ namespace ECS {
                     DirectionalLightData dirLight;
                     // Direction is the forward vector of the transform (negative Z in local space)
                     dirLight.Direction = -transform.GetForward();
+                    dirLight.CastShadows = light.CastShadows ? 1.0f : 0.0f;
                     dirLight.Color = light.Color;
                     dirLight.Intensity = light.Intensity;
                     m_DirectionalLights.push_back(dirLight);
