@@ -43,6 +43,7 @@ namespace Renderer {
         std::vector<ECS::DrawCommand> DrawCommands;
         std::vector<ECS::DirectionalLightData> DirectionalLights;
         std::vector<ECS::PointLightData> PointLights;
+        std::vector<ECS::SpotLightData> SpotLights;
         Math::Mat4 View{1.0f};
         Math::Mat4 Projection{1.0f};
         Math::Mat4 ViewProjection{1.0f};
@@ -54,6 +55,7 @@ namespace Renderer {
             DrawCommands.clear();
             DirectionalLights.clear();
             PointLights.clear();
+            SpotLights.clear();
         }
     };
 
@@ -68,6 +70,7 @@ namespace Renderer {
         uint32_t MaterialPipelines = 0;
         uint32_t DirectionalLights = 0;
         uint32_t PointLights = 0;
+        uint32_t SpotLights = 0;
         bool GPUDrivenActive = false;
     };
 
@@ -136,6 +139,14 @@ namespace Renderer {
             float Pad0;
             float Pad1;
             float Pad2;
+            Math::Vec4 SpotPositionRadius[kMaxSpotShadows];
+            Math::Vec4 SpotDirectionInner[kMaxSpotShadows];   // xyz dir, w cos(inner)
+            Math::Vec4 SpotColorOuter[kMaxSpotShadows];       // rgb colour, w cos(outer)
+            // x = intensity, y = atlas slot (-1 = lit but unshadowed)
+            Math::Vec4 SpotIntensitySlot[kMaxSpotShadows];
+            Math::Mat4 SpotShadowMatrix[kMaxSpotShadows];
+            // xy = atlas size, z = tile size, w = 1 / atlas size
+            Math::Vec4 AtlasParams;
             Math::Mat4 CascadeViewProjection[kMaxShadowCascades];
             Math::Vec4 CascadeSplits;
             // x = cascade count, y = PCF texel step, z = normal bias,
@@ -180,6 +191,7 @@ namespace Renderer {
         // descriptor must be valid even when shadows are off or failed to
         // initialize. A 1x1 depth array costs nothing and keeps that true.
         RHI::GpuImage m_DummyShadow{};
+        RHI::GpuImage m_DummyAtlas{};
         bool m_DummyInitialized = false;
 
         VkSampler m_LinearSampler = VK_NULL_HANDLE;

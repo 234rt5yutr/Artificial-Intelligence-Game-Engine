@@ -182,6 +182,7 @@ namespace MCP {
             Json lights;
             lights["directional"] = stats.DirectionalLights;
             lights["point"] = stats.PointLights;
+            lights["spot"] = stats.SpotLights;
             report["lights"] = lights;
 
             const auto& shadows = renderer->GetShadowRenderer().GetStats();
@@ -195,6 +196,13 @@ namespace MCP {
             shadowJson["cascadeCount"] = shadows.CascadeCount;
             shadowJson["resolution"] = shadows.Resolution;
             shadowJson["clusterSlots"] = shadows.ClusterSlots;
+            // Spot lights with an atlas tile this frame. Lights past the tile
+            // cap are still lit, just unshadowed.
+            shadowJson["spotShadowCount"] = shadows.SpotShadowCount;
+            shadowJson["spotShadowsEnabled"] = shadowSettings.SpotShadowsEnabled;
+            shadowJson["atlasResolution"] = shadows.AtlasResolution;
+            shadowJson["atlasTileSize"] = shadows.AtlasTileSize;
+            shadowJson["atlasTilesPerRow"] = shadowSettings.AtlasTilesPerRow;
             shadowJson["maxShadowDistance"] = shadowSettings.MaxShadowDistance;
             shadowJson["splitLambda"] = shadowSettings.CascadeSplitLambda;
             shadowJson["depthBias"] = shadowSettings.DepthBias;
@@ -527,6 +535,12 @@ namespace MCP {
                 "PCF kernel half-width in texels. Higher is softer and slower.", 0, 8);
             schema.Properties["stabilizeCascades"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Snap cascades to a texel grid so shadow edges stop crawling as the camera moves.");
+            schema.Properties["spotShadows"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Render shadow tiles for spot lights.");
+            schema.Properties["atlasResolution"] = RenderToolsDetail::NumberProperty(
+                "Spot shadow atlas resolution in pixels.", 512, 8192);
+            schema.Properties["atlasTilesPerRow"] = RenderToolsDetail::NumberProperty(
+                "Atlas tiles per row; the atlas holds this squared, capped at 8 lights.", 1, 8);
             return schema;
         }
 
@@ -580,6 +594,19 @@ namespace MCP {
             if (arguments.contains("stabilizeCascades") && arguments["stabilizeCascades"].is_boolean()) {
                 settings.StabilizeCascades = arguments["stabilizeCascades"].get<bool>();
             }
+            if (arguments.contains("spotShadows") && arguments["spotShadows"].is_boolean()) {
+                settings.SpotShadowsEnabled = arguments["spotShadows"].get<bool>();
+            }
+            if (arguments.contains("atlasResolution") && arguments["atlasResolution"].is_number()) {
+                const uint32_t value = std::clamp(arguments["atlasResolution"].get<uint32_t>(), 512u, 8192u);
+                rebuild = rebuild || value != settings.AtlasResolution;
+                settings.AtlasResolution = value;
+            }
+            if (arguments.contains("atlasTilesPerRow") && arguments["atlasTilesPerRow"].is_number()) {
+                const uint32_t value = std::clamp(arguments["atlasTilesPerRow"].get<uint32_t>(), 1u, 8u);
+                rebuild = rebuild || value != settings.AtlasTilesPerRow;
+                settings.AtlasTilesPerRow = value;
+            }
 
             // Only a count or resolution change reallocates; that stalls the
             // device, so it is not paid for a bias tweak.
@@ -600,6 +627,10 @@ namespace MCP {
             state["pcfRadius"] = settings.PcfRadius;
             state["stabilizeCascades"] = settings.StabilizeCascades;
             state["shadowLightIndex"] = stats.ShadowLightIndex;
+            state["spotShadows"] = settings.SpotShadowsEnabled;
+            state["atlasResolution"] = stats.AtlasResolution;
+            state["atlasTileSize"] = stats.AtlasTileSize;
+            state["spotShadowCount"] = stats.SpotShadowCount;
             return ToolResult::Success("Shadow settings updated", state);
         }
     };

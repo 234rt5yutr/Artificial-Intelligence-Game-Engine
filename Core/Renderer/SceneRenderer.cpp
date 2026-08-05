@@ -40,6 +40,12 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     float Pad0;
     float Pad1;
     float Pad2;
+    vec4 SpotPositionRadius[8];
+    vec4 SpotDirectionInner[8];
+    vec4 SpotColorOuter[8];
+    vec4 SpotIntensitySlot[8];
+    mat4 SpotShadowMatrix[8];
+    vec4 AtlasParams;
     mat4 CascadeViewProjection[4];
     vec4 CascadeSplits;
     vec4 ShadowParams;
@@ -114,6 +120,52 @@ layout(set = 1, binding = 0) uniform sampler2D uMaterialTextures[8];
 // Comparison sampler: one tap is already 2x2 hardware PCF, so the loop below
 // widens an already-filtered result rather than doing the filtering itself.
 layout(set = 0, binding = 2) uniform sampler2DArrayShadow uCascadeShadow;
+layout(set = 0, binding = 3) uniform sampler2DShadow uShadowAtlas;
+
+// Spot shadows share one atlas: the light's tile is addressed by slot, so the
+// lookup is the same projection as a cascade plus a tile offset.
+float SampleSpotShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightDirection) {
+    if (slot < 0) {
+        return 1.0;
+    }
+
+    float grazing = 1.0 - abs(dot(normal, lightDirection));
+    vec3 offsetPos = worldPos + normal * uMaterial.ShadowParams.z * (1.0 + grazing * 2.0);
+
+    vec4 lightClip = uMaterial.SpotShadowMatrix[slot] * vec4(offsetPos, 1.0);
+    if (lightClip.w <= 1e-6) {
+        return 1.0;
+    }
+    vec3 projected = lightClip.xyz / lightClip.w;
+    vec2 tileUV = projected.xy * 0.5 + 0.5;
+    if (projected.z > 1.0 || projected.z < 0.0 ||
+        any(lessThan(tileUV, vec2(0.0))) || any(greaterThan(tileUV, vec2(1.0)))) {
+        return 1.0;
+    }
+
+    float tileSize = uMaterial.AtlasParams.z;
+    float invAtlas = uMaterial.AtlasParams.w;
+    int tilesPerRow = max(int(uMaterial.AtlasParams.x / max(tileSize, 1.0)), 1);
+    vec2 tileOrigin = vec2(float(slot % tilesPerRow), float(slot / tilesPerRow)) * tileSize;
+
+    // Inset by a texel so a PCF tap at the tile edge cannot bleed into the
+    // neighbouring light's depth.
+    vec2 inset = vec2(1.0) / max(tileSize, 1.0);
+    vec2 clamped = clamp(tileUV, inset, vec2(1.0) - inset);
+
+    float step = invAtlas;
+    float sum = 0.0;
+    int taps = 0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 offset = vec2(float(x), float(y)) * step;
+            vec2 atlasUV = (tileOrigin + clamped * tileSize) * invAtlas + offset;
+            sum += texture(uShadowAtlas, vec3(atlasUV, projected.z));
+            ++taps;
+        }
+    }
+    return sum / float(taps);
+}
 
 int SelectCascade(float viewDepth) {
     int count = int(uMaterial.ShadowParams.x);
@@ -260,6 +312,35 @@ void main() {
         vec3 radiance = uMaterial.PointColorIntensity[i].rgb *
                         uMaterial.PointColorIntensity[i].w * attenuation * window * window;
         direct += ShadeLight(n, v, toLight / max(distance, 1e-5), radiance, surf, f0);
+    }
+
+    // Spot lights were collected by LightSystem and never uploaded, so they
+    // emitted nothing at all until now.
+    for (uint i = 0u; i < min(uMaterial.LightCounts.z, 8u); ++i) {
+        vec3 toLight = uMaterial.SpotPositionRadius[i].xyz - inWorldPos;
+        float distance = length(toLight);
+        float radius = max(uMaterial.SpotPositionRadius[i].w, 1e-3);
+        if (distance > radius) {
+            continue;
+        }
+        vec3 l = toLight / max(distance, 1e-5);
+
+        // Cone falloff, smooth between the inner and outer half-angles.
+        float cosAngle = dot(-l, normalize(uMaterial.SpotDirectionInner[i].xyz));
+        float cosInner = uMaterial.SpotDirectionInner[i].w;
+        float cosOuter = uMaterial.SpotColorOuter[i].w;
+        float cone = clamp((cosAngle - cosOuter) / max(cosInner - cosOuter, 1e-4), 0.0, 1.0);
+        if (cone <= 0.0) {
+            continue;
+        }
+
+        float attenuation = 1.0 / max(distance * distance, 1e-4);
+        float window = clamp(1.0 - pow(distance / radius, 4.0), 0.0, 1.0);
+        vec3 radiance = uMaterial.SpotColorOuter[i].rgb * uMaterial.SpotIntensitySlot[i].x *
+                        attenuation * window * window * cone * cone;
+
+        float shadow = SampleSpotShadow(int(uMaterial.SpotIntensitySlot[i].y), inWorldPos, n, l);
+        direct += ShadeLight(n, v, l, radiance, surf, f0) * shadow;
     }
 
     // A small constant ambient keeps unlit scenes readable. Indirect light is
@@ -464,7 +545,7 @@ void main() {
         }
 
         // Set 0: scene uniforms + the instance transforms the indirect draws index.
-        VkDescriptorSetLayoutBinding sceneBindings[3]{};
+        VkDescriptorSetLayoutBinding sceneBindings[4]{};
         sceneBindings[0].binding = 0;
         sceneBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         sceneBindings[0].descriptorCount = 1;
@@ -477,10 +558,14 @@ void main() {
         sceneBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         sceneBindings[2].descriptorCount = 1;
         sceneBindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        sceneBindings[3].binding = 3;
+        sceneBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sceneBindings[3].descriptorCount = 1;
+        sceneBindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         VkDescriptorSetLayoutCreateInfo sceneLayoutInfo{};
         sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        sceneLayoutInfo.bindingCount = 3;
+        sceneLayoutInfo.bindingCount = 4;
         sceneLayoutInfo.pBindings = sceneBindings;
         if (vkCreateDescriptorSetLayout(device, &sceneLayoutInfo, nullptr, &m_SceneSetLayout) != VK_SUCCESS) {
             return false;
@@ -603,6 +688,9 @@ void main() {
         allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
         m_DummyShadow = RHI::GpuImage{};
+        // Two placeholders: the cascade sampler is an array, the atlas sampler
+        // is not, and a view type mismatch is a validation error.
+        
         if (vmaCreateImage(m_Context->GetAllocator(), &imageInfo, &allocInfo,
                            &m_DummyShadow.Image, &m_DummyShadow.Allocation, nullptr) != VK_SUCCESS) {
             ENGINE_CORE_ERROR("SceneRenderer: placeholder shadow array allocation failed");
@@ -624,6 +712,27 @@ void main() {
         viewInfo.subresourceRange.layerCount = kMaxShadowCascades;
         if (vkCreateImageView(device, &viewInfo, nullptr, &m_DummyShadow.View) != VK_SUCCESS) {
             ENGINE_CORE_ERROR("SceneRenderer: placeholder shadow view creation failed");
+            return false;
+        }
+
+        imageInfo.arrayLayers = 1;
+        m_DummyAtlas = RHI::GpuImage{};
+        if (vmaCreateImage(m_Context->GetAllocator(), &imageInfo, &allocInfo,
+                           &m_DummyAtlas.Image, &m_DummyAtlas.Allocation, nullptr) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("SceneRenderer: placeholder shadow atlas allocation failed");
+            return false;
+        }
+        m_DummyAtlas.Format = imageInfo.format;
+        m_DummyAtlas.Extent = {1, 1};
+        m_DummyAtlas.MipLevels = 1;
+        m_DummyAtlas.Aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        m_DummyAtlas.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        viewInfo.image = m_DummyAtlas.Image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(device, &viewInfo, nullptr, &m_DummyAtlas.View) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("SceneRenderer: placeholder shadow atlas view creation failed");
             return false;
         }
         return true;
@@ -1230,7 +1339,34 @@ void main() {
             uniforms.PointPositionRadius[i] = Math::Vec4(light.Position, light.Radius);
             uniforms.PointColorIntensity[i] = Math::Vec4(light.Color, light.Intensity);
         }
-        uniforms.LightCounts = Math::UVec4(directionalCount, pointCount, 0, 0);
+        const uint32_t spotCount =
+            std::min<uint32_t>(kMaxSpotShadows, static_cast<uint32_t>(frame.SpotLights.size()));
+        // Which spot lights got an atlas tile this frame. Lights without one are
+        // still lit, just unshadowed.
+        int32_t slotForLight[kMaxSpotShadows];
+        std::fill(std::begin(slotForLight), std::end(slotForLight), -1);
+        const auto& spotSlots = m_Shadows.GetSpotSlots();
+        for (std::size_t slot = 0; slot < spotSlots.size(); ++slot) {
+            const int32_t lightIndex = spotSlots[slot].LightIndex;
+            if (lightIndex >= 0 && lightIndex < static_cast<int32_t>(kMaxSpotShadows)) {
+                slotForLight[lightIndex] = static_cast<int32_t>(slot);
+                uniforms.SpotShadowMatrix[slot] = spotSlots[slot].ViewProjection;
+            }
+        }
+
+        for (uint32_t i = 0; i < spotCount; ++i) {
+            const auto& light = frame.SpotLights[i];
+            uniforms.SpotPositionRadius[i] = Math::Vec4(light.Position, light.Radius);
+            // Cutoffs arrive as half-angles; the shader compares cosines.
+            uniforms.SpotDirectionInner[i] = Math::Vec4(light.Direction, std::cos(light.InnerCutoff));
+            uniforms.SpotColorOuter[i] = Math::Vec4(light.Color, std::cos(light.OuterCutoff));
+            uniforms.SpotIntensitySlot[i] =
+                Math::Vec4(light.Intensity, static_cast<float>(slotForLight[i]), 0.0f, 0.0f);
+        }
+        uniforms.AtlasParams = m_Shadows.IsInitialized() ? m_Shadows.GetAtlasParams()
+                                                         : Math::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
+
+        uniforms.LightCounts = Math::UVec4(directionalCount, pointCount, spotCount, 0);
 
         // Cascades were fitted in BeginFrame, before this runs.
         const bool shadowsActive = m_Shadows.IsInitialized() && m_Shadows.GetShadowLightIndex() >= 0;
@@ -1257,6 +1393,7 @@ void main() {
 
         m_Stats.DirectionalLights = directionalCount;
         m_Stats.PointLights = pointCount;
+        m_Stats.SpotLights = spotCount;
         if (frame.DirectionalLights.size() > 4 || frame.PointLights.size() > 16) {
             ENGINE_CORE_WARN("Light list exceeds the forward shader's caps ({} directional, {} point); "
                              "the surplus is dropped this frame",
@@ -1322,7 +1459,7 @@ void main() {
         VkDescriptorBufferInfo uniformInfo{m_SceneUniformBuffer.Buffer, 0, sizeof(SceneUniforms)};
         VkBuffer instanceBuffer = m_GPUScene.IsInitialized() ? m_GPUScene.GetInstanceBuffer()
                                                              : VK_NULL_HANDLE;
-        VkWriteDescriptorSet writes[3]{};
+        VkWriteDescriptorSet writes[4]{};
         uint32_t writeCount = 1;
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_SceneSet;
@@ -1361,6 +1498,23 @@ void main() {
             writes[writeCount].pImageInfo = &shadowInfo;
             ++writeCount;
         }
+        const bool atlasReady = m_Shadows.IsInitialized() &&
+                                m_Shadows.GetAtlasView() != VK_NULL_HANDLE &&
+                                !m_Shadows.GetSpotSlots().empty();
+        VkDescriptorImageInfo atlasInfo{};
+        atlasInfo.sampler = shadowInfo.sampler;
+        atlasInfo.imageView = atlasReady ? m_Shadows.GetAtlasView() : m_DummyAtlas.View;
+        atlasInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        if (atlasInfo.sampler != VK_NULL_HANDLE && atlasInfo.imageView != VK_NULL_HANDLE) {
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].dstSet = m_SceneSet;
+            writes[writeCount].dstBinding = 3;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[writeCount].pImageInfo = &atlasInfo;
+            ++writeCount;
+        }
+
         vkUpdateDescriptorSets(m_Context->GetDevice(), writeCount, writes, 0, nullptr);
     }
 
@@ -1483,6 +1637,7 @@ void main() {
             // The placeholder cascade array is never rendered into, so nothing
             // else would ever move it out of UNDEFINED.
             RHI::TransitionImage(cmd, m_DummyShadow, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+            RHI::TransitionImage(cmd, m_DummyAtlas, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
             m_DummyInitialized = true;
         }
 
@@ -1717,6 +1872,7 @@ void main() {
         DestroyTargets();
         RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_DummyWhite);
         RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_DummyShadow);
+        RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_DummyAtlas);
         m_DummyInitialized = false;
 
         RHI::DestroyComputePipeline(device, m_ResolvePipeline);

@@ -31,6 +31,15 @@ namespace Renderer {
     // resolution and each extra cascade is another full depth pass.
     inline constexpr uint32_t kMaxShadowCascades = 4;
 
+    // Spot lights that can have a shadow tile in the atlas at once. Lights past
+    // this are lit but unshadowed rather than dropped, so the scene degrades
+    // instead of flickering as the selection changes.
+    inline constexpr uint32_t kMaxSpotShadows = 8;
+
+    // Shadow views culled per frame: cascades occupy [0, kMaxShadowCascades),
+    // spot atlas tiles follow. Each view owns a draw buffer and a descriptor set.
+    inline constexpr uint32_t kMaxShadowViews = kMaxShadowCascades + kMaxSpotShadows;
+
     struct ShadowSettings {
         bool Enabled = true;
         uint32_t CascadeCount = 4;
@@ -53,6 +62,12 @@ namespace Renderer {
         // Snap each cascade's centre to a texel grid so the shadow does not
         // shimmer as the camera moves.
         bool StabilizeCascades = true;
+
+        // Punctual (spot) shadows share one atlas. One tile per light, sized
+        // atlas / tilesPerRow.
+        bool SpotShadowsEnabled = true;
+        uint32_t AtlasResolution = 4096;
+        uint32_t AtlasTilesPerRow = 3;   // 3x3 = 9 tiles, one spare over the cap
     };
 
     struct ShadowStats {
@@ -63,6 +78,18 @@ namespace Renderer {
         uint32_t VisibleClusters[kMaxShadowCascades] = {0, 0, 0, 0};
         float CascadeSplits[kMaxShadowCascades] = {0.0f, 0.0f, 0.0f, 0.0f};
         int32_t ShadowLightIndex = -1;
+        uint32_t SpotShadowCount = 0;
+        uint32_t AtlasResolution = 0;
+        uint32_t AtlasTileSize = 0;
+    };
+
+    // One spot light's slot in the shadow atlas, as the lit shader needs it.
+    struct SpotShadowSlot {
+        Math::Mat4 ViewProjection{1.0f};
+        // Which light in FrameRenderData's spot list this belongs to.
+        int32_t LightIndex = -1;
+        uint32_t TileX = 0;
+        uint32_t TileY = 0;
     };
 
     class ShadowRenderer {
@@ -87,6 +114,10 @@ namespace Renderer {
         void Render(VkCommandBuffer cmd, GPUScene& scene);
 
         VkImageView GetCascadeArrayView() const { return m_CascadeArray.View; }
+        VkImageView GetAtlasView() const { return m_Atlas.View; }
+        const std::vector<SpotShadowSlot>& GetSpotSlots() const { return m_SpotSlots; }
+        // xy = atlas size in texels, z = tile size in texels, w = 1 / atlas size.
+        Math::Vec4 GetAtlasParams() const;
         // Comparison sampler, so a single tap is already 2x2 hardware PCF.
         VkSampler GetComparisonSampler() const { return m_ComparisonSampler; }
 
@@ -119,6 +150,13 @@ namespace Renderer {
         bool CreatePipeline();
         bool CreateCascadeTargets();
         void DestroyCascadeTargets();
+        bool CreateAtlasTargets();
+        void DestroyAtlasTargets();
+        void FitSpotShadows(const FrameRenderData& frame);
+        // Shared by the cascade and atlas passes: writes one view's cull
+        // descriptors and dispatches it.
+        void DispatchCull(VkCommandBuffer cmd, GPUScene& scene, uint32_t viewIndex,
+                          const Math::Mat4& viewProjection, const Math::Vec3& viewDirection);
         void FitCascades(const FrameRenderData& frame, const Math::Vec3& lightDirection);
 
         RHI::VulkanContext* m_Context = nullptr;
@@ -128,6 +166,9 @@ namespace Renderer {
         RHI::GpuImage m_CascadeArray{};
         std::vector<VkImageView> m_LayerViews;
         std::vector<VkFramebuffer> m_Framebuffers;
+        RHI::GpuImage m_Atlas{};
+        VkFramebuffer m_AtlasFramebuffer = VK_NULL_HANDLE;
+        std::vector<SpotShadowSlot> m_SpotSlots;
         VkRenderPass m_RenderPass = VK_NULL_HANDLE;
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_Pipeline = VK_NULL_HANDLE;
@@ -138,11 +179,11 @@ namespace Renderer {
         VkDescriptorSetLayout m_CullSetLayout = VK_NULL_HANDLE;
         VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
         VkDescriptorSet m_DrawSet = VK_NULL_HANDLE;
-        VkDescriptorSet m_CullSets[kMaxShadowCascades] = {};
+        VkDescriptorSet m_CullSets[kMaxShadowViews] = {};
 
         RHI::ComputePipeline m_CullPipeline{};
-        RHI::GpuBuffer m_DrawBuffers[kMaxShadowCascades] = {};
-        RHI::GpuBuffer m_CullUniforms[kMaxShadowCascades] = {};
+        RHI::GpuBuffer m_DrawBuffers[kMaxShadowViews] = {};
+        RHI::GpuBuffer m_CullUniforms[kMaxShadowViews] = {};
         RHI::GpuBuffer m_RetestFlags{};
         RHI::GpuBuffer m_Counters{};
         // The cull shader always binds an HZB sampler; shadow views never read

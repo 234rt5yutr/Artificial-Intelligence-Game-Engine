@@ -358,6 +358,7 @@ namespace Core {
         if (const auto* lightSystem = pipeline->GetLightSystem()) {
             frame.DirectionalLights = lightSystem->GetDirectionalLights();
             frame.PointLights = lightSystem->GetPointLights();
+            frame.SpotLights = lightSystem->GetSpotLights();
         }
         if (const auto* cameraSystem = pipeline->GetCameraSystem()) {
             frame.View = cameraSystem->GetViewMatrix();

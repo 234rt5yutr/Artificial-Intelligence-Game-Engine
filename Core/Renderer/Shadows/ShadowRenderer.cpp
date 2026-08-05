@@ -81,13 +81,17 @@ void main() {
         m_MaxClusterSlots = maxClusterSlots;
 
         if (!CreateRenderPass() || !CreateCullResources(maxClusterSlots) ||
-            !CreatePipeline() || !CreateCascadeTargets()) {
+            !CreatePipeline() || !CreateCascadeTargets() || !CreateAtlasTargets()) {
             Shutdown();
             return false;
         }
 
-        ENGINE_CORE_INFO("Shadow renderer ready: {} cascades at {}px",
-                         m_Settings.CascadeCount, m_Settings.CascadeResolution);
+        ENGINE_CORE_INFO("Shadow renderer ready: {} cascades at {}px, spot atlas {}px "
+                         "({} tiles of {}px)",
+                         m_Settings.CascadeCount, m_Settings.CascadeResolution,
+                         m_Stats.AtlasResolution,
+                         m_Settings.AtlasTilesPerRow * m_Settings.AtlasTilesPerRow,
+                         m_Stats.AtlasTileSize);
         return true;
     }
 
@@ -171,10 +175,10 @@ void main() {
         const VkBufferUsageFlags drawUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                              VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
                                              VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        for (uint32_t cascade = 0; cascade < kMaxShadowCascades; ++cascade) {
-            if (!RHI::CreateGpuBuffer(allocator, drawBytes, drawUsage, false, m_DrawBuffers[cascade]) ||
+        for (uint32_t view = 0; view < kMaxShadowViews; ++view) {
+            if (!RHI::CreateGpuBuffer(allocator, drawBytes, drawUsage, false, m_DrawBuffers[view]) ||
                 !RHI::CreateGpuBuffer(allocator, sizeof(CullUniforms),
-                                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true, m_CullUniforms[cascade])) {
+                                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true, m_CullUniforms[view])) {
                 return false;
             }
         }
@@ -215,24 +219,24 @@ void main() {
         }
 
         const VkDescriptorPoolSize poolSizes[] = {
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 6 * kMaxShadowCascades + 2},
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxShadowCascades},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxShadowCascades},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 6 * kMaxShadowViews + 2},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxShadowViews},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kMaxShadowViews},
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolInfo.maxSets = kMaxShadowCascades + 2;
+        poolInfo.maxSets = kMaxShadowViews + 2;
         poolInfo.poolSizeCount = 3;
         poolInfo.pPoolSizes = poolSizes;
         if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
             return false;
         }
 
-        std::vector<VkDescriptorSetLayout> cullLayouts(kMaxShadowCascades, m_CullSetLayout);
+        std::vector<VkDescriptorSetLayout> cullLayouts(kMaxShadowViews, m_CullSetLayout);
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = m_DescriptorPool;
-        allocInfo.descriptorSetCount = kMaxShadowCascades;
+        allocInfo.descriptorSetCount = kMaxShadowViews;
         allocInfo.pSetLayouts = cullLayouts.data();
         if (vkAllocateDescriptorSets(device, &allocInfo, m_CullSets) != VK_SUCCESS) {
             ENGINE_CORE_ERROR("ShadowRenderer: cull descriptor allocation failed");
@@ -469,6 +473,92 @@ void main() {
         return true;
     }
 
+    bool ShadowRenderer::CreateAtlasTargets() {
+        VkDevice device = m_Context->GetDevice();
+        const uint32_t resolution = std::clamp(m_Settings.AtlasResolution, 512u, 8192u);
+
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.extent = {resolution, resolution, 1};
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.format = m_Context->GetDepthFormat();
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+        m_Atlas = RHI::GpuImage{};
+        if (vmaCreateImage(m_Context->GetAllocator(), &imageInfo, &allocInfo,
+                           &m_Atlas.Image, &m_Atlas.Allocation, nullptr) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("ShadowRenderer: shadow atlas allocation failed ({}px)", resolution);
+            return false;
+        }
+        m_Atlas.Format = imageInfo.format;
+        m_Atlas.Extent = {resolution, resolution};
+        m_Atlas.MipLevels = 1;
+        m_Atlas.Aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        m_Atlas.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_Atlas.Image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = imageInfo.format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(device, &viewInfo, nullptr, &m_Atlas.View) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("ShadowRenderer: shadow atlas view creation failed");
+            return false;
+        }
+
+        // One framebuffer for the whole atlas: every tile is a viewport and
+        // scissor inside a single render pass instance, so the atlas is cleared
+        // once per frame rather than once per light.
+        VkFramebufferCreateInfo framebufferInfo{};
+        framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebufferInfo.renderPass = m_RenderPass;
+        framebufferInfo.attachmentCount = 1;
+        framebufferInfo.pAttachments = &m_Atlas.View;
+        framebufferInfo.width = resolution;
+        framebufferInfo.height = resolution;
+        framebufferInfo.layers = 1;
+        if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &m_AtlasFramebuffer) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("ShadowRenderer: shadow atlas framebuffer creation failed");
+            return false;
+        }
+
+        m_Stats.AtlasResolution = resolution;
+        m_Stats.AtlasTileSize = resolution / std::max(1u, m_Settings.AtlasTilesPerRow);
+        return true;
+    }
+
+    void ShadowRenderer::DestroyAtlasTargets() {
+        if (!m_Context) {
+            return;
+        }
+        VkDevice device = m_Context->GetDevice();
+        if (m_AtlasFramebuffer != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(device, m_AtlasFramebuffer, nullptr);
+            m_AtlasFramebuffer = VK_NULL_HANDLE;
+        }
+        RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_Atlas);
+        m_SpotSlots.clear();
+    }
+
+    Math::Vec4 ShadowRenderer::GetAtlasParams() const {
+        const float resolution = static_cast<float>(std::max(1u, m_Stats.AtlasResolution));
+        return Math::Vec4(resolution, resolution,
+                          static_cast<float>(std::max(1u, m_Stats.AtlasTileSize)),
+                          1.0f / resolution);
+    }
+
     void ShadowRenderer::DestroyCascadeTargets() {
         if (!m_Context) {
             return;
@@ -495,7 +585,8 @@ void main() {
         }
         vkDeviceWaitIdle(m_Context->GetDevice());
         DestroyCascadeTargets();
-        return CreateCascadeTargets();
+        DestroyAtlasTargets();
+        return CreateCascadeTargets() && CreateAtlasTargets();
     }
 
     float ShadowRenderer::GetTexelSize() const {
@@ -618,10 +709,80 @@ void main() {
         }
     }
 
+    void ShadowRenderer::FitSpotShadows(const FrameRenderData& frame) {
+        m_SpotSlots.clear();
+        if (!m_Settings.SpotShadowsEnabled || m_Atlas.Image == VK_NULL_HANDLE) {
+            return;
+        }
+
+        const uint32_t tilesPerRow = std::max(1u, m_Settings.AtlasTilesPerRow);
+        const uint32_t tileCapacity = std::min(tilesPerRow * tilesPerRow, kMaxSpotShadows);
+
+        // Rank by how much of the screen the light plausibly covers - intensity
+        // and reach over distance - so the tiles go to the lights a viewer is
+        // most likely to notice rather than to whatever came first in the list.
+        struct Candidate {
+            int32_t LightIndex;
+            float Score;
+        };
+        std::vector<Candidate> candidates;
+        candidates.reserve(frame.SpotLights.size());
+
+        for (std::size_t i = 0; i < frame.SpotLights.size(); ++i) {
+            const auto& light = frame.SpotLights[i];
+            if (light.CastShadows <= 0.5f || light.Radius <= 0.0f) {
+                continue;
+            }
+            const float distance = std::max(0.5f, glm::length(light.Position - frame.CameraPosition));
+            const float score = (light.Intensity * light.Radius) / distance;
+            candidates.push_back({static_cast<int32_t>(i), score});
+        }
+
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const Candidate& lhs, const Candidate& rhs) { return lhs.Score > rhs.Score; });
+        if (candidates.size() > tileCapacity) {
+            candidates.resize(tileCapacity);
+        }
+
+        for (std::size_t slotIndex = 0; slotIndex < candidates.size(); ++slotIndex) {
+            const auto& light = frame.SpotLights[candidates[slotIndex].LightIndex];
+
+            Math::Vec3 direction = light.Direction;
+            const float directionLength = glm::length(direction);
+            if (directionLength < 1e-4f) {
+                continue;
+            }
+            direction /= directionLength;
+
+            const Math::Vec3 up = std::abs(direction.y) > 0.99f ? Math::Vec3(0.0f, 0.0f, 1.0f)
+                                                                : Math::Vec3(0.0f, 1.0f, 0.0f);
+            const Math::Mat4 lightView = glm::lookAt(light.Position, light.Position + direction, up);
+
+            // OuterCutoff is already a half-angle in radians. The projection
+            // needs the full angle, widened slightly so PCF taps at the cone
+            // edge still land inside the tile.
+            const float outerAngle = std::clamp(light.OuterCutoff, 0.05f, 1.5f);
+            const float fov = std::min(outerAngle * 2.2f, 3.0f);
+            Math::Mat4 lightProjection = glm::perspective(fov, 1.0f, 0.05f, light.Radius);
+            lightProjection[1][1] *= -1.0f;
+
+            SpotShadowSlot slot;
+            slot.ViewProjection = lightProjection * lightView;
+            slot.LightIndex = candidates[slotIndex].LightIndex;
+            slot.TileX = static_cast<uint32_t>(slotIndex) % tilesPerRow;
+            slot.TileY = static_cast<uint32_t>(slotIndex) / tilesPerRow;
+            m_SpotSlots.push_back(slot);
+        }
+
+        m_Stats.SpotShadowCount = static_cast<uint32_t>(m_SpotSlots.size());
+    }
+
     bool ShadowRenderer::BeginFrame(const FrameRenderData& frame, GPUScene& scene) {
         m_Stats.Active = false;
         m_ShadowLightIndex = -1;
         m_Stats.ShadowLightIndex = -1;
+        m_Stats.SpotShadowCount = 0;
+        m_SpotSlots.clear();
         m_ClusterSlots = 0;
 
         if (!IsInitialized() || !m_Settings.Enabled) {
@@ -631,6 +792,9 @@ void main() {
             return false;
         }
 
+        m_ClusterSlots = scene.GetFrameClusterSlotCount();
+        m_Stats.ClusterSlots = m_ClusterSlots;
+
         // Cascades are fitted to one directional light: the first that casts.
         for (std::size_t i = 0; i < frame.DirectionalLights.size() && i < 4; ++i) {
             if (frame.DirectionalLights[i].CastShadows > 0.5f) {
@@ -639,32 +803,104 @@ void main() {
                 break;
             }
         }
-        if (m_ShadowLightIndex < 0) {
-            return false;
+
+        if (m_ShadowLightIndex >= 0) {
+            const float directionLength = glm::length(m_LightDirection);
+            if (directionLength < 1e-4f) {
+                m_ShadowLightIndex = -1;
+            } else {
+                m_LightDirection /= directionLength;
+                FitCascades(frame, m_LightDirection);
+            }
         }
 
-        const float directionLength = glm::length(m_LightDirection);
-        if (directionLength < 1e-4f) {
-            return false;
-        }
-        m_LightDirection /= directionLength;
+        // Spot tiles are independent of the directional cascades: a scene with
+        // no sun can still have shadowed spots.
+        FitSpotShadows(frame);
 
-        FitCascades(frame, m_LightDirection);
-
-        m_ClusterSlots = scene.GetFrameClusterSlotCount();
-        m_Stats.ClusterSlots = m_ClusterSlots;
         m_Stats.ShadowLightIndex = m_ShadowLightIndex;
-        m_Stats.Active = m_ClusterSlots > 0;
-        return true;
+        m_Stats.Active = m_ClusterSlots > 0 && (m_ShadowLightIndex >= 0 || !m_SpotSlots.empty());
+        return m_Stats.Active;
+    }
+
+    void ShadowRenderer::DispatchCull(VkCommandBuffer cmd, GPUScene& scene, uint32_t viewIndex,
+                                      const Math::Mat4& viewProjection, const Math::Vec3& viewDirection) {
+        CullUniforms uniforms{};
+        uniforms.ViewProjection = viewProjection;
+        uniforms.View = viewProjection;
+        uniforms.Projection = viewProjection;
+        ExtractFrustumPlanes(viewProjection, uniforms.FrustumPlanes);
+        uniforms.CameraPosition = Math::Vec4(viewDirection, 0.0f);
+        uniforms.HZBParams = Math::Vec4(1.0f, 1.0f, 1.0f, 0.0f);
+        // No HZB and no cone culling for a shadow view: a backfacing cluster
+        // still occludes, and dropping it punches holes in the shadow.
+        uniforms.Flags = Math::Vec4(0.0f, 0.0f, 1.0f, 0.0f);
+        uniforms.Counts = Math::UVec4(m_ClusterSlots, scene.GetFrameInstanceCount(), 0, 0);
+        if (m_CullUniforms[viewIndex].Mapped) {
+            std::memcpy(m_CullUniforms[viewIndex].Mapped, &uniforms, sizeof(uniforms));
+        }
+
+        VkDescriptorBufferInfo bufferInfos[6]{};
+        bufferInfos[0] = {scene.GetInstanceBuffer(), 0, VK_WHOLE_SIZE};
+        bufferInfos[1] = {scene.GetClusterBuffer(), 0, VK_WHOLE_SIZE};
+        bufferInfos[2] = {scene.GetInstanceOffsetBuffer(), 0, VK_WHOLE_SIZE};
+        bufferInfos[3] = {m_DrawBuffers[viewIndex].Buffer, 0, VK_WHOLE_SIZE};
+        bufferInfos[4] = {m_RetestFlags.Buffer, 0, VK_WHOLE_SIZE};
+        bufferInfos[5] = {m_Counters.Buffer, 0, VK_WHOLE_SIZE};
+
+        VkDescriptorImageInfo hzbInfo{};
+        hzbInfo.sampler = m_DummySampler;
+        hzbInfo.imageView = m_DummyHZB.View;
+        hzbInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        VkDescriptorBufferInfo uniformInfo{m_CullUniforms[viewIndex].Buffer, 0, sizeof(CullUniforms)};
+
+        VkWriteDescriptorSet writes[8]{};
+        for (uint32_t i = 0; i < 6; ++i) {
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = m_CullSets[viewIndex];
+            writes[i].dstBinding = i;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].pBufferInfo = &bufferInfos[i];
+        }
+        writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[6].dstSet = m_CullSets[viewIndex];
+        writes[6].dstBinding = 6;
+        writes[6].descriptorCount = 1;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[6].pImageInfo = &hzbInfo;
+        writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[7].dstSet = m_CullSets[viewIndex];
+        writes[7].dstBinding = 7;
+        writes[7].descriptorCount = 1;
+        writes[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[7].pBufferInfo = &uniformInfo;
+        vkUpdateDescriptorSets(m_Context->GetDevice(), 8, writes, 0, nullptr);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_CullPipeline.Pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_CullPipeline.Layout,
+                                0, 1, &m_CullSets[viewIndex], 0, nullptr);
+        vkCmdDispatch(cmd, (m_ClusterSlots + kCullGroupSize - 1) / kCullGroupSize, 1, 1);
+
+        RHI::BufferBarrier(cmd, m_DrawBuffers[viewIndex].Buffer, VK_ACCESS_SHADER_WRITE_BIT,
+                           VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
     }
 
     void ShadowRenderer::Render(VkCommandBuffer cmd, GPUScene& scene) {
-        if (!IsInitialized() || m_ShadowLightIndex < 0 || m_ClusterSlots == 0 ||
+        if (!IsInitialized() || m_ClusterSlots == 0 ||
             scene.GetInstanceBuffer() == VK_NULL_HANDLE) {
             return;
         }
+        const bool hasCascades = m_ShadowLightIndex >= 0;
+        if (!hasCascades && m_SpotSlots.empty()) {
+            return;
+        }
 
-        const uint32_t cascades = std::clamp(m_Settings.CascadeCount, 1u, kMaxShadowCascades);
+        const uint32_t cascades = hasCascades
+                                      ? std::clamp(m_Settings.CascadeCount, 1u, kMaxShadowCascades)
+                                      : 0u;
         VkDevice device = m_Context->GetDevice();
 
         vkCmdFillBuffer(cmd, m_Counters.Buffer, 0, kCounterSlots * sizeof(uint32_t), 0);
@@ -672,7 +908,11 @@ void main() {
                            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 
-        // Bind the instance buffer once for every cascade's draws.
+        // The dummy HZB is only ever bound, never sampled, but it still has to
+        // be in the layout its descriptor declares.
+        RHI::TransitionImage(cmd, m_DummyHZB, VK_IMAGE_LAYOUT_GENERAL);
+
+        // Bind the instance buffer once for every view's draws.
         VkDescriptorBufferInfo instanceInfo{scene.GetInstanceBuffer(), 0, VK_WHOLE_SIZE};
         VkWriteDescriptorSet drawWrite{};
         drawWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -683,76 +923,50 @@ void main() {
         drawWrite.pBufferInfo = &instanceInfo;
         vkUpdateDescriptorSets(device, 1, &drawWrite, 0, nullptr);
 
+        // All culling first, then all rasterisation: one barrier covers every
+        // view instead of interleaving compute and graphics per cascade.
         for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
-            CullUniforms uniforms{};
-            uniforms.ViewProjection = m_CascadeMatrices[cascade];
-            uniforms.View = m_CascadeMatrices[cascade];
-            uniforms.Projection = m_CascadeMatrices[cascade];
-            ExtractFrustumPlanes(m_CascadeMatrices[cascade], uniforms.FrustumPlanes);
-            uniforms.CameraPosition = Math::Vec4(m_LightDirection, 0.0f);
-            uniforms.HZBParams = Math::Vec4(1.0f, 1.0f, 1.0f, 0.0f);
-            // No HZB and no cone culling for a shadow view: a backfacing cluster
-            // still occludes, and dropping it punches holes in the shadow.
-            uniforms.Flags = Math::Vec4(0.0f, 0.0f, 1.0f, 0.0f);
-            uniforms.Counts = Math::UVec4(m_ClusterSlots, scene.GetFrameInstanceCount(), 0, 0);
-            if (m_CullUniforms[cascade].Mapped) {
-                std::memcpy(m_CullUniforms[cascade].Mapped, &uniforms, sizeof(uniforms));
-            }
-
-            VkDescriptorBufferInfo bufferInfos[6]{};
-            bufferInfos[0] = {scene.GetInstanceBuffer(), 0, VK_WHOLE_SIZE};
-            bufferInfos[1] = {scene.GetClusterBuffer(), 0, VK_WHOLE_SIZE};
-            bufferInfos[2] = {scene.GetInstanceOffsetBuffer(), 0, VK_WHOLE_SIZE};
-            bufferInfos[3] = {m_DrawBuffers[cascade].Buffer, 0, VK_WHOLE_SIZE};
-            bufferInfos[4] = {m_RetestFlags.Buffer, 0, VK_WHOLE_SIZE};
-            bufferInfos[5] = {m_Counters.Buffer, 0, VK_WHOLE_SIZE};
-
-            VkDescriptorImageInfo hzbInfo{};
-            hzbInfo.sampler = m_DummySampler;
-            hzbInfo.imageView = m_DummyHZB.View;
-            hzbInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            VkDescriptorBufferInfo uniformInfo{m_CullUniforms[cascade].Buffer, 0, sizeof(CullUniforms)};
-
-            VkWriteDescriptorSet writes[8]{};
-            for (uint32_t i = 0; i < 6; ++i) {
-                writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                writes[i].dstSet = m_CullSets[cascade];
-                writes[i].dstBinding = i;
-                writes[i].descriptorCount = 1;
-                writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                writes[i].pBufferInfo = &bufferInfos[i];
-            }
-            writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[6].dstSet = m_CullSets[cascade];
-            writes[6].dstBinding = 6;
-            writes[6].descriptorCount = 1;
-            writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[6].pImageInfo = &hzbInfo;
-            writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[7].dstSet = m_CullSets[cascade];
-            writes[7].dstBinding = 7;
-            writes[7].descriptorCount = 1;
-            writes[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            writes[7].pBufferInfo = &uniformInfo;
-            vkUpdateDescriptorSets(device, 8, writes, 0, nullptr);
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_CullPipeline.Pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_CullPipeline.Layout,
-                                    0, 1, &m_CullSets[cascade], 0, nullptr);
-            vkCmdDispatch(cmd, (m_ClusterSlots + kCullGroupSize - 1) / kCullGroupSize, 1, 1);
-
-            RHI::BufferBarrier(cmd, m_DrawBuffers[cascade].Buffer, VK_ACCESS_SHADER_WRITE_BIT,
-                               VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
-                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                               VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT);
+            DispatchCull(cmd, scene, cascade, m_CascadeMatrices[cascade], m_LightDirection);
         }
-
-        // The dummy HZB is only ever bound, never sampled, but it still has to
-        // be in a layout the descriptor declares.
-        RHI::TransitionImage(cmd, m_DummyHZB, VK_IMAGE_LAYOUT_GENERAL);
+        for (std::size_t slot = 0; slot < m_SpotSlots.size(); ++slot) {
+            DispatchCull(cmd, scene, kMaxShadowCascades + static_cast<uint32_t>(slot),
+                         m_SpotSlots[slot].ViewProjection, m_LightDirection);
+        }
 
         VkClearValue clear{};
         clear.depthStencil = {1.0f, 0};
+
+        auto recordView = [&](uint32_t viewIndex, const Math::Mat4& viewProjection,
+                              int32_t offsetX, int32_t offsetY, uint32_t extent) {
+            VkViewport viewport{};
+            viewport.x = static_cast<float>(offsetX);
+            viewport.y = static_cast<float>(offsetY);
+            viewport.width = static_cast<float>(extent);
+            viewport.height = static_cast<float>(extent);
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {offsetX, offsetY};
+            scissor.extent = {extent, extent};
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            vkCmdSetDepthBias(cmd, m_Settings.DepthBias, 0.0f, m_Settings.SlopeBias);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout,
+                                    0, 1, &m_DrawSet, 0, nullptr);
+            vkCmdPushConstants(cmd, m_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                               0, sizeof(Math::Mat4), &viewProjection[0][0]);
+
+            VkBuffer vertexBuffer = scene.GetVertexBuffer();
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+            vkCmdBindIndexBuffer(cmd, scene.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+            // One multi-draw per view: shadows do not care about material, so
+            // there is nothing to batch by.
+            vkCmdDrawIndexedIndirect(cmd, m_DrawBuffers[viewIndex].Buffer, 0, m_ClusterSlots, 20);
+        };
 
         for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
             VkRenderPassBeginInfo passBegin{};
@@ -764,44 +978,45 @@ void main() {
             passBegin.pClearValues = &clear;
 
             vkCmdBeginRenderPass(cmd, &passBegin, VK_SUBPASS_CONTENTS_INLINE);
-
-            VkViewport viewport{};
-            viewport.width = static_cast<float>(m_Stats.Resolution);
-            viewport.height = static_cast<float>(m_Stats.Resolution);
-            viewport.maxDepth = 1.0f;
-            vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-            VkRect2D scissor{};
-            scissor.extent = {m_Stats.Resolution, m_Stats.Resolution};
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-            vkCmdSetDepthBias(cmd, m_Settings.DepthBias, 0.0f, m_Settings.SlopeBias);
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout,
-                                    0, 1, &m_DrawSet, 0, nullptr);
-            vkCmdPushConstants(cmd, m_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
-                               0, sizeof(Math::Mat4), &m_CascadeMatrices[cascade][0][0]);
-
-            VkBuffer vertexBuffer = scene.GetVertexBuffer();
-            VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
-            vkCmdBindIndexBuffer(cmd, scene.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-            // One multi-draw for the whole cascade: shadows do not care about
-            // material, so there is nothing to batch by.
-            vkCmdDrawIndexedIndirect(cmd, m_DrawBuffers[cascade].Buffer, 0, m_ClusterSlots, 20);
-
+            recordView(cascade, m_CascadeMatrices[cascade], 0, 0, m_Stats.Resolution);
             vkCmdEndRenderPass(cmd);
         }
+        if (cascades > 0) {
+            m_CascadeArray.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        }
 
-        m_CascadeArray.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        // The atlas is one render pass instance for every tile: cleared once,
+        // then each light draws into its own viewport and scissor.
+        if (!m_SpotSlots.empty() && m_AtlasFramebuffer != VK_NULL_HANDLE) {
+            VkRenderPassBeginInfo passBegin{};
+            passBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            passBegin.renderPass = m_RenderPass;
+            passBegin.framebuffer = m_AtlasFramebuffer;
+            passBegin.renderArea.extent = {m_Stats.AtlasResolution, m_Stats.AtlasResolution};
+            passBegin.clearValueCount = 1;
+            passBegin.pClearValues = &clear;
+
+            vkCmdBeginRenderPass(cmd, &passBegin, VK_SUBPASS_CONTENTS_INLINE);
+            for (std::size_t slot = 0; slot < m_SpotSlots.size(); ++slot) {
+                const SpotShadowSlot& spot = m_SpotSlots[slot];
+                recordView(kMaxShadowCascades + static_cast<uint32_t>(slot), spot.ViewProjection,
+                           static_cast<int32_t>(spot.TileX * m_Stats.AtlasTileSize),
+                           static_cast<int32_t>(spot.TileY * m_Stats.AtlasTileSize),
+                           m_Stats.AtlasTileSize);
+            }
+            vkCmdEndRenderPass(cmd);
+            m_Atlas.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        } else if (m_Atlas.Layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+            // Nothing rendered into it, but the lit shader still samples it, so
+            // it has to reach a readable layout at least once.
+            RHI::TransitionImage(cmd, m_Atlas, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        }
 
         if (m_Counters.Mapped) {
             const auto* counters = static_cast<const uint32_t*>(m_Counters.Mapped);
-            // Summed across cascades: the shader has one counter set, and a
-            // per-cascade breakdown is not worth four more dispatch parameters.
-            for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
+            // Summed across views: the shader has one counter set, and a
+            // per-view breakdown is not worth a dispatch parameter each.
+            for (uint32_t cascade = 0; cascade < kMaxShadowCascades; ++cascade) {
                 m_Stats.VisibleClusters[cascade] = cascade == 0 ? counters[0] : 0;
             }
         }
@@ -816,12 +1031,13 @@ void main() {
         vkDeviceWaitIdle(device);
 
         DestroyCascadeTargets();
+        DestroyAtlasTargets();
         RHI::DestroyGpuImage(device, allocator, m_DummyHZB);
         RHI::DestroyComputePipeline(device, m_CullPipeline);
 
-        for (uint32_t cascade = 0; cascade < kMaxShadowCascades; ++cascade) {
-            RHI::DestroyGpuBuffer(allocator, m_DrawBuffers[cascade]);
-            RHI::DestroyGpuBuffer(allocator, m_CullUniforms[cascade]);
+        for (uint32_t view = 0; view < kMaxShadowViews; ++view) {
+            RHI::DestroyGpuBuffer(allocator, m_DrawBuffers[view]);
+            RHI::DestroyGpuBuffer(allocator, m_CullUniforms[view]);
         }
         RHI::DestroyGpuBuffer(allocator, m_RetestFlags);
         RHI::DestroyGpuBuffer(allocator, m_Counters);

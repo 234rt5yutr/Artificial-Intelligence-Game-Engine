@@ -29,6 +29,8 @@ namespace ECS {
         float Intensity;
     };
 
+    // InnerCutoff and OuterCutoff are cone half-angles in radians, straight from
+    // LightComponent - not cosines. The renderer converts when it needs to.
     struct SpotLightData {
         Math::Vec3 Position;
         float Radius;
@@ -37,7 +39,7 @@ namespace ECS {
         Math::Vec3 Color;
         float OuterCutoff;
         float Intensity;
-        float _pad0;
+        float CastShadows;
         float _pad1;
         float _pad2;
     };

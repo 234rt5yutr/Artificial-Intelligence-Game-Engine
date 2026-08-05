@@ -96,6 +96,7 @@ namespace ECS {
                     spotLight.Intensity = light.Intensity;
                     spotLight.InnerCutoff = light.InnerCutoff;
                     spotLight.OuterCutoff = light.OuterCutoff;
+                    spotLight.CastShadows = light.CastShadows ? 1.0f : 0.0f;
                     m_SpotLights.push_back(spotLight);
                     break;
                 }
