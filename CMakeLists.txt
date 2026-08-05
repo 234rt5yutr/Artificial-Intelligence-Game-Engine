@@ -186,6 +186,7 @@ add_library(EngineCore
     Core/MCP/MCPDevTools.h
     Core/MCP/MCPProjectTools.h
     Core/MCP/MCPRenderTools.h
+    Core/MCP/MCPAssetTools.h
     Core/State/SceneLoader.h
     Core/State/SceneLoader.cpp
     Core/State/TransitionManager.h
@@ -244,6 +245,8 @@ add_library(EngineCore
     Core/Renderer/GPUDriven/GPUScene.h
     Core/Renderer/GPUDriven/GPUScene.cpp
     Core/Renderer/GPUDriven/ClusterCullShader.h
+    Core/Renderer/Textures/TextureLibrary.h
+    Core/Renderer/Textures/TextureLibrary.cpp
     Core/Renderer/Shadows/ShadowRenderer.h
     Core/Renderer/Shadows/ShadowRenderer.cpp
     Core/Renderer/GPUDriven/GPUDrivenCuller.h

@@ -92,3 +92,7 @@ MCP_USER_MENU.tex
 
 # Local release package artifact
 AIGameEngine_Release_Content.zip
+
+# Test assets generated during verification runs
+/assets/textures/checker.png
+/assets/meshes/quad.gltf

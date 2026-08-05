@@ -18,6 +18,10 @@ namespace Renderer {
     namespace {
 
         constexpr uint32_t kMaxMaterialTextures = 8;
+        // Materials that can hold a texture descriptor set at once. Past this,
+        // a material falls back to the shared placeholder set rather than
+        // failing to draw.
+        constexpr uint32_t kMaxMaterialSets = 64;
         constexpr uint32_t kResolveGroupSize = 8;
 
         // Shared declaration block. The material graph's generated code refers to
@@ -488,6 +492,10 @@ void main() {
             m_GPUDrivenEnabled = false;
         }
 
+        if (!TextureLibrary::Get().Initialize(context)) {
+            ENGINE_CORE_WARN("Texture library unavailable; materials keep the white placeholder");
+        }
+
         if (m_GPUDrivenEnabled && !m_Shadows.Initialize(context, m_GPUScene.GetLimits().MaxClusterSlots)) {
             ENGINE_CORE_WARN("Shadow renderer unavailable; the frame renders unshadowed");
         }
@@ -626,6 +634,21 @@ void main() {
         poolInfo.poolSizeCount = 4;
         poolInfo.pPoolSizes = poolSizes;
         if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
+            return false;
+        }
+
+        // Separate pool for per-material texture sets: it is sized by material
+        // count, which grows independently of the fixed frame-level sets.
+        const VkDescriptorPoolSize materialPoolSizes[] = {
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxMaterialTextures * kMaxMaterialSets},
+        };
+        VkDescriptorPoolCreateInfo materialPoolInfo{};
+        materialPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        materialPoolInfo.maxSets = kMaxMaterialSets;
+        materialPoolInfo.poolSizeCount = 1;
+        materialPoolInfo.pPoolSizes = materialPoolSizes;
+        if (vkCreateDescriptorPool(device, &materialPoolInfo, nullptr, &m_MaterialTexturePool) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("SceneRenderer: material texture descriptor pool creation failed");
             return false;
         }
 
@@ -1180,7 +1203,14 @@ void main() {
             if (!compiled.Succeeded) {
                 ENGINE_CORE_ERROR("Material '{}' generated GLSL that does not compile: {}",
                                   material->Name, compiled.ErrorMessage);
-                m_MaterialPipelines[index] = MaterialPipeline{VK_NULL_HANDLE, material->Compiled.Hash, false};
+                // Keep whatever texture set this material already had, so a
+                // failed recompile does not also lose its bindings.
+                MaterialPipeline failed{};
+                failed.GraphHash = material->Compiled.Hash;
+                if (existing != m_MaterialPipelines.end()) {
+                    failed.TextureSet = existing->second.TextureSet;
+                }
+                m_MaterialPipelines[index] = failed;
                 continue;
             }
 
@@ -1274,6 +1304,23 @@ void main() {
 
             MaterialPipeline entry{};
             entry.GraphHash = material->Compiled.Hash;
+            // Carry the existing set across a graph edit: the descriptor pool
+            // has no free, so re-allocating on every recompile would exhaust it.
+            if (existing != m_MaterialPipelines.end()) {
+                entry.TextureSet = existing->second.TextureSet;
+            }
+            if (entry.TextureSet == VK_NULL_HANDLE && m_MaterialTexturePool != VK_NULL_HANDLE) {
+                VkDescriptorSetAllocateInfo textureAlloc{};
+                textureAlloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                textureAlloc.descriptorPool = m_MaterialTexturePool;
+                textureAlloc.descriptorSetCount = 1;
+                textureAlloc.pSetLayouts = &m_MaterialTextureSetLayout;
+                if (vkAllocateDescriptorSets(device, &textureAlloc, &entry.TextureSet) != VK_SUCCESS) {
+                    ENGINE_CORE_WARN("Material '{}' could not get a texture set; it will sample "
+                                     "the shared placeholder", material->Name);
+                    entry.TextureSet = VK_NULL_HANDLE;
+                }
+            }
             if (vkCreateGraphicsPipelines(device, m_Context->GetPipelineCache(), 1, &pipelineInfo,
                                           nullptr, &entry.Pipeline) == VK_SUCCESS) {
                 entry.Valid = true;
@@ -1293,6 +1340,82 @@ void main() {
         m_Stats.MaterialPipelines = validPipelines;
         ENGINE_CORE_INFO("Material pipelines rebuilt: {} valid of {} materials",
                          validPipelines, library.GetMaterialCount());
+
+        // New sets are allocated but empty; a set bound without being written is
+        // undefined behaviour, so this cannot wait for the revision check.
+        m_TextureLibraryRevision = UINT64_MAX;
+    }
+
+    void SceneRenderer::UpdateMaterialTextureSets() {
+        auto& textures = TextureLibrary::Get();
+        auto& materials = MaterialLibrary::Get();
+        if (textures.GetRevision() == m_TextureLibraryRevision) {
+            return;
+        }
+        m_TextureLibraryRevision = textures.GetRevision();
+
+        uint32_t resolved = 0;
+        uint32_t missing = 0;
+
+        for (auto& [index, pipeline] : m_MaterialPipelines) {
+            if (pipeline.TextureSet == VK_NULL_HANDLE) {
+                continue;
+            }
+            const MaterialInstance* material = materials.GetMaterial(index);
+
+            std::vector<VkDescriptorImageInfo> imageInfos(kMaxMaterialTextures);
+            for (uint32_t slot = 0; slot < kMaxMaterialTextures; ++slot) {
+                // Default every slot, including ones this material does not use:
+                // the shader declares the whole array, so every element must be
+                // a live descriptor.
+                imageInfos[slot].sampler = m_LinearSampler;
+                imageInfos[slot].imageView = m_DummyWhite.View;
+                imageInfos[slot].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                if (!material || slot >= material->Compiled.TextureSlots.size()) {
+                    continue;
+                }
+                // A graph's texture slot name is the library key; that is the
+                // whole binding contract, and it means a graph can be authored
+                // before the texture it references exists.
+                const std::string& slotName = material->Compiled.TextureSlots[slot];
+                const uint32_t textureIndex = textures.FindTexture(slotName);
+                if (textureIndex == UINT32_MAX) {
+                    ++missing;
+                    continue;
+                }
+                const GpuTexture* texture = textures.GetTexture(textureIndex);
+                if (!texture || !texture->Image.IsValid()) {
+                    ++missing;
+                    continue;
+                }
+                imageInfos[slot].sampler = textures.GetSampler(true);
+                imageInfos[slot].imageView = texture->Image.View;
+                ++resolved;
+            }
+
+            VkWriteDescriptorSet write{};
+            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet = pipeline.TextureSet;
+            write.dstBinding = 0;
+            write.descriptorCount = kMaxMaterialTextures;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write.pImageInfo = imageInfos.data();
+            vkUpdateDescriptorSets(m_Context->GetDevice(), 1, &write, 0, nullptr);
+        }
+
+        if (resolved > 0 || missing > 0) {
+            ENGINE_CORE_INFO("Material textures rebound: {} resolved, {} still unresolved",
+                             resolved, missing);
+        }
+    }
+
+    VkDescriptorSet SceneRenderer::GetTextureSetForMaterial(uint32_t materialIndex) {
+        auto it = m_MaterialPipelines.find(materialIndex);
+        if (it != m_MaterialPipelines.end() && it->second.TextureSet != VK_NULL_HANDLE) {
+            return it->second.TextureSet;
+        }
+        return m_MaterialTextureSet;
     }
 
     VkPipeline SceneRenderer::GetPipelineForMaterial(uint32_t materialIndex) {
@@ -1408,6 +1531,7 @@ void main() {
 
         m_Frame = frame;
         EnsureMaterialPipelines();
+        UpdateMaterialTextureSets();
 
         // Split the draw list: anything the GPU scene accepted goes through the
         // indirect path, the rest keeps a direct draw so it still appears.
@@ -1529,9 +1653,10 @@ void main() {
         scissor.extent = {m_RenderWidth, m_RenderHeight};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        const VkDescriptorSet sets[] = {m_SceneSet, m_MaterialTextureSet};
+        // Set 0 is per-frame and bound once; set 1 is per-material and rebound
+        // with each pipeline below.
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GeometryLayout,
-                                0, 2, sets, 0, nullptr);
+                                0, 1, &m_SceneSet, 0, nullptr);
 
         const bool indirectAvailable = m_GPUDrivenEnabled && m_GPUScene.IsInitialized() &&
                                        m_Culler.IsInitialized() &&
@@ -1551,6 +1676,9 @@ void main() {
                     continue;
                 }
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                VkDescriptorSet textureSet = GetTextureSetForMaterial(batch.MaterialIndex);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GeometryLayout,
+                                        1, 1, &textureSet, 0, nullptr);
 
                 // One multi-draw per material. Culled clusters are still in the
                 // buffer with instanceCount 0, which the GPU discards for free.
@@ -1599,6 +1727,9 @@ void main() {
                 continue;
             }
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+            VkDescriptorSet textureSet = GetTextureSetForMaterial(command->MaterialIndex);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GeometryLayout,
+                                    1, 1, &textureSet, 0, nullptr);
 
             const uint32_t pushInstancing = 0;
             vkCmdPushConstants(cmd, m_GeometryLayout, VK_SHADER_STAGE_VERTEX_BIT,
@@ -1868,6 +1999,12 @@ void main() {
         }
         m_MaterialPipelines.clear();
         m_MaterialLibraryRevision = UINT64_MAX;
+        m_TextureLibraryRevision = UINT64_MAX;
+        TextureLibrary::Get().Shutdown();
+        if (m_MaterialTexturePool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device, m_MaterialTexturePool, nullptr);
+            m_MaterialTexturePool = VK_NULL_HANDLE;
+        }
 
         DestroyTargets();
         RHI::DestroyGpuImage(device, m_Context->GetAllocator(), m_DummyWhite);

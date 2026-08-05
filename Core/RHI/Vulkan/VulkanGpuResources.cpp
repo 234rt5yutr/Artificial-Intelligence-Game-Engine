@@ -373,5 +373,65 @@ namespace RHI {
         return sampler;
     }
 
+    VkCommandBuffer BeginImmediateCommands(VkDevice device, VkCommandPool pool) {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = pool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+        if (vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("Failed to allocate a one-shot command buffer");
+            return VK_NULL_HANDLE;
+        }
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+            vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+            return VK_NULL_HANDLE;
+        }
+        return commandBuffer;
+    }
+
+    bool EndImmediateCommands(VkDevice device, VkCommandPool pool, VkQueue queue,
+                              VkCommandBuffer commandBuffer) {
+        if (commandBuffer == VK_NULL_HANDLE) {
+            return false;
+        }
+        if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+            vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+            return false;
+        }
+
+        // A fence rather than vkQueueWaitIdle: waiting on the whole queue would
+        // also stall any frame already in flight.
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        VkFence fence = VK_NULL_HANDLE;
+        if (vkCreateFence(device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+            vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+            return false;
+        }
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        const VkResult submitted = vkQueueSubmit(queue, 1, &submitInfo, fence);
+        if (submitted == VK_SUCCESS) {
+            vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+        } else {
+            ENGINE_CORE_ERROR("One-shot command submission failed");
+        }
+
+        vkDestroyFence(device, fence, nullptr);
+        vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+        return submitted == VK_SUCCESS;
+    }
+
 } // namespace RHI
 } // namespace Core

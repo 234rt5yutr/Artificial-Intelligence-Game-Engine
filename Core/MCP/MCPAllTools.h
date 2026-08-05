@@ -17,6 +17,7 @@
 #include "MCPDevTools.h"
 #include "MCPProjectTools.h"
 #include "MCPRenderTools.h"
+#include "MCPAssetTools.h"
 
 // NOT INCLUDED - these four families do not compile against the current MCPTool
 // base class and are excluded from the build until they are ported:
@@ -94,6 +95,8 @@ namespace MCP {
     // - SetShadows: Tune the directional cascaded shadow maps
     // - ListMaterials / GetMaterialGraph / SetMaterialGraph: Author material node graphs
     // - SetEditorViewport: Drive the editor camera, gizmo, and play/pause/step
+    // - LoadTexture / ListTextures: Import images and bind them to material slots
+    // - LoadMesh: Import a glTF/GLB mesh and spawn it
     // Declared here, defined in MCPAllTools.cpp. Callers that only need to
     // register the tools should include this header and link; they do not pay to
     // instantiate every family's schema templates in their own object file.
@@ -155,6 +158,11 @@ namespace MCP {
         // instead of only authoring content that it cannot see.
         auto renderTools = CreateRenderTools();
         tools.insert(tools.end(), renderTools.begin(), renderTools.end());
+
+        // Add asset-import tools. Without these the engine can only render
+        // geometry it generates itself and materials with no textures.
+        auto assetTools = CreateAssetTools();
+        tools.insert(tools.end(), assetTools.begin(), assetTools.end());
 
         return tools;
     }

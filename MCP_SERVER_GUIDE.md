@@ -111,6 +111,7 @@ The bridge requires Node 18+ and has no npm dependencies.
 | **Development** | **`MCPDevTools.h`** | see below |
 | **Project** | **`MCPProjectTools.h`** | `BuildForPlatform`, `SaveScene`, `LoadScene`, `ListProjectFiles` |
 | **Rendering** | **`MCPRenderTools.h`** | see below |
+| **Assets** | **`MCPAssetTools.h`** | `LoadTexture`, `ListTextures`, `LoadMesh` |
 
 ### Not currently registered
 
@@ -171,7 +172,11 @@ upscaling stack invisible to tooling. `MCPRenderTools.h` closes that.
 | `ListMaterials` | Read-only. Every material with its index, node/link counts, compile status, and texture slots |
 | `GetMaterialGraph` | Read-only. A material's graph as JSON, optionally with the GLSL it compiles to |
 | `SetMaterialGraph` | Create or replace a material's node graph; compiles it and rebuilds its pipeline next frame |
+| `SetShadows` | Cascade count and resolution, shadow distance, split distribution, depth/slope/normal bias, PCF radius, spot atlas size |
 | `SetEditorViewport` | Editor fly camera on/off, gizmo mode, frame the selection, pause/resume/single-step |
+| `LoadTexture` | Import an image (PNG/JPEG/TGA/BMP/PSD/GIF/HDR) with mips under a library name |
+| `ListTextures` | Read-only. Every imported texture with dimensions, mips, colour space, and GPU footprint |
+| `LoadMesh` | Import a glTF/GLB mesh and spawn it as an entity |
 
 `SpawnEntity` also gained a `primitive` option on its mesh component
 (`box`, `sphere`, `plane`, `cylinder`, with `subdivisions`), because until now
@@ -220,9 +225,19 @@ but generates GLSL the compiler refuses is stored and reported with
 `compiled: false`; the object then renders with the shader template's default
 surface rather than disappearing.
 
-**Caveat:** `TextureSample` nodes bind a 1x1 white placeholder. The engine has no
-texture import path yet, so the graph, codegen, and permutation cache all work
-but the sampled value is constant.
+A `TextureSample` node's `texture` field is a **texture library name**, not a
+path: `LoadTexture` puts an image into the library under a name, and every
+material slot with that name binds it on the next frame. That means order does
+not matter — a graph can name a texture that has not been imported yet, and it
+resolves as soon as one arrives. Slots with no matching texture keep the 1x1
+white placeholder, so an unresolved slot is a neutral multiply rather than a
+broken material.
+
+`LoadTexture` and `LoadMesh` resolve paths against the project root and reject
+anything that escapes it, the same rule the project-tool family uses.
+
+**Caveat:** textures upload as RGBA8 with mips; there is no BCn compression yet,
+so a large texture set costs more GPU memory than it needs to.
 
 ### Tools that validate but do not yet apply
 
@@ -253,7 +268,8 @@ Rendering loop:
 1. `GetRenderStats` — what the GPU actually drew and culled last frame
 2. `SpawnEntity {template: "mesh", components: {mesh: {primitive: "sphere"}}}` — put
    something in front of the camera
-3. `SetGPUCulling {occlusion: false}` — did the artefact come from the HZB?
+3. `SetGPUCulling {occlusion: false}` / `SetShadows {enabled: false}` — did the
+   artefact come from the HZB, or from the shadows?
 4. `SetMaterialGraph` — change how it shades
 5. `SetUpscaler {quality: "performance"}` — check the cost at a lower render
    resolution
@@ -342,6 +358,7 @@ Every tool publishes MCP annotations so a host can decide what needs confirmatio
 ```
 
 - `readOnlyHint: true` — `GetRenderStats`, `ListMaterials`, `GetMaterialGraph`,
+  `ListTextures`,
   `GetEngineStatus`, `GetEngineLog`, `ListProjectFiles`,
   `RunPlayModeTests`, `RunPerformanceTests`. Safe to auto-permit.
 - `destructiveHint: true` — `SaveScene` (overwrites the target), `LoadScene`

@@ -177,12 +177,32 @@ irradiance-probe fallback rather than hardware RT.
 the probe grid; no hardware ray tracing path; no sky/multi-bounce beyond the
 cache's own feedback loop; no per-light shadowing of indirect contributions.
 
-### 2.3 Shadows
+### 2.3 Shadows — cascades and a spot atlas done
 
-`VirtualShadowMapCache` exists but there is no page table, no clipmap for the
-directional light, and no per-page invalidation on geometry change. There is also
-no equivalent of MegaLights — the many-shadow-casting-light path that UE 5.7 moved
-to beta.
+`Core/Renderer/ShadowPass.*` declared a single shadow map over RHI interfaces
+`VulkanDevice` leaves unimplemented, so it could never render and nothing called
+it. It is deleted. `Core/Renderer/Shadows/ShadowRenderer.*` replaces it:
+
+- **Directional CSM.** Practical split scheme, one bounding sphere per frustum
+  slice (its size is rotation-invariant, which is half of what stops shimmer),
+  texel-grid snapping for the other half, front-face culling in the depth pass,
+  and a normal offset scaled by the grazing angle — the part depth bias alone
+  cannot fix without peter-panning.
+- **Spot atlas.** One shared atlas, one tile per light, allocated per frame by
+  importance so lights past the tile cap degrade to unshadowed rather than
+  flickering. A single render pass instance covers every tile.
+- **Shared culling.** Shadow views cull with the same cluster shader as the main
+  view (moved to `GPUDriven/ClusterCullShader.h`), with occlusion and cone
+  culling switched off — a backfacing cluster still occludes, and dropping it
+  punches holes. All culling runs before any rasterisation.
+
+Spot lights themselves were collected by `LightSystem` and never uploaded, so
+they emitted no light at all; they are now shaded with a proper cone falloff.
+
+**Remaining:** point lights are lit but unshadowed — cube shadows need six tiles
+and a face-selection lookup. `VirtualShadowMapCache` still has no page table and
+no per-page invalidation, so cascades are redrawn in full every frame. No
+MegaLights equivalent.
 
 ### 2.4 FSR upscaling — done
 
@@ -206,16 +226,28 @@ and the GI history, not from a motion-vector-driven reconstruction.
 
 ## Tier 3 — content and tooling parity
 
-### 3.1 No asset import path
+### 3.1 Asset import — geometry and textures done
 
-`AssetCooker` and `AssetLoader` read and write a cooked binary format, but nothing
-imports source assets. `cgltf` is a declared dependency and unused;
-`TerrainGenerator::LoadHeightmap` generates placeholder data instead of reading an
-image.
+`Core/Renderer/Textures/TextureLibrary.*` imports images through stb_image
+(already a declared dependency) and uploads them with a mip chain built by
+successive blits. The binding contract is deliberately simple: a material graph's
+`TextureSample` slot name is the library key, so importing a texture named
+`BaseColor` fills every slot of that name, and a graph can be authored before the
+texture it references exists. Each material owns its own texture descriptor set —
+slot 0 of one material is not slot 0 of another, and a shared set would
+cross-bind them.
 
-**Missing:** glTF mesh/material/skeleton import, texture import with BCn
-compression, and a deterministic cook step that produces the existing cooked
-headers.
+`Mesh::LoadGLTF` was implemented against cgltf and called from nowhere. It is now
+reachable over MCP (`LoadMesh`) and feeds the same GPU-driven path as procedural
+primitives. Both import tools resolve paths against the project root and reject
+anything that escapes it, matching the project-tool family — an import tool that
+took absolute paths would be an arbitrary-file-read primitive.
+
+**Remaining:** glTF brings in geometry only — materials, skeletons, and
+animations in the file are ignored. No BCn compression (`stb_dxt` is available
+and unused), so textures cost RGBA8. No deterministic cook step feeding
+`AssetCooker`'s existing format, and `TerrainGenerator::LoadHeightmap` still
+generates placeholder data rather than reading an image.
 
 ### 3.2 Editor viewport — done
 
@@ -317,18 +349,28 @@ Done in this pass:
   `Mesh::UploadToGPU` silently failed on `Map()`. No mesh had ever been uploaded
   successfully. Fixed at the shared point rather than in `Mesh`.
 
+Also done since:
+
+- ~~Shadows~~ — directional cascades and a spot atlas (Tier 2.3).
+- ~~Asset import~~ — texture import and glTF geometry (Tier 3.1).
+- **A second root-cause fix:** projections were built with OpenGL's `[-1, 1]`
+  clip depth while Vulkan clips to `[0, 1]`, so the near half of every frustum
+  was clipped away and the HZB and GI both misread depth. `GLM_FORCE_DEPTH_ZERO_TO_ONE`
+  is now a `PUBLIC` compile definition.
+
 Remaining, in order:
 
-1. Asset import: `Mesh::LoadGLTF` is implemented with cgltf but nothing calls it,
-   and there is no texture import, which is what caps the material graph at
-   placeholder textures.
-2. Shadows. `ShadowPass` and `VirtualShadowMapCache` still have no consumer, and
-   the new frame draws none — the biggest remaining visual gap.
+1. Point-light cube shadows, then virtual shadow map paging so cascades stop
+   being redrawn in full every frame.
+2. glTF materials and textures, plus a BCn cook step (`stb_dxt` is available and
+   unused).
 3. Port passes onto the render graph (`PostProcessManager::Execute` is still not
    called from the frame).
 4. Skinned geometry through the GPU-driven path, which needs GPU skinning to
    write into the merged arena.
 5. Cluster LOD hierarchy and streaming, so the arena stops being fixed-capacity.
+6. Tier 4: the renderer, ECS, and networking still have no test coverage, and
+   there is no loopback integration test for the netcode.
 
 The structural gate is closed and the rendering gate is now closed too: the frame
 is GPU-driven, lit, globally illuminated, upscaled, authorable, observable in an

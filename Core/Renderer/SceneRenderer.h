@@ -25,6 +25,7 @@
 #include "Core/Renderer/GPUDriven/GPUDrivenCuller.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
+#include "Core/Renderer/Textures/TextureLibrary.h"
 #include "Core/Renderer/Upscaling/FSRUpscaler.h"
 
 #include <cstdint>
@@ -156,6 +157,9 @@ namespace Renderer {
 
         struct MaterialPipeline {
             VkPipeline Pipeline = VK_NULL_HANDLE;
+            // Each material owns its texture set: slot 0 of one material is not
+            // slot 0 of another, so a single shared set would cross-bind them.
+            VkDescriptorSet TextureSet = VK_NULL_HANDLE;
             uint64_t GraphHash = 0;
             bool Valid = false;
         };
@@ -169,6 +173,11 @@ namespace Renderer {
         bool CreateDummyTexture();
         bool CreateDummyShadow();
         void EnsureMaterialPipelines();
+        // Resolves each material's texture slot names against the library and
+        // rewrites its descriptor set. Slots with no matching texture fall back
+        // to the white placeholder.
+        void UpdateMaterialTextureSets();
+        VkDescriptorSet GetTextureSetForMaterial(uint32_t materialIndex);
         VkPipeline GetPipelineForMaterial(uint32_t materialIndex);
         void RecordGeometry(VkCommandBuffer cmd, bool latePhase);
         void RecordDirectDraws(VkCommandBuffer cmd);
@@ -218,6 +227,8 @@ namespace Renderer {
 
         std::unordered_map<uint32_t, MaterialPipeline> m_MaterialPipelines;
         uint64_t m_MaterialLibraryRevision = UINT64_MAX;
+        uint64_t m_TextureLibraryRevision = UINT64_MAX;
+        VkDescriptorPool m_MaterialTexturePool = VK_NULL_HANDLE;
 
         GPUScene m_GPUScene;
         GPUDrivenCuller m_Culler;

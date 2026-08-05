@@ -113,5 +113,15 @@ namespace RHI {
 
     VkSampler CreateClampedSampler(VkDevice device, VkFilter filter);
 
+    // Load-time submission: begin a one-shot command buffer, record, then submit
+    // and wait. Used by asset upload, which happens outside the frame loop and
+    // has no other way onto the queue - the RHI still owns no transfer path.
+    //
+    // Not thread-safe against frame submission: callers must run inside the
+    // frame's idle window (which is where MCP tool handlers already run).
+    VkCommandBuffer BeginImmediateCommands(VkDevice device, VkCommandPool pool);
+    bool EndImmediateCommands(VkDevice device, VkCommandPool pool, VkQueue queue,
+                              VkCommandBuffer commandBuffer);
+
 } // namespace RHI
 } // namespace Core
