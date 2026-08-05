@@ -149,7 +149,18 @@ namespace ECS {
 
     std::size_t Scene::GetEntityCount() const
     {
-        return m_Registry.storage<entt::entity>()->size();
+        // `size()` on the entity storage counts recycled slots as well as live
+        // entities, so it never went down when something was destroyed. That
+        // number is reported straight out of the MCP scene tools, where it read
+        // as "entities are leaking".
+        const auto* storage = m_Registry.storage<entt::entity>();
+        if (storage == nullptr) {
+            return 0;
+        }
+        // entt keeps the entity storage under a swap-only deletion policy, where
+        // free_list() is the number of entities still in use. size() counts
+        // recycled slots as well, which is why the old count never went down.
+        return storage->free_list();
     }
 
     void Scene::Clear()

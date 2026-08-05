@@ -232,6 +232,7 @@ add_library(EngineCore
     Core/Renderer/Upscaling/TemporalUpscalerManager.cpp
     Core/RHI/Vulkan/VulkanGpuResources.h
     Core/RHI/Vulkan/VulkanGpuResources.cpp
+    Core/Renderer/RenderMath.h
     Core/Renderer/SceneRenderer.h
     Core/Renderer/SceneRenderer.cpp
     Core/Renderer/RenderThread.h
@@ -578,6 +579,18 @@ add_executable(EngineCoreSystemPipelineTests
 )
 target_link_libraries(EngineCoreSystemPipelineTests PRIVATE EngineCore)
 add_test(NAME EngineCoreSystemPipelineTests COMMAND EngineCoreSystemPipelineTests)
+
+add_executable(EngineCoreSceneSystemsTests
+    Core/Tests/ECS/SceneSystemsTests.cpp
+)
+target_link_libraries(EngineCoreSceneSystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCoreSceneSystemsTests COMMAND EngineCoreSceneSystemsTests)
+
+add_executable(EngineCoreRenderMathTests
+    Core/Tests/Renderer/RenderMathTests.cpp
+)
+target_link_libraries(EngineCoreRenderMathTests PRIVATE EngineCore)
+add_test(NAME EngineCoreRenderMathTests COMMAND EngineCoreRenderMathTests)
 
 add_executable(EngineCoreRenderPipelineTests
     Core/Tests/Renderer/RenderPipelineTests.cpp

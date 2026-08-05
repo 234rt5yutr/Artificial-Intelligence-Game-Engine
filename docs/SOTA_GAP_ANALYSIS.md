@@ -310,8 +310,21 @@ Unity's Visual Scripting are both major reasons non-programmers ship with them.
 
 - **No platform abstraction beyond Windows/Vulkan.** No D3D12 backend despite the
   RHI being designed for it, no console/mobile targets.
-- **Test coverage is 18 executables over audit/build/diagnostics services only.**
-  Nothing tests the renderer, physics, ECS, or networking.
+- **Test coverage is starting to reach the engine itself.** 22 executables now,
+  including `EngineCoreRenderMathTests` (frustum planes cross-checked against the
+  projection they came from, cascade splits, froxel slicing, backface cones) and
+  `EngineCoreSceneSystemsTests` (entity lifetime, transform hierarchy including
+  parent scale, render collection and visibility filtering, light separation and
+  shadow flags). Writing them required pulling the visibility maths out of the
+  classes that own Vulkan objects into `Core/Renderer/RenderMath.h`, which also
+  removed a duplicated copy of the frustum extraction.
+
+  Both tests found real bugs on their first run: `Scene::GetEntityCount` counted
+  recycled entity slots, so it never decreased after a destroy - and that number
+  is reported straight out of the MCP scene tools.
+
+  Still untested: physics, networking, and everything in the renderer that needs
+  a device. There is still no loopback integration test for the netcode.
 - **No crash telemetry or symbol server integration**, despite
   `StoreSubmissionPackager` producing symbol bundles.
 - **Networking is unproven.** Replication, prediction, reconciliation, rollback, and

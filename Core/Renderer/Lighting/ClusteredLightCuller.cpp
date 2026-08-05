@@ -1,6 +1,7 @@
 #include "ClusteredLightCuller.h"
 
 #include "Core/Log.h"
+#include "Core/Renderer/RenderMath.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Renderer/SceneRenderer.h"
 
@@ -355,10 +356,9 @@ void main() {
 
         // Slice mapping: slice = log(viewZ) * scale + bias, so the shader can
         // recover a froxel from a depth with two multiply-adds.
-        const float logRatio = std::log(farPlane / nearPlane);
-        const float scale = logRatio > 1e-6f ? static_cast<float>(kLightGridSlices) / logRatio : 1.0f;
-        const float bias = -(static_cast<float>(kLightGridSlices) * std::log(nearPlane)) /
-                           std::max(logRatio, 1e-6f);
+        float scale = 1.0f;
+        float bias = 0.0f;
+        ComputeZSliceParams(nearPlane, farPlane, kLightGridSlices, scale, bias);
         m_DepthParams = Math::Vec4(scale, bias, nearPlane, farPlane);
 
         ClusterUniforms uniforms{};

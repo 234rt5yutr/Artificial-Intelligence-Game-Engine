@@ -1,6 +1,7 @@
 #include "GPUDrivenCuller.h"
 
 #include "Core/Log.h"
+#include "Core/Renderer/RenderMath.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Renderer/GPUDriven/ClusterCullShader.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
@@ -17,25 +18,6 @@ namespace Renderer {
         constexpr uint32_t kCullGroupSize = 64;
         constexpr uint32_t kHZBGroupSize = 8;
         constexpr uint32_t kCounterSlots = 8;
-
-        // Gribb-Hartmann plane extraction, normalised so the sphere test is a
-        // plain signed distance.
-        void ExtractFrustumPlanes(const Math::Mat4& viewProjection, Math::Vec4 outPlanes[6]) {
-            const Math::Mat4& m = viewProjection;
-            // glm is column-major: m[column][row].
-            for (int i = 0; i < 3; ++i) {
-                outPlanes[i * 2 + 0] = Math::Vec4(m[0][3] + m[0][i], m[1][3] + m[1][i],
-                                                  m[2][3] + m[2][i], m[3][3] + m[3][i]);
-                outPlanes[i * 2 + 1] = Math::Vec4(m[0][3] - m[0][i], m[1][3] - m[1][i],
-                                                  m[2][3] - m[2][i], m[3][3] - m[3][i]);
-            }
-            for (int i = 0; i < 6; ++i) {
-                const float length = glm::length(Math::Vec3(outPlanes[i]));
-                if (length > 1e-6f) {
-                    outPlanes[i] /= length;
-                }
-            }
-        }
 
         // Shared with the shadow views; see ClusterCullShader.h.
         const char* kCullShader = kClusterCullShaderSource;

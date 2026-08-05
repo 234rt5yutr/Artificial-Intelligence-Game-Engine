@@ -1,6 +1,7 @@
 #include "ShadowRenderer.h"
 
 #include "Core/Log.h"
+#include "Core/Renderer/RenderMath.h"
 #include "Core/RHI/ShaderCompiler.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Renderer/GPUDriven/ClusterCullShader.h"
@@ -21,22 +22,6 @@ namespace Renderer {
 
         constexpr uint32_t kCullGroupSize = 64;
         constexpr uint32_t kCounterSlots = 8;
-
-        void ExtractFrustumPlanes(const Math::Mat4& viewProjection, Math::Vec4 outPlanes[6]) {
-            const Math::Mat4& m = viewProjection;
-            for (int i = 0; i < 3; ++i) {
-                outPlanes[i * 2 + 0] = Math::Vec4(m[0][3] + m[0][i], m[1][3] + m[1][i],
-                                                  m[2][3] + m[2][i], m[3][3] + m[3][i]);
-                outPlanes[i * 2 + 1] = Math::Vec4(m[0][3] - m[0][i], m[1][3] - m[1][i],
-                                                  m[2][3] - m[2][i], m[3][3] - m[3][i]);
-            }
-            for (int i = 0; i < 6; ++i) {
-                const float length = glm::length(Math::Vec3(outPlanes[i]));
-                if (length > 1e-6f) {
-                    outPlanes[i] /= length;
-                }
-            }
-        }
 
         // Depth-only. No fragment stage at all: there is no colour attachment to
         // write, and leaving one out lets the driver take its early-depth path.
@@ -832,19 +817,12 @@ void main() {
         }
 
         const float range = farPlane - nearPlane;
-        const float ratio = farPlane / nearPlane;
+        float splits[kMaxShadowCascades] = {};
+        ComputeCascadeSplits(nearPlane, farPlane, cascades, m_Settings.CascadeSplitLambda, splits);
         float previousSplit = nearPlane;
 
         for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
-            // Practical split scheme: blend a uniform and a logarithmic
-            // distribution so the near cascades stay tight without the far ones
-            // collapsing.
-            const float fraction = static_cast<float>(cascade + 1) / static_cast<float>(cascades);
-            const float logSplit = nearPlane * std::pow(ratio, fraction);
-            const float uniformSplit = nearPlane + range * fraction;
-            const float split = m_Settings.CascadeSplitLambda * logSplit +
-                                (1.0f - m_Settings.CascadeSplitLambda) * uniformSplit;
-
+            const float split = splits[cascade];
             const float nearFraction = (previousSplit - nearPlane) / range;
             const float farFraction = (split - nearPlane) / range;
 
