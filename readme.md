@@ -150,7 +150,12 @@ called `BaseColor` fills every slot of that name, and a graph can be authored
 before the texture it references exists. Each material owns its own texture
 descriptor set, because slot 0 of one material is not slot 0 of another.
 `Mesh::LoadGLTF` was implemented against cgltf but never called; it is now
-reachable over MCP and feeds the same GPU-driven path as procedural primitives.
+reachable over MCP, feeds the same GPU-driven path as procedural primitives, and
+imports the file's materials and images as well as its geometry. A glTF material
+becomes a material graph — base colour factor multiplied by its texture,
+roughness and metallic split out of the packed channels glTF specifies, normal
+and emissive — and because factors multiply their textures, an image the importer
+could not resolve is harmless rather than fatal.
 
 **Editor viewport** (`Core/Editor/Panels/ViewportPanel.*`). The renderer's own
 post-upscale output as an ImGui image, so the editor shows exactly what the game
@@ -277,9 +282,11 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
   carries six matrices each.
 - No texture compression: images upload as RGBA8 with mips. `stb_dxt` is
   available for a BCn cook step but nothing calls it.
-- glTF import brings in geometry only. Materials, skeletons, and animations in
-  the file are ignored, and the mesh is shaded with whichever material index the
-  caller names.
+- glTF skeletons and animations are ignored. A multi-material mesh imports every
+  material, but the geometry path shades a whole mesh with one index, so only the
+  first is applied.
+- Images embedded in a glTF as data URIs are skipped; GLB buffer-view images and
+  external files both work.
 - Skeletal meshes do not go through the new geometry pass. The merged arena
   stores one vertex layout, and GPU skinning is not wired into it yet.
 - Shadows are not part of the new frame. `ShadowPass` and `VirtualShadowMapCache`

@@ -5,6 +5,7 @@
 #include <cgltf.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <cctype>
 #include <cstring>
 
@@ -80,7 +81,116 @@ void Mesh::SetVirtualGeometryFallbackActive(const bool fallbackActive) {
 // Static Mesh Loading
 // ============================================================================
 
-bool Mesh::LoadGLTF(const std::string& filepath) {
+namespace {
+
+    // Image names have to be stable across loads, because a material graph
+    // resolves its texture slots by name. Prefer the glTF image name, fall back
+    // to the file stem, and only then to an index.
+    std::string GltfImageName(const cgltf_image& image, const std::string& meshStem, std::size_t index) {
+        if (image.name != nullptr && image.name[0] != '\0') {
+            return meshStem + ":" + image.name;
+        }
+        if (image.uri != nullptr && image.uri[0] != '\0' && std::strncmp(image.uri, "data:", 5) != 0) {
+            std::string uri = image.uri;
+            const std::size_t slash = uri.find_last_of("/\\");
+            if (slash != std::string::npos) {
+                uri = uri.substr(slash + 1);
+            }
+            const std::size_t dot = uri.find_last_of('.');
+            if (dot != std::string::npos) {
+                uri = uri.substr(0, dot);
+            }
+            return meshStem + ":" + uri;
+        }
+        return meshStem + ":image" + std::to_string(index);
+    }
+
+    void ExtractGltfMaterials(const cgltf_data* data, const std::string& filepath,
+                              GltfImportResult& out) {
+        const std::filesystem::path sourcePath(filepath);
+        const std::filesystem::path baseDirectory = sourcePath.parent_path();
+        const std::string meshStem = sourcePath.stem().string();
+
+        // Images first: materials refer to them by name, and a material can name
+        // an image the caller has not imported yet without that being an error.
+        out.Images.reserve(data->images_count);
+        for (cgltf_size i = 0; i < data->images_count; ++i) {
+            const cgltf_image& image = data->images[i];
+            GltfImageSource source;
+            source.Name = GltfImageName(image, meshStem, i);
+
+            if (image.buffer_view != nullptr && image.buffer_view->buffer != nullptr &&
+                image.buffer_view->buffer->data != nullptr) {
+                // Embedded in a GLB: hand the encoded bytes on rather than
+                // decoding here.
+                const auto* bytes = static_cast<const uint8_t*>(image.buffer_view->buffer->data) +
+                                    image.buffer_view->offset;
+                source.Encoded.assign(bytes, bytes + image.buffer_view->size);
+            } else if (image.uri != nullptr && std::strncmp(image.uri, "data:", 5) != 0) {
+                source.Path = (baseDirectory / image.uri).string();
+            } else {
+                ENGINE_CORE_WARN("glTF image '{}' uses a data URI, which the importer does not "
+                                 "decode; the material slot will keep its placeholder",
+                                 source.Name);
+                continue;
+            }
+            out.Images.push_back(std::move(source));
+        }
+
+        auto textureName = [&](const cgltf_texture_view& view) -> std::string {
+            if (view.texture == nullptr || view.texture->image == nullptr) {
+                return {};
+            }
+            const cgltf_size index = static_cast<cgltf_size>(view.texture->image - data->images);
+            if (index >= data->images_count) {
+                return {};
+            }
+            return GltfImageName(data->images[index], meshStem, index);
+        };
+
+        out.Materials.reserve(data->materials_count);
+        for (cgltf_size i = 0; i < data->materials_count; ++i) {
+            const cgltf_material& material = data->materials[i];
+            GltfMaterialDesc desc;
+            desc.Name = (material.name != nullptr && material.name[0] != '\0')
+                            ? meshStem + ":" + material.name
+                            : meshStem + ":material" + std::to_string(i);
+            desc.DoubleSided = material.double_sided != 0;
+            desc.EmissiveFactor = Math::Vec3(material.emissive_factor[0],
+                                             material.emissive_factor[1],
+                                             material.emissive_factor[2]);
+            desc.NormalTexture = textureName(material.normal_texture);
+            desc.EmissiveTexture = textureName(material.emissive_texture);
+
+            if (material.has_pbr_metallic_roughness) {
+                const auto& pbr = material.pbr_metallic_roughness;
+                desc.BaseColorFactor = Math::Vec4(pbr.base_color_factor[0], pbr.base_color_factor[1],
+                                                  pbr.base_color_factor[2], pbr.base_color_factor[3]);
+                desc.MetallicFactor = pbr.metallic_factor;
+                desc.RoughnessFactor = pbr.roughness_factor;
+                desc.BaseColorTexture = textureName(pbr.base_color_texture);
+                desc.MetallicRoughnessTexture = textureName(pbr.metallic_roughness_texture);
+            }
+            out.Materials.push_back(std::move(desc));
+        }
+
+        // Only base colour and emissive are colour; the rest are data, and
+        // gamma-decoding a normal or roughness map bends the lighting.
+        for (auto& image : out.Images) {
+            image.SRGB = false;
+        }
+        for (const auto& material : out.Materials) {
+            for (auto& image : out.Images) {
+                if (image.Name == material.BaseColorTexture || image.Name == material.EmissiveTexture) {
+                    image.SRGB = true;
+                }
+            }
+        }
+    }
+
+} // namespace
+
+bool Mesh::LoadGLTF(const std::string& filepath, GltfImportResult* out) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
     cgltf_result result = cgltf_parse_file(&options, filepath.c_str(), &data);
@@ -170,6 +280,10 @@ bool Mesh::LoadGLTF(const std::string& filepath) {
             
             primitives.push_back(p);
         }
+    }
+
+    if (out != nullptr) {
+        ExtractGltfMaterials(data, filepath, *out);
     }
 
     cgltf_free(data);

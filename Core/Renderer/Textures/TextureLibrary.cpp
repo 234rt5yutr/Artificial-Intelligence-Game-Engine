@@ -149,6 +149,40 @@ namespace Renderer {
         return index;
     }
 
+    uint32_t TextureLibrary::LoadFromEncodedMemory(const std::string& name,
+                                                  const uint8_t* encoded,
+                                                  std::size_t byteCount,
+                                                  const TextureImportOptions& options) {
+        if (!m_Context || !encoded || byteCount == 0) {
+            ++m_Stats.FailedLoads;
+            return UINT32_MAX;
+        }
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* pixels = stbi_load_from_memory(encoded, static_cast<int>(byteCount),
+                                                &width, &height, &channels, STBI_rgb_alpha);
+        if (!pixels || width <= 0 || height <= 0) {
+            ENGINE_CORE_ERROR("TextureLibrary: failed to decode embedded image '{}': {}",
+                              name, stbi_failure_reason() ? stbi_failure_reason() : "unknown");
+            if (pixels) {
+                stbi_image_free(pixels);
+            }
+            ++m_Stats.FailedLoads;
+            return UINT32_MAX;
+        }
+
+        const uint32_t index = LoadFromMemory(name, pixels, static_cast<uint32_t>(width),
+                                              static_cast<uint32_t>(height), options);
+        stbi_image_free(pixels);
+        if (index != UINT32_MAX) {
+            m_Textures[index].Channels = static_cast<uint32_t>(channels);
+            m_Textures[index].SourcePath = "<embedded>";
+        }
+        return index;
+    }
+
     uint32_t TextureLibrary::LoadFromMemory(const std::string& name,
                                             const uint8_t* pixels,
                                             uint32_t width,

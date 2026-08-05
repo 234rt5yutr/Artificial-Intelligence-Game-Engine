@@ -177,6 +177,38 @@ namespace Renderer {
         uint32_t materialIndex;
     };
 
+    // What a glTF file says about a surface, before it becomes a MaterialGraph.
+    // Kept as plain data rather than translated inside the loader, so the mesh
+    // path stays free of any dependency on the material system.
+    struct GltfMaterialDesc {
+        std::string Name;
+        Math::Vec4 BaseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+        float MetallicFactor = 1.0f;
+        float RoughnessFactor = 1.0f;
+        Math::Vec3 EmissiveFactor{0.0f};
+        // Texture library names, empty when the material does not use one.
+        std::string BaseColorTexture;
+        std::string MetallicRoughnessTexture;
+        std::string NormalTexture;
+        std::string EmissiveTexture;
+        bool DoubleSided = false;
+    };
+
+    // One image referenced by the file. Either a path on disk, or the encoded
+    // bytes for an image embedded in a GLB - the importer does not decode, so
+    // the loader needs no image library of its own.
+    struct GltfImageSource {
+        std::string Name;
+        std::string Path;               // set for external images
+        std::vector<uint8_t> Encoded;   // set for embedded images
+        bool SRGB = true;
+    };
+
+    struct GltfImportResult {
+        std::vector<GltfMaterialDesc> Materials;
+        std::vector<GltfImageSource> Images;
+    };
+
     struct VirtualGeometryAssociation {
         bool Enabled = false;
         bool Clusterized = false;
@@ -203,8 +235,11 @@ namespace Renderer {
         static std::shared_ptr<Mesh> CreatePrimitive(const std::string& kind,
                                                      uint32_t subdivisions = 16);
 
-        // Load static mesh from GLTF
-        bool LoadGLTF(const std::string& filepath);
+        // Load static mesh from GLTF. `out` optionally receives the file's
+        // materials and image references; the caller decides what to do with
+        // them, because this class has no business knowing about the material
+        // graph or the texture library.
+        bool LoadGLTF(const std::string& filepath, GltfImportResult* out = nullptr);
 
         // Load skeletal mesh with skeleton and animations from GLTF
         bool LoadSkeletalGLTF(const std::string& filepath);

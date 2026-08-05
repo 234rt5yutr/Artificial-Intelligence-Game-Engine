@@ -64,6 +64,95 @@ namespace MCP {
             return true;
         }
 
+        // Translates a glTF material into a MaterialGraph. This is the whole
+        // point of keeping GltfMaterialDesc as plain data: the shape of a glTF
+        // material and the shape of the node graph are different problems, and
+        // the loader should not know about the second one.
+        //
+        // A factor and a texture multiply together, which is what glTF specifies
+        // and also what makes an unimported texture harmless - the slot keeps
+        // its white placeholder and the factor still applies.
+        inline Renderer::MaterialGraph BuildGraphFromGltfMaterial(const Renderer::GltfMaterialDesc& desc) {
+            using namespace Renderer;
+            MaterialGraph graph(desc.Name);
+
+            const uint32_t output = graph.AddNode(MaterialNodeType::Output, "Output");
+
+            // Base colour: factor * texture.
+            const uint32_t baseFactor = graph.AddNode(MaterialNodeType::ConstantColor, "BaseColorFactor");
+            graph.SetNodeValue(baseFactor, desc.BaseColorFactor);
+            if (!desc.BaseColorTexture.empty()) {
+                const uint32_t baseTexture = graph.AddNode(MaterialNodeType::TextureSample, "BaseColorTexture");
+                graph.SetNodeTextureSlot(baseTexture, desc.BaseColorTexture);
+                const uint32_t multiply = graph.AddNode(MaterialNodeType::Multiply, "BaseColor");
+                graph.Connect(baseFactor, multiply, 0);
+                graph.Connect(baseTexture, multiply, 1);
+                graph.Connect(multiply, output, static_cast<uint8_t>(MaterialOutputSlot::BaseColor));
+            } else {
+                graph.Connect(baseFactor, output, static_cast<uint8_t>(MaterialOutputSlot::BaseColor));
+            }
+
+            // glTF packs roughness in G and metallic in B of one texture, so the
+            // two outputs are different channels of the same sample.
+            if (!desc.MetallicRoughnessTexture.empty()) {
+                const uint32_t sample = graph.AddNode(MaterialNodeType::TextureSample, "MetallicRoughness");
+                graph.SetNodeTextureSlot(sample, desc.MetallicRoughnessTexture);
+
+                const uint32_t roughnessChannel = graph.AddNode(MaterialNodeType::Split, "RoughnessChannel");
+                graph.SetNodeValue(roughnessChannel, Math::Vec4(1.0f, 0.0f, 0.0f, 0.0f)); // G
+                graph.Connect(sample, roughnessChannel, 0);
+                const uint32_t roughnessFactor = graph.AddNode(MaterialNodeType::ConstantScalar, "RoughnessFactor");
+                graph.SetNodeValue(roughnessFactor, Math::Vec4(desc.RoughnessFactor));
+                const uint32_t roughness = graph.AddNode(MaterialNodeType::Multiply, "Roughness");
+                graph.Connect(roughnessChannel, roughness, 0);
+                graph.Connect(roughnessFactor, roughness, 1);
+                graph.Connect(roughness, output, static_cast<uint8_t>(MaterialOutputSlot::Roughness));
+
+                const uint32_t metallicChannel = graph.AddNode(MaterialNodeType::Split, "MetallicChannel");
+                graph.SetNodeValue(metallicChannel, Math::Vec4(2.0f, 0.0f, 0.0f, 0.0f)); // B
+                graph.Connect(sample, metallicChannel, 0);
+                const uint32_t metallicFactor = graph.AddNode(MaterialNodeType::ConstantScalar, "MetallicFactor");
+                graph.SetNodeValue(metallicFactor, Math::Vec4(desc.MetallicFactor));
+                const uint32_t metallic = graph.AddNode(MaterialNodeType::Multiply, "Metallic");
+                graph.Connect(metallicChannel, metallic, 0);
+                graph.Connect(metallicFactor, metallic, 1);
+                graph.Connect(metallic, output, static_cast<uint8_t>(MaterialOutputSlot::Metallic));
+            } else {
+                const uint32_t roughness = graph.AddNode(MaterialNodeType::ConstantScalar, "Roughness");
+                graph.SetNodeValue(roughness, Math::Vec4(desc.RoughnessFactor));
+                graph.Connect(roughness, output, static_cast<uint8_t>(MaterialOutputSlot::Roughness));
+
+                const uint32_t metallic = graph.AddNode(MaterialNodeType::ConstantScalar, "Metallic");
+                graph.SetNodeValue(metallic, Math::Vec4(desc.MetallicFactor));
+                graph.Connect(metallic, output, static_cast<uint8_t>(MaterialOutputSlot::Metallic));
+            }
+
+            if (!desc.NormalTexture.empty()) {
+                const uint32_t normal = graph.AddNode(MaterialNodeType::TextureSample, "NormalTexture");
+                graph.SetNodeTextureSlot(normal, desc.NormalTexture);
+                graph.Connect(normal, output, static_cast<uint8_t>(MaterialOutputSlot::Normal));
+            }
+
+            const bool hasEmissive = desc.EmissiveFactor.x > 0.0f || desc.EmissiveFactor.y > 0.0f ||
+                                     desc.EmissiveFactor.z > 0.0f || !desc.EmissiveTexture.empty();
+            if (hasEmissive) {
+                const uint32_t emissiveFactor = graph.AddNode(MaterialNodeType::ConstantColor, "EmissiveFactor");
+                graph.SetNodeValue(emissiveFactor, Math::Vec4(desc.EmissiveFactor, 1.0f));
+                if (!desc.EmissiveTexture.empty()) {
+                    const uint32_t emissiveTexture = graph.AddNode(MaterialNodeType::TextureSample, "EmissiveTexture");
+                    graph.SetNodeTextureSlot(emissiveTexture, desc.EmissiveTexture);
+                    const uint32_t emissive = graph.AddNode(MaterialNodeType::Multiply, "Emissive");
+                    graph.Connect(emissiveFactor, emissive, 0);
+                    graph.Connect(emissiveTexture, emissive, 1);
+                    graph.Connect(emissive, output, static_cast<uint8_t>(MaterialOutputSlot::Emissive));
+                } else {
+                    graph.Connect(emissiveFactor, output, static_cast<uint8_t>(MaterialOutputSlot::Emissive));
+                }
+            }
+
+            return graph;
+        }
+
     } // namespace AssetToolsDetail
 
     // ========================================================================
@@ -223,7 +312,10 @@ namespace MCP {
     public:
         LoadMeshTool()
             : MCPTool("LoadMesh",
-                      "Import a glTF or GLB mesh from the project and spawn it as an entity. "
+                      "Import a glTF or GLB mesh from the project and spawn it as an entity, "
+                      "with its materials and textures. Base colour, metallic-roughness, normal, "
+                      "and emissive become a material graph; images referenced by the file are "
+                      "imported into the texture library under names the graph resolves against. "
                       "The mesh is clusterised into the GPU scene like any other, so it goes "
                       "straight through GPU-driven culling. Use SpawnEntity with a primitive "
                       "instead when you just need a box or a sphere.") {}
@@ -254,6 +346,10 @@ namespace MCP {
             schema.Properties["scale"] = Json{
                 {"type", "number"},
                 {"description", "Uniform scale applied to the spawned entity."}};
+            schema.Properties["importMaterials"] = Json{
+                {"type", "boolean"},
+                {"description", "Import the file's materials and textures and shade the mesh with "
+                                "them. Off spawns geometry only, shaded by materialIndex."}};
             schema.Required = {"path"};
             return schema;
         }
@@ -277,7 +373,8 @@ namespace MCP {
             }
 
             auto mesh = std::make_shared<Renderer::Mesh>();
-            if (!mesh->LoadGLTF(resolved.string())) {
+            Renderer::GltfImportResult imported;
+            if (!mesh->LoadGLTF(resolved.string(), &imported)) {
                 return ToolResult::Error("Failed to parse '" + arguments["path"].get<std::string>() +
                                          "' as glTF. Check the engine log for the parser's reason.");
             }
@@ -291,6 +388,56 @@ namespace MCP {
                 if (auto device = application->GetRHIDevice()) {
                     mesh->UploadToGPU(*device);
                 }
+            }
+
+            // Images before materials: a material resolves its texture slots by
+            // name, and the library has to already hold them.
+            uint32_t imagesImported = 0;
+            uint32_t imagesFailed = 0;
+            auto& textures = Renderer::TextureLibrary::Get();
+            if (arguments.value("importMaterials", true) && textures.IsInitialized()) {
+                for (const auto& image : imported.Images) {
+                    Renderer::TextureImportOptions options;
+                    options.SRGB = image.SRGB;
+                    uint32_t index = UINT32_MAX;
+                    if (!image.Encoded.empty()) {
+                        index = textures.LoadFromEncodedMemory(image.Name, image.Encoded.data(),
+                                                               image.Encoded.size(), options);
+                    } else if (!image.Path.empty() && std::filesystem::exists(image.Path)) {
+                        index = textures.LoadFromFile(image.Name, image.Path, options);
+                    } else {
+                        ENGINE_CORE_WARN("glTF image '{}' points at '{}', which is missing",
+                                         image.Name, image.Path);
+                    }
+                    if (index == UINT32_MAX) {
+                        ++imagesFailed;
+                    } else {
+                        ++imagesImported;
+                    }
+                }
+            }
+
+            uint32_t firstMaterialIndex = arguments.value("materialIndex", 0u);
+            uint32_t materialsImported = 0;
+            Json materialNames = Json::array();
+            if (arguments.value("importMaterials", true)) {
+                auto& library = Renderer::MaterialLibrary::Get();
+                library.GetOrCreateDefault();
+                for (std::size_t i = 0; i < imported.Materials.size(); ++i) {
+                    const auto& desc = imported.Materials[i];
+                    const uint32_t index = library.CreateMaterial(desc.Name);
+                    if (auto* material = library.GetMaterial(index)) {
+                        material->Graph = AssetToolsDetail::BuildGraphFromGltfMaterial(desc);
+                        material->DoubleSided = desc.DoubleSided;
+                        library.MarkDirty(index);
+                    }
+                    if (i == 0) {
+                        firstMaterialIndex = index;
+                    }
+                    materialNames.push_back(desc.Name);
+                    ++materialsImported;
+                }
+                library.CompileDirty();
             }
 
             const std::string name = arguments.value("name", resolved.stem().string());
@@ -313,7 +460,8 @@ namespace MCP {
             ECS::MeshComponent meshComponent;
             meshComponent.MeshData = mesh;
             meshComponent.MeshPath = arguments["path"].get<std::string>();
-            meshComponent.MaterialIndex = arguments.value("materialIndex", 0u);
+            // The file's own first material wins unless the caller named one.
+            meshComponent.MaterialIndex = firstMaterialIndex;
             registry.emplace<ECS::MeshComponent>(entity, meshComponent);
 
             Json state;
@@ -322,6 +470,16 @@ namespace MCP {
             state["vertices"] = mesh->vertices.size();
             state["triangles"] = mesh->indices.size() / 3;
             state["submeshes"] = mesh->primitives.size();
+            state["materialsImported"] = materialsImported;
+            state["materialNames"] = materialNames;
+            state["texturesImported"] = imagesImported;
+            state["texturesFailed"] = imagesFailed;
+            state["materialIndex"] = firstMaterialIndex;
+            if (mesh->primitives.size() > 1 && materialsImported > 1) {
+                state["multiMaterialNote"] =
+                    "The mesh has several submeshes with different materials, but the geometry "
+                    "path shades a whole mesh with one material index. Only the first is applied.";
+            }
             state["skeletal"] = mesh->IsSkeletal();
             if (mesh->IsSkeletal()) {
                 state["note"] = "Skeletal meshes are not drawn by the geometry pass yet; "

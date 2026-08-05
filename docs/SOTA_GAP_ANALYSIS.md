@@ -243,11 +243,25 @@ primitives. Both import tools resolve paths against the project root and reject
 anything that escapes it, matching the project-tool family — an import tool that
 took absolute paths would be an arbitrary-file-read primitive.
 
-**Remaining:** glTF brings in geometry only — materials, skeletons, and
-animations in the file are ignored. No BCn compression (`stb_dxt` is available
-and unused), so textures cost RGBA8. No deterministic cook step feeding
-`AssetCooker`'s existing format, and `TerrainGenerator::LoadHeightmap` still
-generates placeholder data rather than reading an image.
+glTF materials now import too. `Mesh::LoadGLTF` optionally reports the file's
+materials and image references as plain data; the MCP importer translates that
+into a `MaterialGraph` — base colour factor multiplied by its texture, roughness
+and metallic split out of the packed G and B channels glTF specifies, plus normal
+and emissive. Keeping the description as data rather than translating inside the
+loader is deliberate: the shape of a glTF material and the shape of a node graph
+are different problems, and the mesh path should not depend on the material
+system to compile.
+
+Because factors multiply their textures, a texture the importer could not resolve
+is harmless — the slot keeps its white placeholder and the factor still applies.
+
+**Remaining:** skeletons and animations in the file are still ignored. Multi-material
+meshes import every material but the geometry path shades a whole mesh with one
+index, so only the first is applied. No BCn compression (`stb_dxt` is available
+and unused), so textures cost RGBA8. Images embedded as data URIs are skipped
+(GLB buffer-view images and external files both work). No deterministic cook step
+feeding `AssetCooker`'s existing format, and `TerrainGenerator::LoadHeightmap`
+still generates placeholder data rather than reading an image.
 
 ### 3.2 Editor viewport — done
 
@@ -365,8 +379,8 @@ Also done since:
 
 Remaining, in order:
 
-1. glTF materials and textures, plus a BCn cook step (`stb_dxt` is available and
-   unused).
+1. BCn texture compression (`stb_dxt` is available and unused), then glTF
+   skeletons and animations.
 2. Port passes onto the render graph (`PostProcessManager::Execute` is still not
    called from the frame).
 3. Skinned geometry through the GPU-driven path, which needs GPU skinning to

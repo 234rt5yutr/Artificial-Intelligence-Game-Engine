@@ -76,6 +76,13 @@ namespace Renderer {
                                 uint32_t height,
                                 const TextureImportOptions& options = {});
 
+        // Decodes an encoded image already in memory (a PNG or JPEG embedded in
+        // a GLB, say). Same formats as LoadFromFile - it is the same decoder.
+        uint32_t LoadFromEncodedMemory(const std::string& name,
+                                       const uint8_t* encoded,
+                                       std::size_t byteCount,
+                                       const TextureImportOptions& options = {});
+
         uint32_t FindTexture(const std::string& name) const;
         const GpuTexture* GetTexture(uint32_t index) const;
         uint32_t GetTextureCount() const { return static_cast<uint32_t>(m_Textures.size()); }
