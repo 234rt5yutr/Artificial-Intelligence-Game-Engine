@@ -146,6 +146,10 @@ namespace Renderer {
             // x = intensity, y = atlas slot (-1 = lit but unshadowed)
             Math::Vec4 SpotIntensitySlot[kMaxSpotShadows];
             Math::Mat4 SpotShadowMatrix[kMaxSpotShadows];
+            // Six faces per point light, laid out flat. x of PointBaseTile is
+            // the first atlas tile of the cube, y is -1 when the light has none.
+            Math::Mat4 PointShadowMatrix[kMaxPointShadows * kCubeFaceCount];
+            Math::Vec4 PointShadowSlotInfo[16];   // x = base tile, y = matrix base, z = has shadow
             // xy = atlas size, z = tile size, w = 1 / atlas size
             Math::Vec4 AtlasParams;
             Math::Mat4 CascadeViewProjection[kMaxShadowCascades];

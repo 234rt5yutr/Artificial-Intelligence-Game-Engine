@@ -36,9 +36,16 @@ namespace Renderer {
     // instead of flickering as the selection changes.
     inline constexpr uint32_t kMaxSpotShadows = 8;
 
+    // Point lights get six tiles each, one per cube face. The cap is set by the
+    // uniform block: six mat4 per light means two lights already cost more than
+    // all the other light data put together.
+    inline constexpr uint32_t kMaxPointShadows = 2;
+    inline constexpr uint32_t kCubeFaceCount = 6;
+
     // Shadow views culled per frame: cascades occupy [0, kMaxShadowCascades),
     // spot atlas tiles follow. Each view owns a draw buffer and a descriptor set.
-    inline constexpr uint32_t kMaxShadowViews = kMaxShadowCascades + kMaxSpotShadows;
+    inline constexpr uint32_t kMaxShadowViews =
+        kMaxShadowCascades + kMaxSpotShadows + kMaxPointShadows * kCubeFaceCount;
 
     struct ShadowSettings {
         bool Enabled = true;
@@ -66,8 +73,11 @@ namespace Renderer {
         // Punctual (spot) shadows share one atlas. One tile per light, sized
         // atlas / tilesPerRow.
         bool SpotShadowsEnabled = true;
+        bool PointShadowsEnabled = true;
         uint32_t AtlasResolution = 4096;
-        uint32_t AtlasTilesPerRow = 3;   // 3x3 = 9 tiles, one spare over the cap
+        // 4x4 = 16 tiles: one point light's cube (6) plus ten spots, or two
+        // cubes plus four spots.
+        uint32_t AtlasTilesPerRow = 4;
     };
 
     struct ShadowStats {
@@ -79,6 +89,9 @@ namespace Renderer {
         float CascadeSplits[kMaxShadowCascades] = {0.0f, 0.0f, 0.0f, 0.0f};
         int32_t ShadowLightIndex = -1;
         uint32_t SpotShadowCount = 0;
+        uint32_t PointShadowCount = 0;
+        uint32_t AtlasTilesUsed = 0;
+        uint32_t AtlasTilesTotal = 0;
         uint32_t AtlasResolution = 0;
         uint32_t AtlasTileSize = 0;
     };
@@ -88,8 +101,16 @@ namespace Renderer {
         Math::Mat4 ViewProjection{1.0f};
         // Which light in FrameRenderData's spot list this belongs to.
         int32_t LightIndex = -1;
-        uint32_t TileX = 0;
-        uint32_t TileY = 0;
+        uint32_t Tile = 0;   // flat tile index into the atlas grid
+    };
+
+    // A point light's cube: six contiguous tiles, one per face, in the order
+    // +X, -X, +Y, -Y, +Z, -Z. The shader picks a face by major axis and indexes
+    // BaseTile + face, so the run has to stay contiguous.
+    struct PointShadowSlot {
+        Math::Mat4 FaceViewProjection[kCubeFaceCount];
+        int32_t LightIndex = -1;
+        uint32_t BaseTile = 0;
     };
 
     class ShadowRenderer {
@@ -116,6 +137,7 @@ namespace Renderer {
         VkImageView GetCascadeArrayView() const { return m_CascadeArray.View; }
         VkImageView GetAtlasView() const { return m_Atlas.View; }
         const std::vector<SpotShadowSlot>& GetSpotSlots() const { return m_SpotSlots; }
+        const std::vector<PointShadowSlot>& GetPointSlots() const { return m_PointSlots; }
         // xy = atlas size in texels, z = tile size in texels, w = 1 / atlas size.
         Math::Vec4 GetAtlasParams() const;
         // Comparison sampler, so a single tap is already 2x2 hardware PCF.
@@ -152,7 +174,10 @@ namespace Renderer {
         void DestroyCascadeTargets();
         bool CreateAtlasTargets();
         void DestroyAtlasTargets();
-        void FitSpotShadows(const FrameRenderData& frame);
+        // Allocates atlas tiles for both punctual kinds. A point light needs a
+        // contiguous run of six; a light that does not fit is skipped whole,
+        // because a partial cube reads as fully lit on its missing faces.
+        void FitPunctualShadows(const FrameRenderData& frame);
         // Shared by the cascade and atlas passes: writes one view's cull
         // descriptors and dispatches it.
         void DispatchCull(VkCommandBuffer cmd, GPUScene& scene, uint32_t viewIndex,
@@ -169,6 +194,7 @@ namespace Renderer {
         RHI::GpuImage m_Atlas{};
         VkFramebuffer m_AtlasFramebuffer = VK_NULL_HANDLE;
         std::vector<SpotShadowSlot> m_SpotSlots;
+        std::vector<PointShadowSlot> m_PointSlots;
         VkRenderPass m_RenderPass = VK_NULL_HANDLE;
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_Pipeline = VK_NULL_HANDLE;

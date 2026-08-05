@@ -200,6 +200,12 @@ namespace MCP {
             // cap are still lit, just unshadowed.
             shadowJson["spotShadowCount"] = shadows.SpotShadowCount;
             shadowJson["spotShadowsEnabled"] = shadowSettings.SpotShadowsEnabled;
+            // Point lights take six tiles each; a light that cannot fit a whole
+            // cube is skipped rather than partially allocated.
+            shadowJson["pointShadowCount"] = shadows.PointShadowCount;
+            shadowJson["pointShadowsEnabled"] = shadowSettings.PointShadowsEnabled;
+            shadowJson["atlasTilesUsed"] = shadows.AtlasTilesUsed;
+            shadowJson["atlasTilesTotal"] = shadows.AtlasTilesTotal;
             shadowJson["atlasResolution"] = shadows.AtlasResolution;
             shadowJson["atlasTileSize"] = shadows.AtlasTileSize;
             shadowJson["atlasTilesPerRow"] = shadowSettings.AtlasTilesPerRow;
@@ -537,6 +543,8 @@ namespace MCP {
                 "boolean", "Snap cascades to a texel grid so shadow edges stop crawling as the camera moves.");
             schema.Properties["spotShadows"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Render shadow tiles for spot lights.");
+            schema.Properties["pointShadows"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Render cube shadows for point lights. Each takes six atlas tiles.");
             schema.Properties["atlasResolution"] = RenderToolsDetail::NumberProperty(
                 "Spot shadow atlas resolution in pixels.", 512, 8192);
             schema.Properties["atlasTilesPerRow"] = RenderToolsDetail::NumberProperty(
@@ -597,6 +605,9 @@ namespace MCP {
             if (arguments.contains("spotShadows") && arguments["spotShadows"].is_boolean()) {
                 settings.SpotShadowsEnabled = arguments["spotShadows"].get<bool>();
             }
+            if (arguments.contains("pointShadows") && arguments["pointShadows"].is_boolean()) {
+                settings.PointShadowsEnabled = arguments["pointShadows"].get<bool>();
+            }
             if (arguments.contains("atlasResolution") && arguments["atlasResolution"].is_number()) {
                 const uint32_t value = std::clamp(arguments["atlasResolution"].get<uint32_t>(), 512u, 8192u);
                 rebuild = rebuild || value != settings.AtlasResolution;
@@ -631,6 +642,10 @@ namespace MCP {
             state["atlasResolution"] = stats.AtlasResolution;
             state["atlasTileSize"] = stats.AtlasTileSize;
             state["spotShadowCount"] = stats.SpotShadowCount;
+            state["pointShadows"] = settings.PointShadowsEnabled;
+            state["pointShadowCount"] = stats.PointShadowCount;
+            state["atlasTilesUsed"] = stats.AtlasTilesUsed;
+            state["atlasTilesTotal"] = stats.AtlasTilesTotal;
             return ToolResult::Success("Shadow settings updated", state);
         }
     };

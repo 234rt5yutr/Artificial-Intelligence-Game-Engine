@@ -75,6 +75,7 @@ namespace ECS {
                     PointLightData pointLight;
                     pointLight.Position = Math::Vec3(transform.WorldMatrix[3]);
                     pointLight.Radius = light.Radius;
+                    pointLight.CastShadows = light.CastShadows ? 1.0f : 0.0f;
                     pointLight.Color = light.Color;
                     pointLight.Intensity = light.Intensity;
                     m_PointLights.push_back(pointLight);

@@ -27,6 +27,13 @@ namespace ECS {
         float Radius;
         Math::Vec3 Color;
         float Intensity;
+        // The shadow renderer allocates cube tiles for lights that cast, so the
+        // flag travels with the light rather than in a parallel array the two
+        // systems would have to keep in step.
+        float CastShadows;
+        float _pad0;
+        float _pad1;
+        float _pad2;
     };
 
     // InnerCutoff and OuterCutoff are cone half-angles in radians, straight from

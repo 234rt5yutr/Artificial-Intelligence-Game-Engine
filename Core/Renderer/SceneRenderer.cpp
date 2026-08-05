@@ -49,6 +49,8 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     vec4 SpotColorOuter[8];
     vec4 SpotIntensitySlot[8];
     mat4 SpotShadowMatrix[8];
+    mat4 PointShadowMatrix[12];
+    vec4 PointShadowSlotInfo[16];
     vec4 AtlasParams;
     mat4 CascadeViewProjection[4];
     vec4 CascadeSplits;
@@ -126,17 +128,11 @@ layout(set = 1, binding = 0) uniform sampler2D uMaterialTextures[8];
 layout(set = 0, binding = 2) uniform sampler2DArrayShadow uCascadeShadow;
 layout(set = 0, binding = 3) uniform sampler2DShadow uShadowAtlas;
 
-// Spot shadows share one atlas: the light's tile is addressed by slot, so the
-// lookup is the same projection as a cascade plus a tile offset.
-float SampleSpotShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightDirection) {
-    if (slot < 0) {
-        return 1.0;
-    }
-
-    float grazing = 1.0 - abs(dot(normal, lightDirection));
-    vec3 offsetPos = worldPos + normal * uMaterial.ShadowParams.z * (1.0 + grazing * 2.0);
-
-    vec4 lightClip = uMaterial.SpotShadowMatrix[slot] * vec4(offsetPos, 1.0);
+// One atlas tile lookup, shared by spot and point-cube shadows: project, clamp
+// inside the tile, then PCF. The projection differs; everything after it does
+// not.
+float SampleAtlasTile(mat4 lightViewProjection, int tile, vec3 worldPos) {
+    vec4 lightClip = lightViewProjection * vec4(worldPos, 1.0);
     if (lightClip.w <= 1e-6) {
         return 1.0;
     }
@@ -150,25 +146,65 @@ float SampleSpotShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightDirection
     float tileSize = uMaterial.AtlasParams.z;
     float invAtlas = uMaterial.AtlasParams.w;
     int tilesPerRow = max(int(uMaterial.AtlasParams.x / max(tileSize, 1.0)), 1);
-    vec2 tileOrigin = vec2(float(slot % tilesPerRow), float(slot / tilesPerRow)) * tileSize;
+    vec2 tileOrigin = vec2(float(tile % tilesPerRow), float(tile / tilesPerRow)) * tileSize;
 
-    // Inset by a texel so a PCF tap at the tile edge cannot bleed into the
-    // neighbouring light's depth.
-    vec2 inset = vec2(1.0) / max(tileSize, 1.0);
+    // Inset before the taps, not after: a PCF tap at the tile edge would
+    // otherwise read the neighbouring tile, which for a cube is a different
+    // face entirely and shows as a hard line along the seam.
+    vec2 inset = vec2(1.5) / max(tileSize, 1.0);
     vec2 clamped = clamp(tileUV, inset, vec2(1.0) - inset);
 
-    float step = invAtlas;
     float sum = 0.0;
     int taps = 0;
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
-            vec2 offset = vec2(float(x), float(y)) * step;
+            vec2 offset = vec2(float(x), float(y)) * invAtlas;
             vec2 atlasUV = (tileOrigin + clamped * tileSize) * invAtlas + offset;
             sum += texture(uShadowAtlas, vec3(atlasUV, projected.z));
             ++taps;
         }
     }
     return sum / float(taps);
+}
+
+vec3 ShadowOffsetPosition(vec3 worldPos, vec3 normal, vec3 lightDirection) {
+    float grazing = 1.0 - abs(dot(normal, lightDirection));
+    return worldPos + normal * uMaterial.ShadowParams.z * (1.0 + grazing * 2.0);
+}
+
+float SampleSpotShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightDirection) {
+    if (slot < 0) {
+        return 1.0;
+    }
+    return SampleAtlasTile(uMaterial.SpotShadowMatrix[slot],
+                           slot,
+                           ShadowOffsetPosition(worldPos, normal, lightDirection));
+}
+
+// A point light casts in every direction, so it owns six contiguous tiles. The
+// face is picked by the major axis of the light-to-fragment vector, which is
+// uniform across most of a triangle and so costs little despite being a branch.
+float SamplePointShadow(int lightIndex, vec3 worldPos, vec3 normal, vec3 lightPosition) {
+    vec4 info = uMaterial.PointShadowSlotInfo[lightIndex];
+    if (info.z < 0.5) {
+        return 1.0;
+    }
+
+    vec3 toFragment = worldPos - lightPosition;
+    vec3 magnitude = abs(toFragment);
+    int face;
+    if (magnitude.x >= magnitude.y && magnitude.x >= magnitude.z) {
+        face = toFragment.x > 0.0 ? 0 : 1;
+    } else if (magnitude.y >= magnitude.z) {
+        face = toFragment.y > 0.0 ? 2 : 3;
+    } else {
+        face = toFragment.z > 0.0 ? 4 : 5;
+    }
+
+    vec3 lightDirection = normalize(-toFragment);
+    return SampleAtlasTile(uMaterial.PointShadowMatrix[int(info.y) + face],
+                           int(info.x) + face,
+                           ShadowOffsetPosition(worldPos, normal, lightDirection));
 }
 
 int SelectCascade(float viewDepth) {
@@ -315,7 +351,9 @@ void main() {
         float window = clamp(1.0 - pow(distance / radius, 4.0), 0.0, 1.0);
         vec3 radiance = uMaterial.PointColorIntensity[i].rgb *
                         uMaterial.PointColorIntensity[i].w * attenuation * window * window;
-        direct += ShadeLight(n, v, toLight / max(distance, 1e-5), radiance, surf, f0);
+        float shadow = SamplePointShadow(int(i), inWorldPos, n,
+                                         uMaterial.PointPositionRadius[i].xyz);
+        direct += ShadeLight(n, v, toLight / max(distance, 1e-5), radiance, surf, f0) * shadow;
     }
 
     // Spot lights were collected by LightSystem and never uploaded, so they
@@ -1486,6 +1524,28 @@ void main() {
             uniforms.SpotIntensitySlot[i] =
                 Math::Vec4(light.Intensity, static_cast<float>(slotForLight[i]), 0.0f, 0.0f);
         }
+        // Point cube slots. Default every entry to "no shadow" so a light
+        // without a tile takes the early out rather than indexing a stale
+        // matrix from a previous frame.
+        for (auto& info : uniforms.PointShadowSlotInfo) {
+            info = Math::Vec4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+        const auto& pointSlots = m_Shadows.GetPointSlots();
+        for (std::size_t slot = 0; slot < pointSlots.size(); ++slot) {
+            const int32_t lightIndex = pointSlots[slot].LightIndex;
+            if (lightIndex < 0 || lightIndex >= 16) {
+                continue;
+            }
+            const uint32_t matrixBase = static_cast<uint32_t>(slot) * kCubeFaceCount;
+            for (uint32_t face = 0; face < kCubeFaceCount; ++face) {
+                uniforms.PointShadowMatrix[matrixBase + face] =
+                    pointSlots[slot].FaceViewProjection[face];
+            }
+            uniforms.PointShadowSlotInfo[lightIndex] =
+                Math::Vec4(static_cast<float>(pointSlots[slot].BaseTile),
+                           static_cast<float>(matrixBase), 1.0f, 0.0f);
+        }
+
         uniforms.AtlasParams = m_Shadows.IsInitialized() ? m_Shadows.GetAtlasParams()
                                                          : Math::Vec4(1.0f, 1.0f, 1.0f, 1.0f);
 
@@ -1624,7 +1684,8 @@ void main() {
         }
         const bool atlasReady = m_Shadows.IsInitialized() &&
                                 m_Shadows.GetAtlasView() != VK_NULL_HANDLE &&
-                                !m_Shadows.GetSpotSlots().empty();
+                                (!m_Shadows.GetSpotSlots().empty() ||
+                                 !m_Shadows.GetPointSlots().empty());
         VkDescriptorImageInfo atlasInfo{};
         atlasInfo.sampler = shadowInfo.sampler;
         atlasInfo.imageView = atlasReady ? m_Shadows.GetAtlasView() : m_DummyAtlas.View;

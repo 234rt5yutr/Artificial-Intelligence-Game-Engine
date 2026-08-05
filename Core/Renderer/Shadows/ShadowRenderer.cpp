@@ -709,43 +709,115 @@ void main() {
         }
     }
 
-    void ShadowRenderer::FitSpotShadows(const FrameRenderData& frame) {
+    void ShadowRenderer::FitPunctualShadows(const FrameRenderData& frame) {
         m_SpotSlots.clear();
-        if (!m_Settings.SpotShadowsEnabled || m_Atlas.Image == VK_NULL_HANDLE) {
+        m_PointSlots.clear();
+        m_Stats.SpotShadowCount = 0;
+        m_Stats.PointShadowCount = 0;
+        m_Stats.AtlasTilesUsed = 0;
+
+        const uint32_t tilesPerRow = std::max(1u, m_Settings.AtlasTilesPerRow);
+        const uint32_t tileCapacity = tilesPerRow * tilesPerRow;
+        m_Stats.AtlasTilesTotal = tileCapacity;
+
+        if (m_Atlas.Image == VK_NULL_HANDLE) {
             return;
         }
 
-        const uint32_t tilesPerRow = std::max(1u, m_Settings.AtlasTilesPerRow);
-        const uint32_t tileCapacity = std::min(tilesPerRow * tilesPerRow, kMaxSpotShadows);
-
-        // Rank by how much of the screen the light plausibly covers - intensity
-        // and reach over distance - so the tiles go to the lights a viewer is
-        // most likely to notice rather than to whatever came first in the list.
+        // Rank both punctual kinds together by how much of the screen the light
+        // plausibly covers - intensity and reach over distance - so tiles go to
+        // the lights a viewer is most likely to notice rather than to whichever
+        // kind happens to be enumerated first.
         struct Candidate {
             int32_t LightIndex;
             float Score;
+            bool IsPoint;
         };
         std::vector<Candidate> candidates;
-        candidates.reserve(frame.SpotLights.size());
+        candidates.reserve(frame.SpotLights.size() + frame.PointLights.size());
 
-        for (std::size_t i = 0; i < frame.SpotLights.size(); ++i) {
-            const auto& light = frame.SpotLights[i];
-            if (light.CastShadows <= 0.5f || light.Radius <= 0.0f) {
-                continue;
+        auto scoreFor = [&](const Math::Vec3& position, float intensity, float radius) {
+            const float distance = std::max(0.5f, glm::length(position - frame.CameraPosition));
+            return (intensity * radius) / distance;
+        };
+
+        if (m_Settings.SpotShadowsEnabled) {
+            for (std::size_t i = 0; i < frame.SpotLights.size() && i < kMaxSpotShadows; ++i) {
+                const auto& light = frame.SpotLights[i];
+                if (light.CastShadows <= 0.5f || light.Radius <= 0.0f) {
+                    continue;
+                }
+                candidates.push_back({static_cast<int32_t>(i),
+                                      scoreFor(light.Position, light.Intensity, light.Radius), false});
             }
-            const float distance = std::max(0.5f, glm::length(light.Position - frame.CameraPosition));
-            const float score = (light.Intensity * light.Radius) / distance;
-            candidates.push_back({static_cast<int32_t>(i), score});
+        }
+        if (m_Settings.PointShadowsEnabled) {
+            for (std::size_t i = 0; i < frame.PointLights.size() && i < kMaxPointShadows; ++i) {
+                const auto& light = frame.PointLights[i];
+                if (light.CastShadows <= 0.5f || light.Radius <= 0.0f) {
+                    continue;
+                }
+                candidates.push_back({static_cast<int32_t>(i),
+                                      scoreFor(light.Position, light.Intensity, light.Radius), true});
+            }
         }
 
         std::sort(candidates.begin(), candidates.end(),
                   [](const Candidate& lhs, const Candidate& rhs) { return lhs.Score > rhs.Score; });
-        if (candidates.size() > tileCapacity) {
-            candidates.resize(tileCapacity);
-        }
 
-        for (std::size_t slotIndex = 0; slotIndex < candidates.size(); ++slotIndex) {
-            const auto& light = frame.SpotLights[candidates[slotIndex].LightIndex];
+        // Tile-run allocator. A point light needs six contiguous tiles; a light
+        // that does not fit is skipped whole, because a partial cube reads as
+        // fully lit on its missing faces - worse than no shadow at all.
+        uint32_t nextTile = 0;
+
+        for (const Candidate& candidate : candidates) {
+            if (candidate.IsPoint) {
+                if (m_PointSlots.size() >= kMaxPointShadows ||
+                    nextTile + kCubeFaceCount > tileCapacity) {
+                    continue;
+                }
+                const auto& light = frame.PointLights[candidate.LightIndex];
+
+                PointShadowSlot slot;
+                slot.LightIndex = candidate.LightIndex;
+                slot.BaseTile = nextTile;
+
+                // The six standard cube directions, in the order the shader's
+                // major-axis pick produces: +X, -X, +Y, -Y, +Z, -Z.
+                const Math::Vec3 faceDirections[kCubeFaceCount] = {
+                    Math::Vec3( 1.0f,  0.0f,  0.0f), Math::Vec3(-1.0f,  0.0f,  0.0f),
+                    Math::Vec3( 0.0f,  1.0f,  0.0f), Math::Vec3( 0.0f, -1.0f,  0.0f),
+                    Math::Vec3( 0.0f,  0.0f,  1.0f), Math::Vec3( 0.0f,  0.0f, -1.0f),
+                };
+                // Up vectors chosen so no face's forward is parallel to its up,
+                // which would make lookAt degenerate.
+                const Math::Vec3 faceUps[kCubeFaceCount] = {
+                    Math::Vec3(0.0f, 1.0f, 0.0f), Math::Vec3(0.0f, 1.0f, 0.0f),
+                    Math::Vec3(0.0f, 0.0f, 1.0f), Math::Vec3(0.0f, 0.0f, 1.0f),
+                    Math::Vec3(0.0f, 1.0f, 0.0f), Math::Vec3(0.0f, 1.0f, 0.0f),
+                };
+
+                // 90 degrees exactly: anything wider overlaps the neighbouring
+                // face, anything narrower leaves a gap along the seam.
+                Math::Mat4 faceProjection = glm::perspective(
+                    1.5707963f, 1.0f, 0.05f, std::max(light.Radius, 0.1f));
+                faceProjection[1][1] *= -1.0f;
+
+                for (uint32_t face = 0; face < kCubeFaceCount; ++face) {
+                    const Math::Mat4 faceView =
+                        glm::lookAt(light.Position, light.Position + faceDirections[face], faceUps[face]);
+                    slot.FaceViewProjection[face] = faceProjection * faceView;
+                }
+
+                m_PointSlots.push_back(slot);
+                nextTile += kCubeFaceCount;
+                continue;
+            }
+
+            if (m_SpotSlots.size() >= kMaxSpotShadows || nextTile >= tileCapacity) {
+                continue;
+            }
+            const auto& light = frame.SpotLights[candidate.LightIndex];
 
             Math::Vec3 direction = light.Direction;
             const float directionLength = glm::length(direction);
@@ -768,13 +840,15 @@ void main() {
 
             SpotShadowSlot slot;
             slot.ViewProjection = lightProjection * lightView;
-            slot.LightIndex = candidates[slotIndex].LightIndex;
-            slot.TileX = static_cast<uint32_t>(slotIndex) % tilesPerRow;
-            slot.TileY = static_cast<uint32_t>(slotIndex) / tilesPerRow;
+            slot.LightIndex = candidate.LightIndex;
+            slot.Tile = nextTile;
             m_SpotSlots.push_back(slot);
+            ++nextTile;
         }
 
         m_Stats.SpotShadowCount = static_cast<uint32_t>(m_SpotSlots.size());
+        m_Stats.PointShadowCount = static_cast<uint32_t>(m_PointSlots.size());
+        m_Stats.AtlasTilesUsed = nextTile;
     }
 
     bool ShadowRenderer::BeginFrame(const FrameRenderData& frame, GPUScene& scene) {
@@ -782,7 +856,9 @@ void main() {
         m_ShadowLightIndex = -1;
         m_Stats.ShadowLightIndex = -1;
         m_Stats.SpotShadowCount = 0;
+        m_Stats.PointShadowCount = 0;
         m_SpotSlots.clear();
+        m_PointSlots.clear();
         m_ClusterSlots = 0;
 
         if (!IsInitialized() || !m_Settings.Enabled) {
@@ -814,12 +890,13 @@ void main() {
             }
         }
 
-        // Spot tiles are independent of the directional cascades: a scene with
-        // no sun can still have shadowed spots.
-        FitSpotShadows(frame);
+        // Punctual tiles are independent of the directional cascades: a scene
+        // with no sun can still have shadowed spots and points.
+        FitPunctualShadows(frame);
 
         m_Stats.ShadowLightIndex = m_ShadowLightIndex;
-        m_Stats.Active = m_ClusterSlots > 0 && (m_ShadowLightIndex >= 0 || !m_SpotSlots.empty());
+        m_Stats.Active = m_ClusterSlots > 0 &&
+                         (m_ShadowLightIndex >= 0 || !m_SpotSlots.empty() || !m_PointSlots.empty());
         return m_Stats.Active;
     }
 
@@ -894,7 +971,8 @@ void main() {
             return;
         }
         const bool hasCascades = m_ShadowLightIndex >= 0;
-        if (!hasCascades && m_SpotSlots.empty()) {
+        const bool hasPunctual = !m_SpotSlots.empty() || !m_PointSlots.empty();
+        if (!hasCascades && !hasPunctual) {
             return;
         }
 
@@ -931,6 +1009,16 @@ void main() {
         for (std::size_t slot = 0; slot < m_SpotSlots.size(); ++slot) {
             DispatchCull(cmd, scene, kMaxShadowCascades + static_cast<uint32_t>(slot),
                          m_SpotSlots[slot].ViewProjection, m_LightDirection);
+        }
+        // Cube views come after the spot views in the same slot space, six per
+        // light, so a view index maps to exactly one draw buffer.
+        for (std::size_t slot = 0; slot < m_PointSlots.size(); ++slot) {
+            for (uint32_t face = 0; face < kCubeFaceCount; ++face) {
+                const uint32_t viewIndex = kMaxShadowCascades + kMaxSpotShadows +
+                                           static_cast<uint32_t>(slot) * kCubeFaceCount + face;
+                DispatchCull(cmd, scene, viewIndex,
+                             m_PointSlots[slot].FaceViewProjection[face], m_LightDirection);
+            }
         }
 
         VkClearValue clear{};
@@ -987,7 +1075,7 @@ void main() {
 
         // The atlas is one render pass instance for every tile: cleared once,
         // then each light draws into its own viewport and scissor.
-        if (!m_SpotSlots.empty() && m_AtlasFramebuffer != VK_NULL_HANDLE) {
+        if (hasPunctual && m_AtlasFramebuffer != VK_NULL_HANDLE) {
             VkRenderPassBeginInfo passBegin{};
             passBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             passBegin.renderPass = m_RenderPass;
@@ -997,12 +1085,30 @@ void main() {
             passBegin.pClearValues = &clear;
 
             vkCmdBeginRenderPass(cmd, &passBegin, VK_SUBPASS_CONTENTS_INLINE);
+            const uint32_t tilesPerRow = std::max(1u, m_Settings.AtlasTilesPerRow);
+            auto tileOrigin = [&](uint32_t tile, int32_t& x, int32_t& y) {
+                x = static_cast<int32_t>((tile % tilesPerRow) * m_Stats.AtlasTileSize);
+                y = static_cast<int32_t>((tile / tilesPerRow) * m_Stats.AtlasTileSize);
+            };
+
             for (std::size_t slot = 0; slot < m_SpotSlots.size(); ++slot) {
                 const SpotShadowSlot& spot = m_SpotSlots[slot];
+                int32_t x = 0;
+                int32_t y = 0;
+                tileOrigin(spot.Tile, x, y);
                 recordView(kMaxShadowCascades + static_cast<uint32_t>(slot), spot.ViewProjection,
-                           static_cast<int32_t>(spot.TileX * m_Stats.AtlasTileSize),
-                           static_cast<int32_t>(spot.TileY * m_Stats.AtlasTileSize),
-                           m_Stats.AtlasTileSize);
+                           x, y, m_Stats.AtlasTileSize);
+            }
+            for (std::size_t slot = 0; slot < m_PointSlots.size(); ++slot) {
+                const PointShadowSlot& point = m_PointSlots[slot];
+                for (uint32_t face = 0; face < kCubeFaceCount; ++face) {
+                    const uint32_t viewIndex = kMaxShadowCascades + kMaxSpotShadows +
+                                               static_cast<uint32_t>(slot) * kCubeFaceCount + face;
+                    int32_t x = 0;
+                    int32_t y = 0;
+                    tileOrigin(point.BaseTile + face, x, y);
+                    recordView(viewIndex, point.FaceViewProjection[face], x, y, m_Stats.AtlasTileSize);
+                }
             }
             vkCmdEndRenderPass(cmd);
             m_Atlas.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
