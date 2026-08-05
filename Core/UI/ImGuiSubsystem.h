@@ -77,6 +77,10 @@ namespace UI {
         /// @brief Render ImGui draw data for a swapchain image
         /// @param commandBuffer The Vulkan command buffer to record into
         /// @param imageIndex Current swapchain image index
+        /// @brief Build the debug panels. Reads scene/engine state, so it must run
+        /// on the simulation thread, before Render records anything.
+        void BuildOverlays();
+
         void Render(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 
         /// @brief End ImGui frame - call at end of frame

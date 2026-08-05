@@ -4,6 +4,8 @@
 // Tools for querying, modifying, spawning entities, and executing scripts via MCP
 
 #include "MCPTool.h"
+#include "Core/Application.h"
+#include "Core/RHI/Vulkan/VulkanDevice.h"
 #include "MCPTypes.h"
 #include "SceneSerialization.h"
 #include "ActionValidator.h"
@@ -644,6 +646,35 @@ namespace MCP {
                 ECS::MeshComponent mesh;
                 if (arguments.contains("components") && arguments["components"].contains("mesh")) {
                     mesh = DeserializeMesh(arguments["components"]["mesh"]);
+                }
+
+                // A MeshComponent with no MeshData draws nothing, which is what
+                // every "mesh" entity used to be. A primitive gives the spawn
+                // real geometry the renderer can consume.
+                const Json& meshArgs = (arguments.contains("components") &&
+                                        arguments["components"].contains("mesh"))
+                                           ? arguments["components"]["mesh"]
+                                           : Json::object();
+                std::string primitive = meshArgs.value("primitive", std::string());
+                if (primitive.empty() && !mesh.IsValid()) {
+                    primitive = arguments.value("primitive", std::string());
+                }
+                if (!primitive.empty()) {
+                    const uint32_t subdivisions = meshArgs.value(
+                        "subdivisions", arguments.value("subdivisions", 16u));
+                    if (auto generated = Renderer::Mesh::CreatePrimitive(primitive, subdivisions)) {
+                        // Upload for the per-mesh fallback path; the GPU-driven
+                        // path clusterises from the CPU arrays either way.
+                        if (auto* application = Application::TryGet()) {
+                            if (auto device = application->GetRHIDevice()) {
+                                generated->UploadToGPU(*device);
+                            }
+                        }
+                        mesh.MeshData = std::move(generated);
+                        mesh.MeshPath = "primitive:" + primitive;
+                    } else {
+                        ENGINE_CORE_WARN("MCP SpawnEntity: unknown primitive '{}'", primitive);
+                    }
                 }
                 registry.emplace<ECS::MeshComponent>(entity, mesh);
             }

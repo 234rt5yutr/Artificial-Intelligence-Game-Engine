@@ -9,11 +9,15 @@
 #include "Core/Diagnostics/GPUProfilerCapture.h"
 #include "Core/Renderer/Upscaling/TemporalUpscalerManager.h"
 #include "Core/UI/UIManager.h"
+#include "Core/Editor/EditorModule.h"
 #include "Core/Asset/HotReload/AssetHotReloadService.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/SystemPipeline.h"
 #include "Core/ECS/Systems/RenderSystem.h"
 #include "Core/ECS/Systems/CameraSystem.h"
+#include "Core/ECS/Systems/LightSystem.h"
+#include "Core/Renderer/RenderThread.h"
+#include "Core/Renderer/SceneRenderer.h"
 #include "Core/MCP/MCPServer.h"
 #include "Core/MCP/MCPToolFactory.h"
 #include <thread>
@@ -122,6 +126,11 @@ namespace Core {
     }
 
     Application::~Application() {
+        // Nothing below is safe while frames are still in flight.
+        if (m_RenderThread) {
+            m_RenderThread->Stop();
+            m_RenderThread.reset();
+        }
         if (m_MCPServer) {
             // Stop serving before the scene goes away: tools hold a raw Scene pointer.
             m_MCPServer->SetActiveScene(nullptr);
@@ -159,25 +168,58 @@ namespace Core {
             return;
         }
 
+        m_RenderThread = std::make_unique<Renderer::RenderThread>();
+        if (m_VulkanContext && s_RuntimeOptions.EnableRenderThread) {
+            m_RenderThread->Start(m_VulkanContext.get());
+        } else if (m_VulkanContext) {
+            ENGINE_CORE_INFO("Render thread disabled; submission runs inline on the main thread");
+        }
+
         auto lastFrameTime = std::chrono::high_resolution_clock::now();
 
         while (m_Running) {
             PROFILE_SCOPE("Application Loop");
 
+            // Events only. A resize is recorded and applied at the sync point
+            // below, because recreating the swapchain under a recording render
+            // thread would destroy objects it is still using.
             m_Window->OnUpdate();
+
+            auto now = std::chrono::high_resolution_clock::now();
+            float deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
+            lastFrameTime = now;
+            m_ElapsedSeconds += deltaTime;
+
+            // Simulation for this frame overlaps the render thread's submission
+            // of the previous one. Nothing in here touches renderer state.
+            if (m_RuntimeScene) {
+                m_RuntimeScene->OnUpdateSimulation(deltaTime);
+            }
+
+            // --- sync point: the renderer is idle from here to SubmitFrame ---
+            m_RenderThread->WaitForFrame();
+
+            if (m_PendingResize && m_VulkanContext) {
+                m_VulkanContext->RecreateSwapchain(m_PendingResizeWidth, m_PendingResizeHeight);
+                if (m_RuntimeScene) {
+                    if (auto* pipeline = m_RuntimeScene->GetSystemPipeline()) {
+                        pipeline->SetScreenDimensions(m_PendingResizeWidth, m_PendingResizeHeight);
+                    }
+                }
+                m_PendingResize = false;
+            }
+
+            // MCP tools drive the scene and the renderer, so they run inside the
+            // idle window rather than racing the render thread.
             if (m_MCPServer) {
                 m_MCPServer->ProcessPendingRequests();
             }
             Asset::HotReload::AssetHotReloadService::Get().PumpFrameSafePoint();
 
-            auto now = std::chrono::high_resolution_clock::now();
-            float deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
-            lastFrameTime = now;
-
             auto& uiManager = UI::UIManager::Get();
             uiManager.BeginFrame();
             if (m_RuntimeScene) {
-                m_RuntimeScene->OnUpdate(deltaTime);
+                m_RuntimeScene->OnUpdateUI();
             }
             uiManager.Update(deltaTime);
 
@@ -189,30 +231,21 @@ namespace Core {
             }
 
             if (m_VulkanContext) {
-                // Hand this frame's draw list to the renderer. Before this the
-                // renderer drew a hard-coded triangle and RenderSystem's output
-                // had no consumer at all.
-                const auto* pipeline = m_RuntimeScene ? m_RuntimeScene->GetSystemPipeline() : nullptr;
-                const auto* renderSystem = pipeline ? pipeline->GetRenderSystem() : nullptr;
-                const auto* cameraSystem = pipeline ? pipeline->GetCameraSystem() : nullptr;
-
-                if (renderSystem && cameraSystem) {
-                    const auto& drawCommands = renderSystem->GetDrawCommands();
-                    m_VulkanContext->SetSceneDrawData(
-                        drawCommands.data(),
-                        drawCommands.size(),
-                        &cameraSystem->GetViewProjectionMatrix()[0][0]);
-                } else {
-                    m_VulkanContext->ClearSceneDrawData();
-                }
-
-                m_VulkanContext->DrawFrame();
-                // The draw list is owned by RenderSystem and rebuilt next frame.
-                m_VulkanContext->ClearSceneDrawData();
+                Renderer::FrameRenderData frame;
+                BuildFrameRenderData(frame, deltaTime);
+                // Hands off and returns; with no render thread this renders
+                // inline, so there is only one call site either way.
+                m_RenderThread->SubmitFrame(std::move(frame));
+            } else {
+                uiManager.EndFrame();
             }
 
-            uiManager.EndFrame();
+            ++m_FrameIndex;
         }
+
+        // Drain before any of the systems the render thread reads go away.
+        m_RenderThread->Stop();
+        m_RenderThread.reset();
 
         ENGINE_CORE_INFO("Application shutting down.");
     }
@@ -234,16 +267,11 @@ namespace Core {
             return true;
         }
 
-        if (m_VulkanContext) {
-            m_VulkanContext->RecreateSwapchain(e.GetWidth(), e.GetHeight());
-        }
-
-        // Keep camera projection aspect ratio in sync with the swapchain.
-        if (m_RuntimeScene) {
-            if (auto* pipeline = m_RuntimeScene->GetSystemPipeline()) {
-                pipeline->SetScreenDimensions(e.GetWidth(), e.GetHeight());
-            }
-        }
+        // Deferred: the swapchain can only be recreated while the render thread
+        // is idle, which the main loop guarantees at its sync point.
+        m_PendingResize = true;
+        m_PendingResizeWidth = e.GetWidth();
+        m_PendingResizeHeight = e.GetHeight();
 
         return true;
     }
@@ -308,6 +336,60 @@ namespace Core {
         }
 
         m_StartupTraceCapturePending = s_RuntimeOptions.CaptureStartupGPUTrace;
+    }
+
+    void Application::BuildFrameRenderData(Renderer::FrameRenderData& frame, float deltaTime) {
+        (void)deltaTime;
+
+        frame.FrameIndex = m_FrameIndex;
+        frame.TimeSeconds = m_ElapsedSeconds;
+
+        const auto* pipeline = m_RuntimeScene ? m_RuntimeScene->GetSystemPipeline() : nullptr;
+        if (!pipeline) {
+            return;
+        }
+
+        // Copied, not referenced: RenderSystem rebuilds these vectors during the
+        // next simulation step, which by design runs while this frame is still
+        // being submitted.
+        if (const auto* renderSystem = pipeline->GetRenderSystem()) {
+            frame.DrawCommands = renderSystem->GetDrawCommands();
+        }
+        if (const auto* lightSystem = pipeline->GetLightSystem()) {
+            frame.DirectionalLights = lightSystem->GetDirectionalLights();
+            frame.PointLights = lightSystem->GetPointLights();
+        }
+        if (const auto* cameraSystem = pipeline->GetCameraSystem()) {
+            frame.View = cameraSystem->GetViewMatrix();
+            frame.Projection = cameraSystem->GetProjectionMatrix();
+            frame.ViewProjection = cameraSystem->GetViewProjectionMatrix();
+            frame.CameraPosition = Math::Vec3(glm::inverse(frame.View)[3]);
+        }
+
+        // The editor viewport can fly its own camera; when it is driving, its
+        // matrices replace the scene camera's for the whole frame so culling,
+        // shading, and picking all agree on one view.
+        if (auto* editorModule = UI::UIManager::Get().GetEditorModule()) {
+            Math::Mat4 editorView(1.0f);
+            Math::Mat4 editorProjection(1.0f);
+            if (editorModule->GetViewportPanel().GetCameraOverride(editorView, editorProjection)) {
+                frame.View = editorView;
+                frame.Projection = editorProjection;
+                frame.ViewProjection = editorProjection * editorView;
+                frame.CameraPosition = Math::Vec3(glm::inverse(editorView)[3]);
+            }
+        }
+
+        // Sub-pixel jitter for the temporal upscaler. Applied to the projection
+        // here so the culling matrices and the draw matrices agree.
+        if (auto* sceneRenderer = m_VulkanContext->GetSceneRenderer()) {
+            const Math::Vec2 jitter = sceneRenderer->GetProjectionJitter(m_FrameIndex);
+            if (jitter.x != 0.0f || jitter.y != 0.0f) {
+                frame.Projection[2][0] += jitter.x;
+                frame.Projection[2][1] += jitter.y;
+                frame.ViewProjection = frame.Projection * frame.View;
+            }
+        }
     }
 
     void Application::CaptureRuntimeTraceNow(const std::filesystem::path& outputPath, const std::string& frameTag) {

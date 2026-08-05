@@ -18,6 +18,13 @@ The gap that matters is not the feature list. It is that **most of this code was
 never connected to a running frame, and a large part of it was never compiled.**
 Findings from the audit:
 
+> **Update, later in August 2026:** the six rendering items this document called
+> out as the real distance to UE/Unity — GPU-driven cluster culling, dynamic GI,
+> a material graph, an editor viewport, FSR, and a render-thread split — are
+> implemented and running. Each section below records what was built and what is
+> still missing inside it. The sections are rewritten in place rather than
+> appended, so this stays a description of the engine rather than a changelog.
+
 | Finding | Scale |
 | --- | --- |
 | `Scene::OnUpdate` ran only the UI system | Every gameplay/physics/animation/camera/render system was dead code |
@@ -62,12 +69,31 @@ term off the vertex normal) because per-material descriptor sets need the RHI to
 own command submission first. `LightSystem::GetForwardPlusLights()` still has no
 consumer, and `PostProcessManager::Execute` is still not called from the frame.
 
-### 1.2 No render-thread / simulation-thread split
+### 1.2 Render-thread split — done
 
-Everything runs on the main thread. Unreal has Game → Render → RHI threads with a
-one-frame pipeline; Unity 6 has the SRP batcher plus its job-based render pipeline.
-Until this exists, CPU-bound scenes cannot overlap simulation with submission and
-the engine is limited to roughly the cost of `simulate + submit` per frame.
+`Core/Renderer/RenderThread.*` runs Vulkan submission on its own thread while the
+simulation for the next frame proceeds. The frame packet (`FrameRenderData`:
+draw commands, lights, view matrices) is **copied**, because `RenderSystem`
+rebuilds its draw list during the overlapping simulation step.
+
+The sync point sits immediately before ImGui's `NewFrame`, which is what makes
+this safe without deep-copying ImGui's draw lists. Two things had to move to keep
+that guarantee honest:
+
+- `ImGuiSubsystem::Render` both built the debug panels and recorded them. Panel
+  construction reads scene state, so it split into `BuildOverlays()` (simulation
+  thread) and `Render()` (render thread).
+- `Scene::OnUpdate` pushed text draws into the shared `TextRenderer` while the
+  render thread would be flushing it. It split into `OnUpdateSimulation` and
+  `OnUpdateUI`, and only the first half overlaps.
+
+Window resizes are deferred from the event callback to the frame's sync point,
+since recreating the swapchain under a recording render thread would destroy
+objects it is still using.
+
+**Remaining:** UI construction does not overlap (it is sub-millisecond against
+the simulation), and there is no separate RHI thread — submission and recording
+share one thread.
 
 ### 1.3 Render graph is built but not used
 
@@ -95,27 +121,61 @@ called from the frame, because the renderer is still not scene-driven (1.1).
 
 ## Tier 2 — visual parity
 
-### 2.1 Virtualized geometry is a cluster builder, not Nanite
+### 2.1 GPU-driven cluster culling — done
 
-`VirtualGeometryClusterBuilder` and `VirtualGeometryStreamingService` produce and
-stream clusters, but there is no GPU-driven culling pipeline: no persistent
-hierarchical cluster culling compute pass, no software rasterizer for sub-pixel
-triangles, no visibility buffer. UE 5.7 additionally ships Nanite Foliage
-(assemblies + skinning + voxel LOD).
+`VirtualGeometryClusterBuilder` clusters *submeshes*, not triangles, which is not
+a granularity a GPU culling pass can use. `Core/Renderer/GPUDriven/` adds the
+real thing:
 
-**Missing:** visibility-buffer pass, two-phase occlusion culling against a HZB,
-GPU-driven indirect draw of cluster batches.
+- **`GPUScene`** merges every registered mesh into one vertex arena and one index
+  arena. Without this an indirect draw is pointless, because each mesh would
+  still need its own bind. Meshes are clusterised into runs of <= 128 triangles
+  ordered along a Morton curve, and the index buffer is reordered so each cluster
+  is one contiguous `(firstIndex, indexCount)` range.
+- **`GPUDrivenCuller`** dispatches one thread per cluster slot. It locates the
+  owning instance by binary-searching a prefix sum the CPU uploads, rather than
+  the CPU expanding every cluster every frame, then tests frustum, backface cone
+  (meshoptimizer's formulation), and a hierarchical-Z pyramid, writing
+  `VkDrawIndexedIndirectCommand`s directly. Culled clusters get `instanceCount`
+  0, which the GPU discards for free.
+- **Two-phase.** Phase 1 tests against the previous frame's HZB and draws.
+  The HZB is rebuilt from the depth those draws produced, and phase 2 re-tests
+  only the clusters phase 1 rejected for occlusion. This is the part that
+  separates it from a plain one-frame-stale occlusion test.
+- Instances are sorted by material on the CPU so each material is one
+  `vkCmdDrawIndexedIndirect` over a contiguous slot range.
 
-### 2.2 No dynamic global illumination that runs
+Verified live over MCP: 43 cluster slots across two meshes, 18 cone-culled, one
+indirect batch, and `gpuDriven:false` correctly falls back to direct draws.
 
-`GlobalIllumination.h` declares SSGI/VXGI/RTGI/probe paths; the compiled unit does
-not implement the async bake, probe update, or radiance propagation entry points.
-Unity 6's Adaptive Probe Volumes auto-place probes and support day/night blending;
-Lumen in UE 5.7 is moving to hardware ray tracing at 60 Hz.
+**Remaining:** no software rasteriser for sub-pixel triangles, no visibility
+buffer, no cluster LOD hierarchy (one LOD per mesh), no streaming — the arena is
+fixed-capacity and a mesh that does not fit stays on the direct path. Skinned
+meshes are excluded because the arena stores one vertex layout.
 
-**Missing:** pick one path and finish it. Given the iGPU target stated in
-`engine_plan.md`, screen-space GI with an irradiance-probe fallback is the
-defensible choice, not hardware RT.
+### 2.2 Dynamic global illumination — done
+
+The recommendation was to pick one path and finish it: screen-space GI with an
+irradiance-probe fallback rather than hardware RT.
+`Core/Renderer/GI/DynamicGlobalIllumination.*` is that path.
+
+- Half-resolution screen traces: cosine-hemisphere rays marched in world space
+  and re-projected each step, so a ray leaving the screen terminates rather than
+  smearing edge pixels inward.
+- A world radiance cache of 16,384 L1 spherical-harmonic probes (48 bytes each)
+  on a camera-centred grid snapped to whole cells. Probes are fed by screen-space
+  injection and only accept a sample when they sit within a cell of the surface
+  they projected onto; probes with no coverage decay rather than holding stale
+  light.
+- Temporal reprojection through the previous frame's view-projection, using exact
+  world position — no motion-vector buffer needed.
+- Indirect light is modulated by the G-buffer albedo in the resolve pass, which
+  is why the frame grew a slim G-buffer (colour, albedo+roughness,
+  normal+metallic, depth).
+
+**Remaining:** no surface cache, so off-screen indirect light is only as good as
+the probe grid; no hardware ray tracing path; no sky/multi-bounce beyond the
+cache's own feedback loop; no per-light shadowing of indirect contributions.
 
 ### 2.3 Shadows
 
@@ -124,14 +184,23 @@ directional light, and no per-page invalidation on geometry change. There is als
 no equivalent of MegaLights — the many-shadow-casting-light path that UE 5.7 moved
 to beta.
 
-### 2.4 Upscaling is a manager without backends
+### 2.4 FSR upscaling — done
 
-`TemporalUpscalerManager` and `FrameGenerationController` compile, but FSR/DLSS/XeSS
-are enum values with no vendor SDK integration. `DynamicResolution` marks them as
-stubs.
+`Core/Renderer/Upscaling/FSRUpscaler.*` implements the FSR 1 pipeline in-engine:
+EASU (12-tap edge-adaptive anisotropic upsample with a windowed-sinc kernel and a
+neighbourhood clamp against ringing) followed by RCAS (contrast-adaptive
+sharpening whose per-pixel lobe is limited so it cannot clip a neighbourhood
+extreme). Quality presets drive the render resolution; Halton(2,3) jitter is
+folded into the projection so the culling and draw matrices agree.
 
-**Missing:** at minimum FSR (open source, no vendor gating), wired to the TAA
-history and motion vectors that `TAASystem` already produces.
+This is an implementation of the published algorithm, not a binding of AMD's SDK,
+which is not a declared dependency of this project. Switching quality over MCP
+rebuilds every offscreen target and was verified changing 853x480 to 640x360
+against a 1280x720 swapchain.
+
+**Remaining:** DLSS and XeSS are still enum values — both need vendor SDKs. There
+is no FSR 2/3 temporal accumulator: stability comes from the engine's own jitter
+and the GI history, not from a motion-vector-driven reconstruction.
 
 ---
 
@@ -148,19 +217,37 @@ image.
 compression, and a deterministic cook step that produces the existing cooked
 headers.
 
-### 3.2 Editor is panels without a viewport
+### 3.2 Editor viewport — done
 
-`EditorAPI`, `EditorSelection`, `CommandStack`, `SceneHierarchyPanel`, and
-`InspectorPanel` exist. There is no scene viewport, no transform gizmo, no
-drag-and-drop asset browser, and no play-in-editor state transition. Prefabs,
-visual scripting graphs, and timelines are asset structs with no editor.
+`Core/Editor/Panels/ViewportPanel.*` displays the renderer's own post-upscale
+output as an ImGui image, so the editor shows exactly what the game sees — GI,
+upscaling and all — rather than a second, simplified render path that would
+drift. It has a fly camera that overrides the frame's view matrices when active,
+click-to-select picking that unprojects through the same matrices the frame was
+rendered with, a translate/rotate/scale gizmo whose drag is projected onto the
+axis as it appears on screen, and play/pause/single-step driving the existing
+`SystemPipeline` gating.
 
-### 3.3 Materials are not authorable
+**Remaining:** no drag-and-drop asset browser; picking uses the transform's
+scaled unit box rather than real mesh bounds, which are not cached anywhere;
+prefabs, visual scripting graphs, and timelines are still asset structs with no
+editor.
 
-There is no material graph, no shader permutation authoring path from a material
-definition, and `MeshComponent` carries a mesh path rather than a material
-instance. `ShaderPermutationLibrary` compiles permutations but nothing declares
-them from content.
+### 3.3 Material graph — done
+
+`Core/Renderer/Material/MaterialGraph.*` is a DAG of ~22 node types compiled to
+GLSL and injected into the lit shader template. Compilation detects cycles,
+missing outputs, and dangling links; `Connect` refuses an edge that would close a
+loop rather than letting codegen discover it later. Permutations are cached by
+graph hash, so an unchanged graph never rebuilds its pipeline, and a graph that
+fails to compile still gets a pipeline built from the template's defaults so the
+object renders flat grey instead of disappearing. `MaterialLibrary` is what
+`DrawCommand::MaterialIndex` now actually indexes.
+
+**Remaining:** no texture import path, so `TextureSample` nodes bind a 1x1 white
+placeholder — the graph, codegen, and permutation cache all work, but the
+sampled value is constant until an asset importer exists. No node editor UI; the
+graph is authored over MCP or JSON.
 
 ### 3.4 No physics debug or visual scripting runtime
 
@@ -210,26 +297,43 @@ Done in this pass:
   through `VulkanContext` directly — implementing them would create a second,
   unused submission path.
 
+Done in this pass:
+
+- ~~Feed lights and materials into the mesh pass~~ — the frame now renders a slim
+  G-buffer through per-material pipelines with a full PBR forward shade over
+  `LightSystem`'s directional and point lights.
+- ~~GPU-driven cluster culling~~ (Tier 2.1)
+- ~~Dynamic global illumination~~ (Tier 2.2)
+- ~~FSR upscaling~~ (Tier 2.4)
+- ~~Material graph~~ (Tier 3.3)
+- ~~Editor viewport~~ (Tier 3.2)
+- ~~Render-thread split~~ (Tier 1.2)
+- **Procedural primitives.** Nothing in the engine could produce renderable
+  geometry without a glTF file on disk, so no rendering path could be exercised
+  at all. `Mesh::CreatePrimitive` builds box/sphere/plane/cylinder, and MCP
+  `SpawnEntity` can request one.
+- **A real bug this uncovered:** `VulkanBuffer` ignored `BufferDescriptor::mapped`
+  for vertex and index buffers, allocating them device-local, so every
+  `Mesh::UploadToGPU` silently failed on `Map()`. No mesh had ever been uploaded
+  successfully. Fixed at the shared point rather than in `Mesh`.
+
 Remaining, in order:
 
-1. Feed lights and materials into the mesh pass, and call
-   `PostProcessManager::Execute` from the frame. The geometry path works; it is
-   unlit.
-2. Wire `Mesh::LoadGLTF` (already implemented with cgltf, but nothing calls it)
-   into the asset pipeline so scenes can reference mesh files, plus BCn texture
-   cook.
-3. Port passes onto the render graph.
-4. Editor viewport with gizmos and play-in-editor.
-5. FSR upscaling wired to existing motion vectors.
-6. Render-thread split.
-7. GPU-driven cluster culling.
+1. Asset import: `Mesh::LoadGLTF` is implemented with cgltf but nothing calls it,
+   and there is no texture import, which is what caps the material graph at
+   placeholder textures.
+2. Shadows. `ShadowPass` and `VirtualShadowMapCache` still have no consumer, and
+   the new frame draws none — the biggest remaining visual gap.
+3. Port passes onto the render graph (`PostProcessManager::Execute` is still not
+   called from the frame).
+4. Skinned geometry through the GPU-driven path, which needs GPU skinning to
+   write into the merged arena.
+5. Cluster LOD hierarchy and streaming, so the arena stops being fixed-capacity.
 
-The structural gate is closed: simulation runs, the renderer consumes the scene,
-and every subsystem is constructed. What remains is depth of feature rather than
-missing plumbing — lighting, materials, asset import wiring, and the GPU-driven
-work in Tier 2. Items 6–7 are the ones that
-genuinely approach UE/Unity rendering architecture, and should not be started
-before item 1 makes the frame observable.
+The structural gate is closed and the rendering gate is now closed too: the frame
+is GPU-driven, lit, globally illuminated, upscaled, authorable, observable in an
+editor viewport, and submitted on its own thread. What remains is content
+pipeline (1), shadows (2), and depth on the culling work (4–5).
 
 ---
 

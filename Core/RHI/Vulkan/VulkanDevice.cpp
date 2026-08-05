@@ -73,7 +73,16 @@ namespace RHI {
             return nullptr;
         }
 
-        return std::make_shared<VulkanBuffer>(m_Context->GetAllocator(), desc);
+        // VulkanBuffer reports allocation failure by throwing. This function is
+        // documented to return null instead, and callers check for null - so a
+        // device out of memory must not take the process down.
+        try {
+            return std::make_shared<VulkanBuffer>(m_Context->GetAllocator(), desc);
+        } catch (const std::exception& error) {
+            ENGINE_CORE_ERROR("VulkanDevice::CreateBuffer failed for {} bytes: {}",
+                              desc.size, error.what());
+            return nullptr;
+        }
     }
 
     std::shared_ptr<RHITexture> VulkanDevice::CreateTexture(const TextureDescriptor& desc) {

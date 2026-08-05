@@ -292,12 +292,14 @@ void ImGuiSubsystem::UpdateStats(const PerformanceStats& stats) {
     m_Stats = stats;
 }
 
-void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+void ImGuiSubsystem::BuildOverlays() {
     if (!m_Initialized) {
         return;
     }
 
-    // Render debug overlays based on config
+    // Panel construction reads engine and scene state, so it has to stay on the
+    // thread that owns the simulation. Only the recording half below is safe to
+    // run on the render thread.
     if (m_Config.showPerformance) {
         RenderPerformanceOverlay();
     }
@@ -322,7 +324,15 @@ void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) 
         m_DebugDrawCallback();
     }
 
-    // Finalize ImGui rendering
+}
+
+void ImGuiSubsystem::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+    if (!m_Initialized) {
+        return;
+    }
+
+    // Finalize ImGui rendering. Touches only ImGui's own buffers, never the
+    // scene, so it is safe here while the simulation runs ahead.
     ImGui::Render();
 
     if (imageIndex >= m_Framebuffers.size()) {

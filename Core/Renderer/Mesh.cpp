@@ -792,5 +792,173 @@ bool Mesh::UploadToGPU(RHI::RHIDevice& device) {
     return true;
 }
 
+
+// ============================================================================
+// Procedural primitives
+// ============================================================================
+//
+// Nothing in the engine could produce renderable geometry without a glTF file
+// on disk, which made every rendering path impossible to exercise: an empty
+// scene proves only that the renderer starts.
+
+namespace {
+
+    void AppendQuad(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices,
+                    const Math::Vec3& origin, const Math::Vec3& right, const Math::Vec3& up,
+                    const Math::Vec3& normal) {
+        const uint32_t base = static_cast<uint32_t>(vertices.size());
+        const Math::Vec4 tangent(glm::normalize(right), 1.0f);
+
+        // Counter-clockwise seen from the normal side, matching the geometry
+        // pipeline's front face.
+        const Math::Vec3 corners[4] = {
+            origin,
+            origin + right,
+            origin + right + up,
+            origin + up
+        };
+        const Math::Vec2 uvs[4] = {
+            Math::Vec2(0.0f, 0.0f), Math::Vec2(1.0f, 0.0f),
+            Math::Vec2(1.0f, 1.0f), Math::Vec2(0.0f, 1.0f)
+        };
+
+        for (int i = 0; i < 4; ++i) {
+            Vertex vertex;
+            vertex.position = corners[i];
+            vertex.normal = normal;
+            vertex.texCoord = uvs[i];
+            vertex.tangent = tangent;
+            vertices.push_back(vertex);
+        }
+
+        indices.insert(indices.end(), {base + 0, base + 1, base + 2,
+                                       base + 0, base + 2, base + 3});
+    }
+
+    void BuildBox(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices) {
+        const float h = 0.5f;
+        AppendQuad(vertices, indices, Math::Vec3(-h, -h,  h), Math::Vec3(1, 0, 0),  Math::Vec3(0, 1, 0),  Math::Vec3(0, 0, 1));
+        AppendQuad(vertices, indices, Math::Vec3( h, -h, -h), Math::Vec3(-1, 0, 0), Math::Vec3(0, 1, 0),  Math::Vec3(0, 0, -1));
+        AppendQuad(vertices, indices, Math::Vec3( h, -h,  h), Math::Vec3(0, 0, -1), Math::Vec3(0, 1, 0),  Math::Vec3(1, 0, 0));
+        AppendQuad(vertices, indices, Math::Vec3(-h, -h, -h), Math::Vec3(0, 0, 1),  Math::Vec3(0, 1, 0),  Math::Vec3(-1, 0, 0));
+        AppendQuad(vertices, indices, Math::Vec3(-h,  h,  h), Math::Vec3(1, 0, 0),  Math::Vec3(0, 0, -1), Math::Vec3(0, 1, 0));
+        AppendQuad(vertices, indices, Math::Vec3(-h, -h, -h), Math::Vec3(1, 0, 0),  Math::Vec3(0, 0, 1),  Math::Vec3(0, -1, 0));
+    }
+
+    void BuildSphere(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices,
+                     uint32_t segments) {
+        segments = std::max(3u, segments);
+        const uint32_t rings = std::max(3u, segments / 2u);
+
+        for (uint32_t ring = 0; ring <= rings; ++ring) {
+            const float v = static_cast<float>(ring) / static_cast<float>(rings);
+            const float phi = v * 3.14159265359f;
+            for (uint32_t segment = 0; segment <= segments; ++segment) {
+                const float u = static_cast<float>(segment) / static_cast<float>(segments);
+                const float theta = u * 6.28318530718f;
+
+                Vertex vertex;
+                vertex.normal = Math::Vec3(std::sin(phi) * std::cos(theta),
+                                           std::cos(phi),
+                                           std::sin(phi) * std::sin(theta));
+                vertex.position = vertex.normal * 0.5f;
+                vertex.texCoord = Math::Vec2(u, v);
+                vertex.tangent = Math::Vec4(-std::sin(theta), 0.0f, std::cos(theta), 1.0f);
+                vertices.push_back(vertex);
+            }
+        }
+
+        const uint32_t stride = segments + 1;
+        for (uint32_t ring = 0; ring < rings; ++ring) {
+            for (uint32_t segment = 0; segment < segments; ++segment) {
+                const uint32_t a = ring * stride + segment;
+                const uint32_t b = a + stride;
+                indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+            }
+        }
+    }
+
+    void BuildPlane(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices,
+                    uint32_t segments) {
+        segments = std::max(1u, segments);
+        for (uint32_t z = 0; z <= segments; ++z) {
+            for (uint32_t x = 0; x <= segments; ++x) {
+                const float u = static_cast<float>(x) / static_cast<float>(segments);
+                const float v = static_cast<float>(z) / static_cast<float>(segments);
+                Vertex vertex;
+                vertex.position = Math::Vec3(u - 0.5f, 0.0f, v - 0.5f);
+                vertex.normal = Math::Vec3(0.0f, 1.0f, 0.0f);
+                vertex.texCoord = Math::Vec2(u, v);
+                vertex.tangent = Math::Vec4(1.0f, 0.0f, 0.0f, 1.0f);
+                vertices.push_back(vertex);
+            }
+        }
+
+        const uint32_t stride = segments + 1;
+        for (uint32_t z = 0; z < segments; ++z) {
+            for (uint32_t x = 0; x < segments; ++x) {
+                const uint32_t a = z * stride + x;
+                const uint32_t b = a + stride;
+                indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+            }
+        }
+    }
+
+    void BuildCylinder(std::vector<Vertex>& vertices, std::vector<uint32_t>& indices,
+                       uint32_t segments) {
+        segments = std::max(3u, segments);
+        const float halfHeight = 0.5f;
+
+        for (uint32_t segment = 0; segment <= segments; ++segment) {
+            const float u = static_cast<float>(segment) / static_cast<float>(segments);
+            const float theta = u * 6.28318530718f;
+            const Math::Vec3 normal(std::cos(theta), 0.0f, std::sin(theta));
+
+            for (int end = 0; end < 2; ++end) {
+                Vertex vertex;
+                vertex.position = normal * 0.5f +
+                                  Math::Vec3(0.0f, end == 0 ? -halfHeight : halfHeight, 0.0f);
+                vertex.normal = normal;
+                vertex.texCoord = Math::Vec2(u, static_cast<float>(end));
+                vertex.tangent = Math::Vec4(-std::sin(theta), 0.0f, std::cos(theta), 1.0f);
+                vertices.push_back(vertex);
+            }
+        }
+
+        for (uint32_t segment = 0; segment < segments; ++segment) {
+            const uint32_t a = segment * 2;
+            indices.insert(indices.end(), {a, a + 1, a + 2, a + 2, a + 1, a + 3});
+        }
+    }
+
+} // namespace
+
+std::shared_ptr<Mesh> Mesh::CreatePrimitive(const std::string& kind, uint32_t subdivisions) {
+    auto mesh = std::make_shared<Mesh>();
+
+    if (kind == "box" || kind == "cube") {
+        BuildBox(mesh->vertices, mesh->indices);
+    } else if (kind == "sphere") {
+        BuildSphere(mesh->vertices, mesh->indices, std::clamp(subdivisions, 3u, 128u));
+    } else if (kind == "plane" || kind == "quad") {
+        BuildPlane(mesh->vertices, mesh->indices, std::clamp(subdivisions, 1u, 256u));
+    } else if (kind == "cylinder") {
+        BuildCylinder(mesh->vertices, mesh->indices, std::clamp(subdivisions, 3u, 128u));
+    } else {
+        ENGINE_CORE_WARN("Mesh::CreatePrimitive: unknown primitive '{}'", kind);
+        return nullptr;
+    }
+
+    Primitive primitive{};
+    primitive.firstIndex = 0;
+    primitive.indexCount = static_cast<uint32_t>(mesh->indices.size());
+    primitive.materialIndex = 0;
+    mesh->primitives.push_back(primitive);
+
+    ENGINE_CORE_INFO("Primitive '{}' built: {} vertices, {} triangles",
+                     kind, mesh->vertices.size(), mesh->indices.size() / 3);
+    return mesh;
+}
+
 } // namespace Renderer
 } // namespace Core

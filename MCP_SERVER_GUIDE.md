@@ -45,6 +45,12 @@ If the game loop stalls, the call fails with a timeout
 (`MCPServerConfig::MainThreadDispatchTimeoutMs`, default 10s) rather than hanging
 the client. Hosts that never pump fall back to executing inline.
 
+Since the engine gained a render thread, `ProcessPendingRequests()` is pumped
+*inside the frame's idle window* — after the render thread has been drained and
+before the next frame is handed to it. That is what lets the rendering tools
+below mutate pipeline state, rebuild render targets, and recompile material
+pipelines directly, without racing a frame that is mid-submission.
+
 Runtime flags:
 
 | Flag | Meaning |
@@ -104,6 +110,7 @@ The bridge requires Node 18+ and has no npm dependencies.
 | Network | `MCPNetworkTools.h` | session, discovery, diagnostics |
 | **Development** | **`MCPDevTools.h`** | see below |
 | **Project** | **`MCPProjectTools.h`** | `BuildForPlatform`, `SaveScene`, `LoadScene`, `ListProjectFiles` |
+| **Rendering** | **`MCPRenderTools.h`** | see below |
 
 ### Not currently registered
 
@@ -149,6 +156,74 @@ machine.
 A failing test suite comes back with `isError: true`, so a passing tool call is never
 mistaken for a passing suite.
 
+### Rendering, material, and editor tools
+
+The other families let an agent author content and drive the development loop.
+None of them could see or touch the renderer, which made the GPU-driven / GI /
+upscaling stack invisible to tooling. `MCPRenderTools.h` closes that.
+
+| Tool | Purpose |
+| --- | --- |
+| `GetRenderStats` | Read-only. Render vs display resolution, GPU cluster-culling counters (frustum / backface cone / HZB occlusion, early and late phase), GPU scene residency, GI state, FSR mode, material pipeline count, render-thread timings |
+| `SetGPUCulling` | Toggle the indirect path, HZB occlusion, cone culling, and the two-phase re-test independently — isolates where an artefact or a perf change comes from |
+| `SetGlobalIllumination` | Rays per pixel, steps per ray, trace distance, indirect intensity, temporal blend rate, probe spacing, probe cache on/off, sky fallback colour |
+| `SetUpscaler` | FSR quality preset, sharpening, jitter. Changing quality moves the render resolution and rebuilds every offscreen target |
+| `ListMaterials` | Read-only. Every material with its index, node/link counts, compile status, and texture slots |
+| `GetMaterialGraph` | Read-only. A material's graph as JSON, optionally with the GLSL it compiles to |
+| `SetMaterialGraph` | Create or replace a material's node graph; compiles it and rebuilds its pipeline next frame |
+| `SetEditorViewport` | Editor fly camera on/off, gizmo mode, frame the selection, pause/resume/single-step |
+
+`SpawnEntity` also gained a `primitive` option on its mesh component
+(`box`, `sphere`, `plane`, `cylinder`, with `subdivisions`), because until now
+nothing in the engine could produce renderable geometry without a glTF file on
+disk — an agent could spawn a mesh entity, but it drew nothing.
+
+`GetRenderStats` counters come from the frame that has finished on the GPU, so
+they lag the caller by up to one frame. They are read after the in-flight fence,
+never mid-write.
+
+Material graph documents look like this:
+
+```json
+{
+  "name": "FresnelGlow",
+  "nodes": [
+    {"id": 1, "type": "ConstantColor",  "value": [0.1, 0.35, 0.8, 1]},
+    {"id": 2, "type": "ConstantScalar", "value": [4, 0, 0, 0]},
+    {"id": 3, "type": "Fresnel"},
+    {"id": 4, "type": "ConstantColor",  "value": [0.9, 0.6, 0.2, 1]},
+    {"id": 5, "type": "Multiply"},
+    {"id": 6, "type": "ConstantScalar", "value": [0.25, 0, 0, 0]},
+    {"id": 7, "type": "Output"}
+  ],
+  "links": [
+    {"from": 1, "to": 7, "slot": 0},
+    {"from": 2, "to": 3, "slot": 0},
+    {"from": 3, "to": 5, "slot": 0},
+    {"from": 4, "to": 5, "slot": 1},
+    {"from": 5, "to": 7, "slot": 3},
+    {"from": 6, "to": 7, "slot": 2}
+  ]
+}
+```
+
+Output slots are `0` BaseColor, `1` Metallic, `2` Roughness, `3` Emissive,
+`4` Normal (tangent space), `5` Opacity. Node types: `ConstantScalar`,
+`ConstantColor`, `TextureSample`, `UV`, `WorldPosition`, `WorldNormal`,
+`VertexColor`, `Time`, `CameraVector`, `Multiply`, `Add`, `Subtract`, `Lerp`,
+`DotProduct`, `OneMinus`, `Saturate`, `Power`, `Fresnel`, `Panner`, `Normalize`,
+`Split`, `Output`.
+
+A graph with a cycle, more than one `Output`, a dangling link, or an unknown node
+type is rejected and the existing material is left untouched. A graph that parses
+but generates GLSL the compiler refuses is stored and reported with
+`compiled: false`; the object then renders with the shader template's default
+surface rather than disappearing.
+
+**Caveat:** `TextureSample` nodes bind a 1x1 white placeholder. The engine has no
+texture import path yet, so the graph, codegen, and permutation cache all work
+but the sampled value is constant.
+
 ### Tools that validate but do not yet apply
 
 Some tools in the physics and gameplay families parse and validate their arguments
@@ -172,6 +247,17 @@ Typical debugging loop for an agent:
 4. `ControlSimulation {action: "step", frames: 1}` — advance exactly one frame
 5. `GetSceneContext` / `GetEngineLog` — observe the result
 6. `RunPlayModeTests` — confirm nothing regressed
+
+Rendering loop:
+
+1. `GetRenderStats` — what the GPU actually drew and culled last frame
+2. `SpawnEntity {template: "mesh", components: {mesh: {primitive: "sphere"}}}` — put
+   something in front of the camera
+3. `SetGPUCulling {occlusion: false}` — did the artefact come from the HZB?
+4. `SetMaterialGraph` — change how it shades
+5. `SetUpscaler {quality: "performance"}` — check the cost at a lower render
+   resolution
+6. `GetRenderStats` — confirm the counters moved the way you expected
 
 ---
 
@@ -255,7 +341,8 @@ Every tool publishes MCP annotations so a host can decide what needs confirmatio
 }
 ```
 
-- `readOnlyHint: true` — `GetEngineStatus`, `GetEngineLog`, `ListProjectFiles`,
+- `readOnlyHint: true` — `GetRenderStats`, `ListMaterials`, `GetMaterialGraph`,
+  `GetEngineStatus`, `GetEngineLog`, `ListProjectFiles`,
   `RunPlayModeTests`, `RunPerformanceTests`. Safe to auto-permit.
 - `destructiveHint: true` — `SaveScene` (overwrites the target), `LoadScene`
   (destroys every entity in the active scene). Hosts always prompt on these.

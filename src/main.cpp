@@ -47,6 +47,13 @@ int main(int argc, char** argv) {
             runtimeOptions.EnableMCPServer = false;
             continue;
         }
+        // Submission runs inline on the main thread. Useful when a GPU debugger
+        // or a crash dump is easier to read without the simulation running a
+        // frame ahead of it.
+        if (arg == "--no-render-thread") {
+            runtimeOptions.EnableRenderThread = false;
+            continue;
+        }
         if (arg == "--capture-trace") {
             runtimeOptions.CaptureStartupGPUTrace = true;
             continue;

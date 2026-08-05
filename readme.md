@@ -14,7 +14,7 @@ The long-term vision combines:
 - Authoritative listen-server multiplayer for small co-op/competitive sessions
 - AI-driven scene and gameplay tooling through an internal MCP server
 
-## Project Status (April 2026)
+## Project Status (August 2026)
 
 This codebase is in active experimental development.
 
@@ -70,6 +70,68 @@ changed:
   Ten families now build and are registered at startup; four are quarantined with
   reasons recorded in `Core/MCP/MCPAllTools.h`.
 
+### Rendering stack (August 2026)
+
+The frame is no longer a single pass into the swapchain. The scene renders into
+offscreen targets at a render resolution independent of the display, which is
+what makes GI, upscaling, and an editor viewport possible at all:
+
+```
+GPU cluster cull -> G-buffer pass -> HZB build -> late cull + pass
+      -> GI (compute) -> resolve -> FSR (EASU + RCAS) -> composite -> UI
+```
+
+**GPU-driven cluster culling** (`Core/Renderer/GPUDriven/`). Meshes are
+clusterised into runs of <= 128 triangles along a Morton curve and copied into a
+single merged vertex/index arena, so a frame is one vertex bind, one index bind,
+and one indirect draw per material. A compute pass tests every cluster against
+the frustum, its backface cone, and a hierarchical-Z pyramid, then writes
+`VkDrawIndexedIndirectCommand`s straight into the buffer the draw consumes — the
+visibility decision never returns to the CPU. Culling is two-phase: clusters
+rejected for occlusion against the previous frame's HZB get a second test
+against an HZB rebuilt from this frame's depth, so a camera cut does not pop
+geometry. Requires `multiDrawIndirect` and `drawIndirectFirstInstance`; without
+them the renderer falls back to per-mesh direct draws.
+
+**Dynamic global illumination** (`Core/Renderer/GI/`). Screen-space radiance
+gathering at half resolution backed by a world-space irradiance cache: 16,384 L1
+spherical-harmonic probes on a camera-centred grid, fed by screen-space
+injection and used as the fallback where a screen trace misses. Temporally
+reprojected through the previous frame's view-projection, so a handful of rays
+per pixel per frame converges. Indirect light is modulated by the G-buffer
+albedo in the resolve pass. Lumen-shaped rather than Lumen: no surface cache, no
+hardware ray tracing, no distance fields.
+
+**Material graph** (`Core/Renderer/Material/`). A DAG of ~22 node types
+(constants, UV, texture sample, math, Fresnel, panner, PBR output) compiled to
+GLSL and injected into the lit shader template, with a permutation cache keyed by
+graph hash so an unchanged graph never rebuilds its pipeline. Cycles, missing
+outputs, and unknown node types are rejected at authoring time. Graphs serialise
+to JSON and are authorable over MCP. `DrawCommand::MaterialIndex` now indexes a
+real `MaterialLibrary` rather than nothing.
+
+**FSR upscaling** (`Core/Renderer/Upscaling/FSRUpscaler.*`). An in-engine
+implementation of the FSR 1 pipeline — EASU edge-adaptive spatial upsampling
+followed by RCAS contrast-adaptive sharpening — as compute passes, with the
+standard quality presets driving the render resolution, and Halton(2,3) jitter
+folded into the projection. Not a binding of AMD's SDK, which is not a dependency
+of this project.
+
+**Editor viewport** (`Core/Editor/Panels/ViewportPanel.*`). The renderer's own
+post-upscale output as an ImGui image, so the editor shows exactly what the game
+sees rather than a second render path that would drift. Fly camera, click-to-
+select picking, a translate/rotate/scale gizmo, and play/pause/single-step.
+
+**Render-thread split** (`Core/Renderer/RenderThread.*`). Simulation for frame
+N+1 runs while the render thread submits frame N. The sync point sits immediately
+before ImGui's `NewFrame`, and the frame packet (draw commands, lights, camera)
+is copied rather than referenced, so the render thread never reads live ECS
+state. `Scene::OnUpdate` is split into simulation and UI halves for this;
+`--no-render-thread` runs submission inline.
+
+Every one of these is reachable from the MCP tool surface — see
+[`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md).
+
 See [`docs/SOTA_GAP_ANALYSIS.md`](docs/SOTA_GAP_ANALYSIS.md) for what still
 separates this from Unreal 5.7 / Unity 6, in priority order.
 
@@ -84,8 +146,11 @@ Primary layers in this repository:
 - Networking Layer: server/client + replication/prediction/reconciliation systems
 - MCP Layer: local AI tool endpoint for scene inspection, manipulation, and
   development control (pause/step the simulation, read engine logs, run the
-  play-mode and performance suites, capture profiler traces). Connect an agent
-  with the bundled stdio bridge — see [`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md).
+  play-mode and performance suites, capture profiler traces), plus rendering
+  control: read the live culling/GI/upscaling pipeline, toggle each culling
+  stage, tune GI, switch FSR quality, author material graphs, and drive the
+  editor viewport. Connect an agent with the bundled stdio bridge — see
+  [`MCP_SERVER_GUIDE.md`](MCP_SERVER_GUIDE.md).
 
 ## Technology Stack
 
@@ -113,6 +178,10 @@ Key directories:
 - `Core/ECS/` - Scene, entities, components, and systems
 - `Core/Physics/` - Physics world and integration adapters
 - `Core/Network/` - Multiplayer networking stack
+- `Core/Renderer/GPUDriven/` - Merged geometry arena and cluster culling
+- `Core/Renderer/GI/` - Dynamic global illumination
+- `Core/Renderer/Material/` - Material graph and GLSL codegen
+- `Core/Editor/` - Editor module, viewport, and panels
 - `Core/MCP/` - AI tool server and scene serialization
 - `Shaders/` - Shader sources
 - `src/` - Entry point (`main.cpp`)
@@ -157,6 +226,15 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Feature completeness and runtime stability vary by subsystem.
 - Security hardening for AI-exposed tool surfaces is not complete.
 - Automated test coverage and release packaging are still limited.
+- No asset import path: `Mesh::CreatePrimitive` and glTF loading exist, but
+  nothing imports textures, so material graphs that sample a texture bind a 1x1
+  white placeholder.
+- Skeletal meshes do not go through the new geometry pass. The merged arena
+  stores one vertex layout, and GPU skinning is not wired into it yet.
+- Shadows are not part of the new frame. `ShadowPass` and `VirtualShadowMapCache`
+  still have no consumer.
+- Vulkan validation is off in release builds; set `AIGE_VULKAN_VALIDATION=1` to
+  force the layers on when they are installed.
 
 ## Why This Exists
 
@@ -166,9 +244,30 @@ This project is an experiment in AI-assisted engine development at scale:
 
 If you use this repository, treat it as research code and prototype infrastructure only.
 
-<!-- release-doc-sync:2026-04-15 -->
+<!-- release-doc-sync:2026-08-05 -->
 
-## Release Sync (2026-04-15)
+## Release Sync (2026-08-05)
+
+- Verified Release build of `ALL_BUILD` and test sweep: `ctest --test-dir build -C Release`
+  (**20/20 passed**), including the new `EngineCoreRenderPipelineTests` covering
+  material-graph codegen, cycle rejection, JSON round-tripping, and the mesh
+  clusteriser's index-permutation invariants.
+- Verified the rendering stack live against an NVIDIA RTX 3050 by driving it over
+  MCP: two primitives resident in the GPU scene as 43 clusters, 18 of them
+  backface-cone culled, one indirect draw per material; `SetGPUCulling
+  {gpuDriven:false}` correctly falls back to 2 direct draws; `SetUpscaler
+  {quality:"performance"}` moved the render resolution from 853x480 to 640x360
+  against a 1280x720 swapchain; `SetMaterialGraph` compiled a Fresnel-emissive
+  graph and the material pipeline count went 1 -> 2.
+- Fixed a latent bug the above uncovered: `VulkanBuffer` ignored
+  `BufferDescriptor::mapped` for vertex and index buffers, so every
+  `Mesh::UploadToGPU` had been failing silently.
+- Runtime flags: `--disable-mcp`, `--mcp-host=<host>`, `--mcp-port=<port>`,
+  `--mcp-token=<secret>`, `--no-render-thread`, and the
+  `AIGE_VULKAN_VALIDATION=1` environment variable to force the Vulkan validation
+  layers on in a release build.
+
+### Earlier: Release Sync (2026-04-15)
 
 - Verified clean Release rebuild: `cmake --build build --config Release --target ALL_BUILD --clean-first -- /m /nologo /verbosity:minimal`.
 - Verified Release test sweep: `ctest --test-dir build -C Release` (**18/18 passed**).

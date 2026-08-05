@@ -33,8 +33,12 @@ namespace RHI {
         }
 
         VmaAllocationCreateInfo allocInfo{};
-        // If it's a staging buffer or explicitly requested to be mapped, we should ideally use sequential write or auto host visible.
-        if (desc.usage == BufferUsage::Staging || desc.usage == BufferUsage::Uniform) {
+        // `mapped` is the caller saying it will write this buffer from the CPU,
+        // and it has to win over the usage-based default. It previously only
+        // applied to staging and uniform buffers, so a mapped vertex or index
+        // buffer landed in device-local memory and every Map() on it returned
+        // null - which is why no mesh could ever be uploaded.
+        if (desc.mapped || desc.usage == BufferUsage::Staging || desc.usage == BufferUsage::Uniform) {
             allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
             allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
             if (desc.mapped) {

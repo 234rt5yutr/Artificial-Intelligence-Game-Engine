@@ -185,6 +185,7 @@ add_library(EngineCore
     Core/MCP/MCPPhysicsTools.h
     Core/MCP/MCPDevTools.h
     Core/MCP/MCPProjectTools.h
+    Core/MCP/MCPRenderTools.h
     Core/State/SceneLoader.h
     Core/State/SceneLoader.cpp
     Core/State/TransitionManager.h
@@ -234,6 +235,22 @@ add_library(EngineCore
     Core/Renderer/DynamicResolution.cpp
     Core/Renderer/Upscaling/TemporalUpscalerManager.h
     Core/Renderer/Upscaling/TemporalUpscalerManager.cpp
+    Core/RHI/Vulkan/VulkanGpuResources.h
+    Core/RHI/Vulkan/VulkanGpuResources.cpp
+    Core/Renderer/SceneRenderer.h
+    Core/Renderer/SceneRenderer.cpp
+    Core/Renderer/RenderThread.h
+    Core/Renderer/RenderThread.cpp
+    Core/Renderer/Material/MaterialGraph.h
+    Core/Renderer/Material/MaterialGraph.cpp
+    Core/Renderer/GPUDriven/GPUScene.h
+    Core/Renderer/GPUDriven/GPUScene.cpp
+    Core/Renderer/GPUDriven/GPUDrivenCuller.h
+    Core/Renderer/GPUDriven/GPUDrivenCuller.cpp
+    Core/Renderer/GI/DynamicGlobalIllumination.h
+    Core/Renderer/GI/DynamicGlobalIllumination.cpp
+    Core/Renderer/Upscaling/FSRUpscaler.h
+    Core/Renderer/Upscaling/FSRUpscaler.cpp
     Core/Renderer/Upscaling/FrameGenerationController.h
     Core/Renderer/Upscaling/FrameGenerationController.cpp
     Core/Renderer/Diagnostics/GPUFrameTraceService.h
@@ -515,6 +532,8 @@ add_library(EngineCore
     Core/Editor/Panels/SceneHierarchyPanel.cpp
     Core/Editor/Panels/InspectorPanel.h
     Core/Editor/Panels/InspectorPanel.cpp
+    Core/Editor/Panels/ViewportPanel.h
+    Core/Editor/Panels/ViewportPanel.cpp
     Core/Editor/Commands/IEditorCommand.h
     Core/Editor/Commands/CommandTransaction.h
     Core/Editor/Commands/CommandStack.h
@@ -552,6 +571,12 @@ add_executable(EngineCoreSystemPipelineTests
 )
 target_link_libraries(EngineCoreSystemPipelineTests PRIVATE EngineCore)
 add_test(NAME EngineCoreSystemPipelineTests COMMAND EngineCoreSystemPipelineTests)
+
+add_executable(EngineCoreRenderPipelineTests
+    Core/Tests/Renderer/RenderPipelineTests.cpp
+)
+target_link_libraries(EngineCoreRenderPipelineTests PRIVATE EngineCore)
+add_test(NAME EngineCoreRenderPipelineTests COMMAND EngineCoreRenderPipelineTests)
 
 add_executable(EngineCoreTraceExportTests
     Core/Tests/Diagnostics/TraceExportTests.cpp

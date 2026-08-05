@@ -1,0 +1,798 @@
+#pragma once
+
+// MCP Rendering & Material Tools
+//
+// The existing families let an agent author content and drive the development
+// loop. None of them could see or touch the renderer, which meant the whole
+// GPU-driven / GI / upscaling stack was invisible to the tooling that is
+// supposed to be this engine's differentiator.
+//
+// Everything here runs on the simulation thread: MCPServer marshals tools/call
+// into the frame's idle window, after the render thread has been drained, so it
+// is safe to mutate renderer state directly.
+
+#include "MCPTool.h"
+#include "Core/Application.h"
+#include "Core/ECS/Scene.h"
+#include "Core/ECS/SystemPipeline.h"
+#include "Core/Editor/EditorModule.h"
+#include "Core/Log.h"
+#include "Core/RHI/Vulkan/VulkanContext.h"
+#include "Core/Renderer/Material/MaterialGraph.h"
+#include "Core/Renderer/RenderThread.h"
+#include "Core/Renderer/SceneRenderer.h"
+#include "Core/UI/UIManager.h"
+
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace Core {
+namespace MCP {
+
+    namespace RenderToolsDetail {
+
+        inline Renderer::SceneRenderer* SceneRendererOrNull() {
+            Application* application = Application::TryGet();
+            if (!application) {
+                return nullptr;
+            }
+            RHI::VulkanContext* context = application->GetVulkanContext();
+            return context ? context->GetSceneRenderer() : nullptr;
+        }
+
+        inline Editor::ViewportPanel* ViewportPanelOrNull() {
+            auto* editorModule = UI::UIManager::Get().GetEditorModule();
+            return editorModule ? &editorModule->GetViewportPanel() : nullptr;
+        }
+
+        inline Json Vec3ToJson(const Math::Vec3& v) {
+            return Json::array({v.x, v.y, v.z});
+        }
+
+        inline bool ReadVec3(const Json& arguments, const char* key, Math::Vec3& out) {
+            if (!arguments.contains(key) || !arguments[key].is_array() || arguments[key].size() != 3) {
+                return false;
+            }
+            out = Math::Vec3(arguments[key][0].get<float>(),
+                             arguments[key][1].get<float>(),
+                             arguments[key][2].get<float>());
+            return true;
+        }
+
+        inline Json SchemaProperty(const char* type, const char* description) {
+            return Json{{"type", type}, {"description", description}};
+        }
+
+        inline Json NumberProperty(const char* description, double minimum, double maximum) {
+            return Json{{"type", "number"}, {"description", description},
+                        {"minimum", minimum}, {"maximum", maximum}};
+        }
+
+    } // namespace RenderToolsDetail
+
+    // ========================================================================
+    // GetRenderStats - what the GPU actually did last frame
+    // ========================================================================
+    class GetRenderStatsTool : public MCPTool {
+    public:
+        GetRenderStatsTool()
+            : MCPTool("GetRenderStats",
+                      "Report the live rendering pipeline: render vs display resolution, "
+                      "GPU-driven cluster culling counters (frustum, backface cone, HZB "
+                      "occlusion, two-phase), global illumination state, FSR upscaling mode, "
+                      "material pipeline count, and render-thread timings. Call this before "
+                      "changing any rendering setting.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Get Render Stats";
+            annotations.ReadOnlyHint = true;
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json&, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error(
+                    "No scene renderer is active. The engine is running headless, or the "
+                    "Vulkan context failed to initialize.");
+            }
+
+            const auto& stats = renderer->GetStats();
+            const auto& cull = renderer->GetCuller().GetStats();
+            const auto& gi = renderer->GetGlobalIllumination().GetStats();
+            const auto& giSettings = renderer->GetGlobalIllumination().GetSettings();
+            const auto& fsr = renderer->GetUpscaler().GetStats();
+            const auto& fsrSettings = renderer->GetUpscaler().GetSettings();
+            const auto& scene = renderer->GetGPUScene().GetStats();
+
+            Json report;
+            Json resolution;
+            resolution["renderWidth"] = stats.RenderWidth;
+            resolution["renderHeight"] = stats.RenderHeight;
+            resolution["displayWidth"] = stats.DisplayWidth;
+            resolution["displayHeight"] = stats.DisplayHeight;
+            report["resolution"] = resolution;
+
+            Json draws;
+            draws["indirectBatches"] = stats.IndirectDraws;
+            draws["directDraws"] = stats.DirectDraws;
+            draws["skippedDraws"] = stats.SkippedDraws;
+            draws["gpuDrivenActive"] = stats.GPUDrivenActive;
+            draws["materialPipelines"] = stats.MaterialPipelines;
+            report["draws"] = draws;
+
+            Json culling;
+            culling["clusterSlots"] = cull.ClusterSlots;
+            culling["visibleEarly"] = cull.VisibleEarly;
+            culling["visibleLate"] = cull.VisibleLate;
+            culling["frustumCulled"] = cull.FrustumCulled;
+            culling["coneCulled"] = cull.ConeCulled;
+            culling["occlusionCulled"] = cull.OcclusionCulled;
+            culling["hzbMipCount"] = cull.HZBMipCount;
+            culling["occlusionEnabled"] = cull.OcclusionEnabled;
+            culling["coneCullingEnabled"] = cull.ConeCullingEnabled;
+            culling["twoPhaseEnabled"] = cull.TwoPhaseEnabled;
+            report["gpuCulling"] = culling;
+
+            Json gpuScene;
+            gpuScene["residentMeshes"] = scene.ResidentMeshes;
+            gpuScene["residentClusters"] = scene.ResidentClusters;
+            gpuScene["residentTriangles"] = scene.ResidentTriangles;
+            gpuScene["frameInstances"] = scene.FrameInstances;
+            gpuScene["materialBatches"] = scene.FrameMaterialBatches;
+            gpuScene["rejectedMeshes"] = scene.RejectedMeshes;
+            gpuScene["vertexBytesUsed"] = scene.VertexBytesUsed;
+            gpuScene["vertexBytesCapacity"] = scene.VertexBytesCapacity;
+            report["gpuScene"] = gpuScene;
+
+            Json illumination;
+            illumination["enabled"] = giSettings.Enabled;
+            illumination["ready"] = gi.Ready;
+            illumination["width"] = gi.Width;
+            illumination["height"] = gi.Height;
+            illumination["probeCount"] = gi.ProbeCount;
+            illumination["framesAccumulated"] = gi.FramesAccumulated;
+            illumination["raysPerPixel"] = giSettings.RaysPerPixel;
+            illumination["stepsPerRay"] = giSettings.StepsPerRay;
+            illumination["intensity"] = giSettings.Intensity;
+            illumination["temporalAlpha"] = giSettings.TemporalAlpha;
+            illumination["probeCacheEnabled"] = giSettings.ProbeCacheEnabled;
+            report["globalIllumination"] = illumination;
+
+            Json upscaling;
+            upscaling["enabled"] = fsrSettings.Enabled;
+            upscaling["quality"] = Renderer::FSRQualityModeName(fsrSettings.Quality);
+            upscaling["sharpness"] = fsrSettings.Sharpness;
+            upscaling["jitterEnabled"] = fsrSettings.JitterEnabled;
+            upscaling["active"] = fsr.Active;
+            upscaling["renderScale"] = fsr.RenderScale;
+            report["upscaling"] = upscaling;
+
+            Json lights;
+            lights["directional"] = stats.DirectionalLights;
+            lights["point"] = stats.PointLights;
+            report["lights"] = lights;
+
+            if (auto* application = Application::TryGet()) {
+                if (auto* renderThread = application->GetRenderThread()) {
+                    const auto threadStats = renderThread->GetStats();
+                    Json thread;
+                    thread["running"] = threadStats.Running;
+                    thread["framesSubmitted"] = threadStats.FramesSubmitted;
+                    thread["framesRendered"] = threadStats.FramesRendered;
+                    thread["lastRenderMs"] = threadStats.LastRenderMs;
+                    // How long the simulation had to wait for the renderer. Near
+                    // zero means the two threads are balanced.
+                    thread["lastSimulationWaitMs"] = threadStats.LastWaitMs;
+                    report["renderThread"] = thread;
+                }
+            }
+
+            return ToolResult::SuccessJson(report);
+        }
+    };
+
+    // ========================================================================
+    // SetGPUCulling - control the Nanite-class cluster culling pipeline
+    // ========================================================================
+    class SetGPUCullingTool : public MCPTool {
+    public:
+        SetGPUCullingTool()
+            : MCPTool("SetGPUCulling",
+                      "Enable or disable parts of the GPU-driven cluster culling pipeline: "
+                      "the whole indirect path, hierarchical-Z occlusion culling, backface "
+                      "cone culling, and the two-phase re-test. Use it to isolate what a "
+                      "visual artefact or a performance change is coming from.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set GPU Culling";
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["gpuDriven"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Use the GPU indirect draw path at all. Off falls back to per-mesh direct draws.");
+            schema.Properties["occlusion"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Hierarchical-Z occlusion culling.");
+            schema.Properties["coneCulling"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Backface cluster cone culling.");
+            schema.Properties["twoPhase"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Second culling pass against the HZB built from this frame's depth.");
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+
+            auto& culler = renderer->GetCuller();
+            if (arguments.contains("gpuDriven") && arguments["gpuDriven"].is_boolean()) {
+                renderer->SetGPUDrivenEnabled(arguments["gpuDriven"].get<bool>());
+            }
+            if (arguments.contains("occlusion") && arguments["occlusion"].is_boolean()) {
+                culler.SetOcclusionEnabled(arguments["occlusion"].get<bool>());
+            }
+            if (arguments.contains("coneCulling") && arguments["coneCulling"].is_boolean()) {
+                culler.SetConeCullingEnabled(arguments["coneCulling"].get<bool>());
+            }
+            if (arguments.contains("twoPhase") && arguments["twoPhase"].is_boolean()) {
+                culler.SetTwoPhaseEnabled(arguments["twoPhase"].get<bool>());
+            }
+
+            Json state;
+            state["gpuDriven"] = renderer->IsGPUDrivenEnabled();
+            state["occlusion"] = culler.IsOcclusionEnabled();
+            state["coneCulling"] = culler.IsConeCullingEnabled();
+            state["twoPhase"] = culler.IsTwoPhaseEnabled();
+            return ToolResult::Success("GPU culling updated", state);
+        }
+    };
+
+    // ========================================================================
+    // SetGlobalIllumination - control the dynamic GI pipeline
+    // ========================================================================
+    class SetGlobalIlluminationTool : public MCPTool {
+    public:
+        SetGlobalIlluminationTool()
+            : MCPTool("SetGlobalIllumination",
+                      "Tune the dynamic global illumination pass: enable it, set screen-space "
+                      "rays per pixel and steps per ray, trace distance, indirect intensity, "
+                      "temporal blend rate, the world radiance-cache probe spacing, and the sky "
+                      "colour rays fall back to when they miss.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set Global Illumination";
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["enabled"] = RenderToolsDetail::SchemaProperty("boolean", "Run the GI pass.");
+            schema.Properties["raysPerPixel"] = RenderToolsDetail::NumberProperty(
+                "Screen-space rays per half-resolution pixel per frame.", 1, 32);
+            schema.Properties["stepsPerRay"] = RenderToolsDetail::NumberProperty(
+                "March steps per ray.", 2, 64);
+            schema.Properties["maxTraceDistance"] = RenderToolsDetail::NumberProperty(
+                "World-space ray length in metres.", 0.5, 200.0);
+            schema.Properties["intensity"] = RenderToolsDetail::NumberProperty(
+                "Indirect light multiplier.", 0.0, 8.0);
+            schema.Properties["temporalAlpha"] = RenderToolsDetail::NumberProperty(
+                "New-frame weight in the temporal filter. Lower is smoother and laggier.", 0.01, 1.0);
+            schema.Properties["probeSpacing"] = RenderToolsDetail::NumberProperty(
+                "World radiance-cache probe spacing in metres.", 0.25, 20.0);
+            schema.Properties["probeCacheEnabled"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Use the world probe cache for rays that miss on screen.");
+            schema.Properties["skyColor"] = Json{
+                {"type", "array"},
+                {"description", "Linear RGB fallback radiance for rays that escape."},
+                {"items", Json{{"type", "number"}}},
+                {"minItems", 3}, {"maxItems", 3}};
+            schema.Properties["skyIntensity"] = RenderToolsDetail::NumberProperty(
+                "Sky radiance multiplier.", 0.0, 16.0);
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+
+            auto& settings = renderer->GetGlobalIllumination().GetSettings();
+            if (arguments.contains("enabled") && arguments["enabled"].is_boolean()) {
+                settings.Enabled = arguments["enabled"].get<bool>();
+            }
+            if (arguments.contains("raysPerPixel") && arguments["raysPerPixel"].is_number()) {
+                settings.RaysPerPixel = std::clamp(arguments["raysPerPixel"].get<uint32_t>(), 1u, 32u);
+            }
+            if (arguments.contains("stepsPerRay") && arguments["stepsPerRay"].is_number()) {
+                settings.StepsPerRay = std::clamp(arguments["stepsPerRay"].get<uint32_t>(), 2u, 64u);
+            }
+            if (arguments.contains("maxTraceDistance") && arguments["maxTraceDistance"].is_number()) {
+                settings.MaxTraceDistance = std::clamp(arguments["maxTraceDistance"].get<float>(), 0.5f, 200.0f);
+            }
+            if (arguments.contains("intensity") && arguments["intensity"].is_number()) {
+                settings.Intensity = std::clamp(arguments["intensity"].get<float>(), 0.0f, 8.0f);
+            }
+            if (arguments.contains("temporalAlpha") && arguments["temporalAlpha"].is_number()) {
+                settings.TemporalAlpha = std::clamp(arguments["temporalAlpha"].get<float>(), 0.01f, 1.0f);
+            }
+            if (arguments.contains("probeSpacing") && arguments["probeSpacing"].is_number()) {
+                settings.ProbeSpacing = std::clamp(arguments["probeSpacing"].get<float>(), 0.25f, 20.0f);
+            }
+            if (arguments.contains("probeCacheEnabled") && arguments["probeCacheEnabled"].is_boolean()) {
+                settings.ProbeCacheEnabled = arguments["probeCacheEnabled"].get<bool>();
+            }
+            Math::Vec3 skyColor;
+            if (RenderToolsDetail::ReadVec3(arguments, "skyColor", skyColor)) {
+                settings.SkyColor = skyColor;
+            }
+            if (arguments.contains("skyIntensity") && arguments["skyIntensity"].is_number()) {
+                settings.SkyIntensity = std::clamp(arguments["skyIntensity"].get<float>(), 0.0f, 16.0f);
+            }
+
+            Json state;
+            state["enabled"] = settings.Enabled;
+            state["raysPerPixel"] = settings.RaysPerPixel;
+            state["stepsPerRay"] = settings.StepsPerRay;
+            state["maxTraceDistance"] = settings.MaxTraceDistance;
+            state["intensity"] = settings.Intensity;
+            state["temporalAlpha"] = settings.TemporalAlpha;
+            state["probeSpacing"] = settings.ProbeSpacing;
+            state["probeCacheEnabled"] = settings.ProbeCacheEnabled;
+            state["skyColor"] = RenderToolsDetail::Vec3ToJson(settings.SkyColor);
+            state["skyIntensity"] = settings.SkyIntensity;
+            return ToolResult::Success("Global illumination updated", state);
+        }
+    };
+
+    // ========================================================================
+    // SetUpscaler - FSR quality mode and sharpening
+    // ========================================================================
+    class SetUpscalerTool : public MCPTool {
+    public:
+        SetUpscalerTool()
+            : MCPTool("SetUpscaler",
+                      "Set the FSR upscaling mode. Changing quality changes the render "
+                      "resolution and rebuilds every offscreen target, so the whole frame "
+                      "gets cheaper or sharper. Modes: off, ultraQuality, quality, balanced, "
+                      "performance, ultraPerformance.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set Upscaler";
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["quality"] = Json{
+                {"type", "string"},
+                {"description", "FSR quality preset."},
+                {"enum", Json::array({"off", "ultraQuality", "quality", "balanced",
+                                      "performance", "ultraPerformance"})}};
+            schema.Properties["enabled"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Run the upscaler at all.");
+            schema.Properties["sharpness"] = RenderToolsDetail::NumberProperty(
+                "RCAS sharpening strength; 0 skips the sharpening pass.", 0.0, 1.0);
+            schema.Properties["jitter"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Apply the Halton sub-pixel jitter to the projection.");
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+
+            auto& settings = renderer->GetUpscaler().GetSettings();
+            bool resolutionChanged = false;
+
+            if (arguments.contains("quality") && arguments["quality"].is_string()) {
+                Renderer::FSRQualityMode mode;
+                const std::string text = arguments["quality"].get<std::string>();
+                if (!Renderer::FSRQualityModeFromString(text, mode)) {
+                    return ToolResult::Error("Unknown FSR quality mode '" + text + "'");
+                }
+                resolutionChanged = mode != settings.Quality;
+                settings.Quality = mode;
+            }
+            if (arguments.contains("enabled") && arguments["enabled"].is_boolean()) {
+                const bool enabled = arguments["enabled"].get<bool>();
+                resolutionChanged = resolutionChanged || enabled != settings.Enabled;
+                settings.Enabled = enabled;
+            }
+            if (arguments.contains("sharpness") && arguments["sharpness"].is_number()) {
+                settings.Sharpness = std::clamp(arguments["sharpness"].get<float>(), 0.0f, 1.0f);
+            }
+            if (arguments.contains("jitter") && arguments["jitter"].is_boolean()) {
+                settings.JitterEnabled = arguments["jitter"].get<bool>();
+            }
+
+            // Only a quality or enable change moves the render resolution, and
+            // that rebuild stalls the device - so do not pay for it otherwise.
+            if (resolutionChanged && !renderer->ApplyUpscalerQuality()) {
+                return ToolResult::Error("Failed to rebuild render targets for the new upscaler mode");
+            }
+
+            const auto& stats = renderer->GetStats();
+            Json state;
+            state["quality"] = Renderer::FSRQualityModeName(settings.Quality);
+            state["enabled"] = settings.Enabled;
+            state["sharpness"] = settings.Sharpness;
+            state["jitter"] = settings.JitterEnabled;
+            state["renderWidth"] = stats.RenderWidth;
+            state["renderHeight"] = stats.RenderHeight;
+            state["displayWidth"] = stats.DisplayWidth;
+            state["displayHeight"] = stats.DisplayHeight;
+            return ToolResult::Success("Upscaler updated", state);
+        }
+    };
+
+    // ========================================================================
+    // ListMaterials
+    // ========================================================================
+    class ListMaterialsTool : public MCPTool {
+    public:
+        ListMaterialsTool()
+            : MCPTool("ListMaterials",
+                      "List every material in the library with its index, node/link counts, "
+                      "and whether its graph compiled. The index is what a mesh's "
+                      "MaterialIndex refers to.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "List Materials";
+            annotations.ReadOnlyHint = true;
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json&, ECS::Scene*) override {
+            auto& library = Renderer::MaterialLibrary::Get();
+            library.GetOrCreateDefault();
+
+            Json materials = Json::array();
+            for (uint32_t index = 0; index < library.GetMaterialCount(); ++index) {
+                const auto* material = library.GetMaterial(index);
+                if (!material) {
+                    continue;
+                }
+                Json entry;
+                entry["index"] = index;
+                entry["name"] = material->Name;
+                entry["nodeCount"] = material->Graph.GetNodes().size();
+                entry["linkCount"] = material->Graph.GetLinks().size();
+                entry["compiled"] = material->Compiled.Succeeded;
+                entry["doubleSided"] = material->DoubleSided;
+                if (!material->Compiled.Succeeded) {
+                    entry["error"] = material->Compiled.Error;
+                }
+                entry["textureSlots"] = material->Compiled.TextureSlots;
+                materials.push_back(entry);
+            }
+
+            Json report;
+            report["revision"] = library.GetRevision();
+            report["materials"] = materials;
+            return ToolResult::SuccessJson(report);
+        }
+    };
+
+    // ========================================================================
+    // SetMaterialGraph - author a material as a node graph
+    // ========================================================================
+    class SetMaterialGraphTool : public MCPTool {
+    public:
+        SetMaterialGraphTool()
+            : MCPTool("SetMaterialGraph",
+                      "Create or replace a material's node graph from JSON, compile it to "
+                      "GLSL, and rebuild its pipeline on the next frame. The document is "
+                      "{name, nodes:[{id,type,name,value:[r,g,b,a],texture}], links:[{from,to,slot}]}. "
+                      "Node types include ConstantColor, ConstantScalar, TextureSample, UV, "
+                      "WorldPosition, WorldNormal, Time, CameraVector, Multiply, Add, Subtract, "
+                      "Lerp, DotProduct, OneMinus, Saturate, Power, Fresnel, Panner, Normalize, "
+                      "Split and Output. Output slots are 0 BaseColor, 1 Metallic, 2 Roughness, "
+                      "3 Emissive, 4 Normal, 5 Opacity. Rejects cycles and unknown node types "
+                      "without touching the existing material.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set Material Graph";
+            annotations.DestructiveHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["name"] = RenderToolsDetail::SchemaProperty(
+                "string", "Material name. Created if it does not exist.");
+            schema.Properties["graph"] = Json{
+                {"type", "object"},
+                {"description", "The graph document. Accepts an object or a JSON string."}};
+            schema.Properties["doubleSided"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Disable backface culling for this material.");
+            schema.Required = {"name", "graph"};
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            if (!arguments.contains("name") || !arguments["name"].is_string()) {
+                return ToolResult::Error("'name' is required and must be a string");
+            }
+            if (!arguments.contains("graph")) {
+                return ToolResult::Error("'graph' is required");
+            }
+
+            const std::string name = arguments["name"].get<std::string>();
+            const std::string document = arguments["graph"].is_string()
+                                             ? arguments["graph"].get<std::string>()
+                                             : arguments["graph"].dump();
+
+            Renderer::MaterialGraph graph;
+            std::string error;
+            if (!Renderer::MaterialGraph::FromJson(document, graph, &error)) {
+                return ToolResult::Error("Material graph rejected: " + error);
+            }
+            graph.SetName(name);
+
+            auto& library = Renderer::MaterialLibrary::Get();
+            library.GetOrCreateDefault();
+            const uint32_t index = library.CreateMaterial(name);
+            auto* material = library.GetMaterial(index);
+            if (!material) {
+                return ToolResult::Error("Failed to allocate a material slot");
+            }
+
+            material->Graph = std::move(graph);
+            if (arguments.contains("doubleSided") && arguments["doubleSided"].is_boolean()) {
+                material->DoubleSided = arguments["doubleSided"].get<bool>();
+            }
+            library.MarkDirty(index);
+            library.CompileDirty();
+
+            Json state;
+            state["index"] = index;
+            state["name"] = material->Name;
+            state["compiled"] = material->Compiled.Succeeded;
+            state["textureSlots"] = material->Compiled.TextureSlots;
+            if (!material->Compiled.Succeeded) {
+                state["error"] = material->Compiled.Error;
+                return ToolResult::Success("Material stored but its graph does not compile; "
+                                           "the fallback surface will be used", state);
+            }
+            return ToolResult::Success("Material graph compiled; the pipeline rebuilds next frame",
+                                       state);
+        }
+    };
+
+    // ========================================================================
+    // GetMaterialGraph
+    // ========================================================================
+    class GetMaterialGraphTool : public MCPTool {
+    public:
+        GetMaterialGraphTool()
+            : MCPTool("GetMaterialGraph",
+                      "Return a material's node graph as JSON, plus the GLSL body it compiles "
+                      "to. Use this to read a material before editing it, or to see why one "
+                      "renders the way it does.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Get Material Graph";
+            annotations.ReadOnlyHint = true;
+            annotations.IdempotentHint = true;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["name"] = RenderToolsDetail::SchemaProperty("string", "Material name.");
+            schema.Properties["index"] = RenderToolsDetail::SchemaProperty(
+                "integer", "Material index. Used when 'name' is absent.");
+            schema.Properties["includeGeneratedCode"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Include the generated GLSL fragment body.");
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto& library = Renderer::MaterialLibrary::Get();
+            library.GetOrCreateDefault();
+
+            uint32_t index = UINT32_MAX;
+            if (arguments.contains("name") && arguments["name"].is_string()) {
+                index = library.FindMaterial(arguments["name"].get<std::string>());
+                if (index == UINT32_MAX) {
+                    return ToolResult::Error("No material named '" +
+                                             arguments["name"].get<std::string>() + "'");
+                }
+            } else if (arguments.contains("index") && arguments["index"].is_number_integer()) {
+                index = arguments["index"].get<uint32_t>();
+            } else {
+                return ToolResult::Error("Provide either 'name' or 'index'");
+            }
+
+            const auto* material = library.GetMaterial(index);
+            if (!material) {
+                return ToolResult::Error("Material index " + std::to_string(index) + " is out of range");
+            }
+
+            Json report;
+            report["index"] = index;
+            report["name"] = material->Name;
+            report["compiled"] = material->Compiled.Succeeded;
+            report["doubleSided"] = material->DoubleSided;
+            report["graph"] = Json::parse(material->Graph.ToJson(), nullptr, false);
+            report["textureSlots"] = material->Compiled.TextureSlots;
+            if (!material->Compiled.Succeeded) {
+                report["error"] = material->Compiled.Error;
+            }
+            if (arguments.value("includeGeneratedCode", false)) {
+                report["generatedGlsl"] = material->Compiled.FragmentBody;
+            }
+            return ToolResult::SuccessJson(report);
+        }
+    };
+
+    // ========================================================================
+    // SetEditorViewport - drive the editor camera, gizmo, and play state
+    // ========================================================================
+    class SetEditorViewportTool : public MCPTool {
+    public:
+        SetEditorViewportTool()
+            : MCPTool("SetEditorViewport",
+                      "Control the editor scene viewport: switch between the editor fly camera "
+                      "and the scene camera, choose the gizmo mode (none/translate/rotate/scale), "
+                      "frame the current selection, and pause, resume, or single-step the "
+                      "simulation while the frame stays inspectable.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Set Editor Viewport";
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["open"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Show or hide the viewport panel.");
+            schema.Properties["editorCamera"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Drive the frame from the editor fly camera instead of the scene camera.");
+            schema.Properties["gizmo"] = Json{
+                {"type", "string"},
+                {"description", "Transform gizmo mode."},
+                {"enum", Json::array({"none", "translate", "rotate", "scale"})}};
+            schema.Properties["focusSelection"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Move the editor camera to frame the current selection.");
+            schema.Properties["paused"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Freeze or resume the simulation.");
+            schema.Properties["stepFrames"] = RenderToolsDetail::SchemaProperty(
+                "integer", "Advance this many frames while paused, then re-freeze.");
+            schema.Properties["cameraSpeed"] = RenderToolsDetail::NumberProperty(
+                "Editor fly camera speed in metres per second.", 0.1, 200.0);
+            return schema;
+        }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene* scene) override {
+            auto* editorModule = UI::UIManager::Get().GetEditorModule();
+            if (!editorModule) {
+                return ToolResult::Error(
+                    "The editor module is not available. The engine is running headless or "
+                    "with UI disabled.");
+            }
+            auto& viewport = editorModule->GetViewportPanel();
+            auto& state = viewport.GetState();
+
+            if (arguments.contains("open") && arguments["open"].is_boolean()) {
+                state.Open = arguments["open"].get<bool>();
+            }
+            if (arguments.contains("editorCamera") && arguments["editorCamera"].is_boolean()) {
+                state.UseEditorCamera = arguments["editorCamera"].get<bool>();
+            }
+            if (arguments.contains("cameraSpeed") && arguments["cameraSpeed"].is_number()) {
+                state.CameraSpeed = std::clamp(arguments["cameraSpeed"].get<float>(), 0.1f, 200.0f);
+            }
+            if (arguments.contains("gizmo") && arguments["gizmo"].is_string()) {
+                const std::string mode = arguments["gizmo"].get<std::string>();
+                if (mode == "none")            state.Gizmo = Editor::GizmoMode::None;
+                else if (mode == "translate")  state.Gizmo = Editor::GizmoMode::Translate;
+                else if (mode == "rotate")     state.Gizmo = Editor::GizmoMode::Rotate;
+                else if (mode == "scale")      state.Gizmo = Editor::GizmoMode::Scale;
+                else return ToolResult::Error("Unknown gizmo mode '" + mode + "'");
+            }
+            if (arguments.value("focusSelection", false)) {
+                viewport.FocusOnSelection(editorModule->GetContext());
+            }
+
+            auto* pipeline = scene ? scene->GetSystemPipeline() : nullptr;
+            if (pipeline) {
+                if (arguments.contains("paused") && arguments["paused"].is_boolean()) {
+                    pipeline->SetPaused(arguments["paused"].get<bool>());
+                }
+                if (arguments.contains("stepFrames") && arguments["stepFrames"].is_number_integer()) {
+                    const int frames = arguments["stepFrames"].get<int>();
+                    if (frames > 0) {
+                        pipeline->SetPaused(true);
+                        pipeline->RequestStepFrames(static_cast<uint32_t>(frames));
+                    }
+                }
+            }
+
+            Json report;
+            report["open"] = state.Open;
+            report["editorCamera"] = state.UseEditorCamera;
+            report["cameraSpeed"] = state.CameraSpeed;
+            switch (state.Gizmo) {
+                case Editor::GizmoMode::None:      report["gizmo"] = "none"; break;
+                case Editor::GizmoMode::Translate: report["gizmo"] = "translate"; break;
+                case Editor::GizmoMode::Rotate:    report["gizmo"] = "rotate"; break;
+                case Editor::GizmoMode::Scale:     report["gizmo"] = "scale"; break;
+            }
+            report["paused"] = pipeline ? pipeline->IsPaused() : false;
+            report["pendingStepFrames"] = pipeline ? pipeline->GetPendingStepFrames() : 0u;
+            return ToolResult::Success("Editor viewport updated", report);
+        }
+    };
+
+    // ========================================================================
+    // Factory
+    // ========================================================================
+    inline std::vector<MCPToolPtr> CreateRenderTools() {
+        std::vector<MCPToolPtr> tools;
+        tools.push_back(std::make_shared<GetRenderStatsTool>());
+        tools.push_back(std::make_shared<SetGPUCullingTool>());
+        tools.push_back(std::make_shared<SetGlobalIlluminationTool>());
+        tools.push_back(std::make_shared<SetUpscalerTool>());
+        tools.push_back(std::make_shared<ListMaterialsTool>());
+        tools.push_back(std::make_shared<SetMaterialGraphTool>());
+        tools.push_back(std::make_shared<GetMaterialGraphTool>());
+        tools.push_back(std::make_shared<SetEditorViewportTool>());
+        return tools;
+    }
+
+} // namespace MCP
+} // namespace Core

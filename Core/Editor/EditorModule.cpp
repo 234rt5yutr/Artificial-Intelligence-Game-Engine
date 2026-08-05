@@ -186,8 +186,9 @@ namespace {
 
 } // namespace
 
-    void EditorModule::Initialize(ECS::Scene* activeScene) {
+    void EditorModule::Initialize(ECS::Scene* activeScene, RHI::VulkanContext* context) {
         m_Context.ActiveScene = activeScene;
+        m_Viewport.Initialize(context);
         m_Context.Initialized = true;
         m_Context.Panels.Hierarchy.Open = true;
         m_Context.Panels.Inspector.Open = true;
@@ -196,6 +197,7 @@ namespace {
     }
 
     void EditorModule::Shutdown() {
+        m_Viewport.Shutdown();
         m_Context = EditorContext{};
         m_Enabled = false;
     }
@@ -208,6 +210,9 @@ namespace {
         if (!m_Enabled || !m_Context.Initialized) {
             return;
         }
+
+        // RenderPanels runs from ImGui's draw callback, which carries no delta.
+        m_LastDeltaTime = deltaTime;
 
         if (!m_Context.Panels.Sequencer.IsPlaying || m_Context.Panels.Sequencer.ActiveTimelineGuid.empty()) {
             return;
@@ -242,6 +247,9 @@ namespace {
 
         ImGui::DockSpaceOverViewport(0U, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
 
+        // Viewport first so the hierarchy and inspector dock around it.
+        m_Viewport.Render(m_Context, m_LastDeltaTime);
+
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("Editor")) {
                 if (ImGui::MenuItem("Hierarchy", nullptr, m_Context.Panels.Hierarchy.Open)) {
@@ -249,6 +257,9 @@ namespace {
                 }
                 if (ImGui::MenuItem("Inspector", nullptr, m_Context.Panels.Inspector.Open)) {
                     m_Context.Panels.Inspector.Open = !m_Context.Panels.Inspector.Open;
+                }
+                if (ImGui::MenuItem("Viewport", nullptr, m_Viewport.GetState().Open)) {
+                    m_Viewport.GetState().Open = !m_Viewport.GetState().Open;
                 }
                 if (ImGui::MenuItem("Undo", "Ctrl+Z", false, m_Context.History.CanUndo())) {
                     UndoEditorAction(m_Context);

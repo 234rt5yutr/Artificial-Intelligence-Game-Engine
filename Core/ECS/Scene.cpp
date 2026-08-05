@@ -182,16 +182,30 @@ namespace ECS {
         PROFILE_FUNCTION();
 
         // Simulation runs before UI so widgets see this frame's world state.
+        OnUpdateSimulation(deltaTime);
+        OnUpdateUI();
+    }
+
+    void Scene::OnUpdateSimulation(float deltaTime)
+    {
+        PROFILE_FUNCTION();
+
+        m_LastUIDeltaTime = deltaTime;
         if (m_SystemPipeline != nullptr) {
             m_SystemPipeline->Update(*this, deltaTime);
         }
+    }
+
+    void Scene::OnUpdateUI()
+    {
+        PROFILE_FUNCTION();
 
         if (m_UIManager != nullptr) {
             m_ViewportSize = m_UIManager->GetViewportSize();
         }
 
         if (m_UISystem != nullptr) {
-            m_UISystem->Update(deltaTime, m_ViewportSize);
+            m_UISystem->Update(m_LastUIDeltaTime, m_ViewportSize);
             if (m_UIManager != nullptr && m_UIManager->IsInitialized()) {
                 m_UISystem->Render(m_UIManager->GetTextRenderer(), m_ViewportSize);
             }

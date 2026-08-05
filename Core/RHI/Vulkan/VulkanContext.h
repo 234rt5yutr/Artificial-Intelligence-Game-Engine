@@ -5,6 +5,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <filesystem>
+#include <memory>
 #include <vector>
 #include <optional>
 #include <set>
@@ -13,6 +14,10 @@
 
 namespace Core {
     class Window;
+namespace Renderer {
+    class SceneRenderer;
+    struct FrameRenderData;
+}
 
 namespace RHI {
 
@@ -65,14 +70,21 @@ namespace RHI {
         VkFence GetInFlightFence() const { return m_InFlightFence; }
 
         // Scene rendering ---------------------------------------------------
-        // Queue the draw list produced by ECS::RenderSystem for this frame. Held
-        // by pointer for the duration of DrawFrame only; the caller owns it.
-        // Passing an empty list (or never calling this) falls back to the
-        // placeholder triangle so an empty scene is still visibly alive.
-        void SetSceneDrawData(const void* drawCommands, std::size_t drawCommandCount,
-                              const float* viewProjection);
+        // Hand the renderer this frame's simulation output. The data is copied,
+        // so the caller may rebuild its lists immediately afterwards - which is
+        // what lets the simulation run on a different thread from submission.
+        void SubmitFrameRenderData(const Renderer::FrameRenderData& frame);
         void ClearSceneDrawData();
         uint32_t GetLastDrawnMeshCount() const { return m_LastDrawnMeshCount; }
+
+        // The frame pipeline: cull -> G-buffer -> HZB -> GI -> resolve -> FSR.
+        // Null until Init() runs with a window.
+        Renderer::SceneRenderer* GetSceneRenderer() const { return m_SceneRenderer.get(); }
+
+        VkFormat GetDepthFormat() const { return m_DepthFormat; }
+        // False when the driver refused multiDrawIndirect/drawIndirectFirstInstance,
+        // in which case GPU-driven cluster draws cannot be issued at all.
+        bool SupportsGPUDrivenDraw() const { return m_SupportsGPUDrivenDraw; }
 
         VkShaderModule CreateShaderModule(const std::vector<uint32_t>& code);
         void DestroyShaderModule(VkShaderModule shaderModule);
@@ -120,7 +132,6 @@ namespace RHI {
         // The original pipeline has no vertex input at all - it draws a hard-coded
         // triangle - so scene geometry needs its own.
         void CreateMeshPipeline();
-        void RecordSceneDraws(VkCommandBuffer cmd);
         bool IsDeviceSuitable(VkPhysicalDevice device);
         bool CheckDeviceExtensionSupport(VkPhysicalDevice device) const;
         QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device) const;
@@ -159,12 +170,11 @@ namespace RHI {
         VkPipelineLayout m_MeshPipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_MeshPipeline = VK_NULL_HANDLE;
 
-        // Scene draw list for the current frame, set by the application.
-        const void* m_SceneDrawCommands = nullptr;
-        std::size_t m_SceneDrawCommandCount = 0;
-        float m_SceneViewProjection[16] = {
-            1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1
-        };
+        // Owns everything between "the command buffer has begun" and "the
+        // swapchain pass is about to end": culling, the G-buffer, GI, upscaling.
+        std::unique_ptr<Renderer::SceneRenderer> m_SceneRenderer;
+        bool m_HasFrameData = false;
+        bool m_SupportsGPUDrivenDraw = false;
         uint32_t m_LastDrawnMeshCount = 0;
         VkPipelineCache m_PipelineCache = VK_NULL_HANDLE;
         PipelineCacheMetadata m_PipelineCacheMetadata{};
@@ -184,10 +194,14 @@ namespace RHI {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME
         };
 
+        // On in debug builds, and forceable in release with
+        // AIGE_VULKAN_VALIDATION=1 - a release build is the only place the
+        // GPU-driven and GI passes run at full speed, so it has to be possible
+        // to validate them there.
 #ifdef NDEBUG
-        const bool m_EnableValidationLayers = false;
+        bool m_EnableValidationLayers = false;
 #else
-        const bool m_EnableValidationLayers = true;
+        bool m_EnableValidationLayers = true;
 #endif
 
         const std::vector<const char*> m_ValidationLayers = {

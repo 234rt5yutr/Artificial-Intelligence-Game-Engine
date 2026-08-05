@@ -102,6 +102,13 @@ namespace ECS {
 
         // Update scene (called each frame)
         void OnUpdate(float deltaTime);
+
+        // Split halves of OnUpdate, for callers that run rendering on another
+        // thread. The simulation half touches no renderer state and can overlap
+        // submission; the UI half pushes draws into the shared text renderer and
+        // must not run while the render thread is flushing it.
+        void OnUpdateSimulation(float deltaTime);
+        void OnUpdateUI();
         void BindUIManager(UI::UIManager* uiManager);
         UISystem* GetUISystem() { return m_UISystem.get(); }
         const UISystem* GetUISystem() const { return m_UISystem.get(); }
@@ -121,6 +128,7 @@ namespace ECS {
         std::unique_ptr<SystemPipeline> m_SystemPipeline;
         UI::UIManager* m_UIManager = nullptr;
         glm::vec2 m_ViewportSize{1920.0f, 1080.0f};
+        float m_LastUIDeltaTime = 0.0f;
 
         friend class Entity;
     };

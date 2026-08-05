@@ -71,7 +71,7 @@ void UIManager::Initialize(RHI::VulkanContext* vulkanContext, Window* window, Vk
 
     // Initialize editor module and bind panel rendering through ImGui callback.
     m_EditorModule = std::make_unique<Editor::EditorModule>();
-    m_EditorModule->Initialize(nullptr);
+    m_EditorModule->Initialize(nullptr, vulkanContext);
     m_ImGui->SetDebugDrawCallback([this]() {
         if (m_ShowStage27DiagnosticsPanel) {
             RenderStage27DiagnosticsPanel();
@@ -189,15 +189,19 @@ void UIManager::Update(float deltaTime) {
             ++it;
         }
     }
+
+    // Everything that reads scene or engine state to build UI happens here, on
+    // the simulation thread. Render() below only records what this produced.
+    RenderMessages();
+    if (m_ImGui) {
+        m_ImGui->BuildOverlays();
+    }
 }
 
 void UIManager::Render(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     if (!m_Initialized || !m_InFrame) {
         return;
     }
-
-    // Render messages first (below ImGui)
-    RenderMessages();
 
     // Flush text renderer
     if (m_TextRenderer) {

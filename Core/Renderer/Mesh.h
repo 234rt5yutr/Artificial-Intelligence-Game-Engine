@@ -196,6 +196,13 @@ namespace Renderer {
         Mesh();
         ~Mesh();
 
+        // Build a procedural primitive: "box"/"cube", "sphere", "plane", or
+        // "cylinder". Nothing in the engine could produce renderable geometry
+        // without a glTF file on disk, which made every rendering path
+        // impossible to exercise. Returns nullptr for an unknown kind.
+        static std::shared_ptr<Mesh> CreatePrimitive(const std::string& kind,
+                                                     uint32_t subdivisions = 16);
+
         // Load static mesh from GLTF
         bool LoadGLTF(const std::string& filepath);
 

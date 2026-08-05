@@ -9,6 +9,7 @@
 #include "Core/RHI/Vulkan/VulkanBuffer.h"
 #include "Core/ECS/Systems/RenderSystem.h"
 #include "Core/Renderer/Mesh.h"
+#include "Core/Renderer/SceneRenderer.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <cstring>
 
@@ -17,6 +18,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 
@@ -59,6 +61,17 @@ namespace RHI {
 
     VulkanContext::VulkanContext(Core::Window* window) 
         : m_Window(window) {
+        // _dupenv_s rather than getenv: MSVC treats the latter as a deprecation
+        // error under this project's warning settings.
+        char* forced = nullptr;
+        std::size_t forcedLength = 0;
+        if (_dupenv_s(&forced, &forcedLength, "AIGE_VULKAN_VALIDATION") == 0 && forced != nullptr) {
+            m_EnableValidationLayers = forced[0] == '1' || forced[0] == 't' || forced[0] == 'T';
+            if (m_EnableValidationLayers) {
+                ENGINE_CORE_INFO("Vulkan validation layers forced on by AIGE_VULKAN_VALIDATION");
+            }
+            std::free(forced);
+        }
     }
 
     VulkanContext::~VulkanContext() {
@@ -84,6 +97,15 @@ namespace RHI {
             CreateMeshPipeline();
             CreateDepthResources();
             CreateFramebuffers();
+
+            // The scene renderer needs the swapchain render pass (for its
+            // composite pipeline) and the depth format, so it is built last.
+            m_SceneRenderer = std::make_unique<Renderer::SceneRenderer>();
+            if (!m_SceneRenderer->Initialize(this)) {
+                ENGINE_CORE_ERROR("SceneRenderer failed to initialize; falling back to the "
+                                  "placeholder triangle path");
+                m_SceneRenderer.reset();
+            }
         }
     }
 
@@ -144,12 +166,21 @@ namespace RHI {
         CreateDepthResources();
         CreateFramebuffers();
 
+        // Render resolution is derived from the display resolution, so every
+        // offscreen target has to be rebuilt with the swapchain.
+        if (m_SceneRenderer) {
+            m_SceneRenderer->OnDisplayResize(m_SwapchainExtent.width, m_SwapchainExtent.height);
+        }
+
         UI::UIManager::Get().OnResize(width, height);
     }
 
     void VulkanContext::Shutdown() {
         if (m_Device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(m_Device);
+            // Holds pipelines built against the swapchain render pass, so it has
+            // to go before the pass does.
+            m_SceneRenderer.reset();
             CleanupSwapchain();
 
             if (m_GraphicsPipeline != VK_NULL_HANDLE) {
@@ -487,7 +518,26 @@ namespace RHI {
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
+        // GPU-driven culling writes one VkDrawIndexedIndirectCommand per cluster
+        // and issues them as a single multi-draw, tagging each with the instance
+        // it belongs to via firstInstance. Both are optional core features, so
+        // ask for them and record whether the driver agreed - the renderer falls
+        // back to per-mesh direct draws when it did not.
+        VkPhysicalDeviceFeatures supportedFeatures{};
+        vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
+
         VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.multiDrawIndirect = supportedFeatures.multiDrawIndirect;
+        deviceFeatures.drawIndirectFirstInstance = supportedFeatures.drawIndirectFirstInstance;
+        deviceFeatures.fragmentStoresAndAtomics = supportedFeatures.fragmentStoresAndAtomics;
+        deviceFeatures.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
+
+        m_SupportsGPUDrivenDraw = supportedFeatures.multiDrawIndirect == VK_TRUE &&
+                                  supportedFeatures.drawIndirectFirstInstance == VK_TRUE;
+        if (!m_SupportsGPUDrivenDraw) {
+            ENGINE_CORE_WARN("Device lacks multiDrawIndirect/drawIndirectFirstInstance; "
+                             "GPU-driven cluster culling will fall back to direct draws");
+        }
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1082,6 +1132,12 @@ namespace RHI {
     void VulkanContext::DrawFrame() {
         vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
 
+        // The fence guarantees last frame's compute has retired, so the cull
+        // counters are complete rather than a torn read of live GPU writes.
+        if (m_SceneRenderer) {
+            m_SceneRenderer->GetCuller().RefreshStats();
+        }
+
         uint32_t imageIndex;
         VkResult result = vkAcquireNextImageKHR(m_Device, m_Swapchain, UINT64_MAX, m_ImageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
 
@@ -1100,6 +1156,18 @@ namespace RHI {
 
         if (vkBeginCommandBuffer(m_CommandBuffer, &beginInfo) != VK_SUCCESS) {
             ENGINE_CORE_ASSERT(false, "failed to begin recording command buffer!");
+        }
+
+        // Everything offscreen - culling, the G-buffer, GI, resolve, upscale -
+        // is recorded before the swapchain pass opens, because compute cannot
+        // run inside a render pass and the G-buffer is not the swapchain image.
+        const bool sceneRendererActive = m_SceneRenderer && m_HasFrameData;
+        if (sceneRendererActive) {
+            m_SceneRenderer->RecordOffscreen(m_CommandBuffer);
+            m_LastDrawnMeshCount = m_SceneRenderer->GetStats().DirectDraws +
+                                   m_SceneRenderer->GetStats().IndirectDraws;
+        } else {
+            m_LastDrawnMeshCount = 0;
         }
 
         VkRenderPassBeginInfo renderPassInfo{};
@@ -1135,11 +1203,12 @@ namespace RHI {
         scissor.extent = m_SwapchainExtent;
         vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
 
-        // Scene geometry when the application supplied a draw list this frame,
-        // otherwise the original placeholder triangle so an empty scene still
-        // shows the renderer is alive.
-        RecordSceneDraws(m_CommandBuffer);
-        if (m_LastDrawnMeshCount == 0) {
+        // Composite the upscaled scene into the swapchain. With no scene
+        // renderer (or no frame data yet) the original placeholder triangle
+        // still shows the renderer is alive.
+        if (sceneRendererActive) {
+            m_SceneRenderer->RecordComposite(m_CommandBuffer);
+        } else {
             vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
             vkCmdDraw(m_CommandBuffer, 3, 1, 0, 0);
         }
@@ -1437,60 +1506,18 @@ namespace RHI {
     // Scene draw submission
     // ========================================================================
 
-    void VulkanContext::SetSceneDrawData(const void* drawCommands, std::size_t drawCommandCount,
-                                         const float* viewProjection) {
-        m_SceneDrawCommands = drawCommands;
-        m_SceneDrawCommandCount = drawCommandCount;
-        if (viewProjection) {
-            std::memcpy(m_SceneViewProjection, viewProjection, sizeof(m_SceneViewProjection));
+    void VulkanContext::SubmitFrameRenderData(const Renderer::FrameRenderData& frame) {
+        if (!m_SceneRenderer) {
+            return;
         }
+        // BeginFrame copies what it needs, so the simulation is free to rebuild
+        // its draw list the moment this returns.
+        m_SceneRenderer->BeginFrame(frame);
+        m_HasFrameData = true;
     }
 
     void VulkanContext::ClearSceneDrawData() {
-        m_SceneDrawCommands = nullptr;
-        m_SceneDrawCommandCount = 0;
-    }
-
-    void VulkanContext::RecordSceneDraws(VkCommandBuffer cmd) {
-        m_LastDrawnMeshCount = 0;
-
-        if (!m_SceneDrawCommands || m_SceneDrawCommandCount == 0 ||
-            m_MeshPipeline == VK_NULL_HANDLE) {
-            return;
-        }
-
-        const auto* commands = static_cast<const ECS::DrawCommand*>(m_SceneDrawCommands);
-        const glm::mat4 viewProj = glm::make_mat4(m_SceneViewProjection);
-
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_MeshPipeline);
-
-        for (std::size_t i = 0; i < m_SceneDrawCommandCount; ++i) {
-            const ECS::DrawCommand& command = commands[i];
-            const Renderer::Mesh* mesh = command.Mesh;
-            // Skip anything without GPU buffers rather than issuing a draw that
-            // would read from a null binding.
-            if (!mesh || !mesh->IsUploaded() || mesh->GetUploadedIndexCount() == 0) {
-                continue;
-            }
-
-            const auto* vertexBuffer = static_cast<const VulkanBuffer*>(mesh->vertexBuffer.get());
-            const auto* indexBuffer = static_cast<const VulkanBuffer*>(mesh->indexBuffer.get());
-            if (!vertexBuffer || !indexBuffer) {
-                continue;
-            }
-
-            const glm::mat4 mvp = viewProj * command.Transform;
-            vkCmdPushConstants(cmd, m_MeshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
-                               0, sizeof(glm::mat4), &mvp[0][0]);
-
-            VkBuffer vertexHandle = vertexBuffer->GetBuffer();
-            VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexHandle, &offset);
-            vkCmdBindIndexBuffer(cmd, indexBuffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, mesh->GetUploadedIndexCount(), 1, 0, 0, 0);
-
-            ++m_LastDrawnMeshCount;
-        }
+        m_HasFrameData = false;
     }
 
 } // namespace RHI

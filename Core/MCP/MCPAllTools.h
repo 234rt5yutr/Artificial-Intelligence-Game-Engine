@@ -16,6 +16,7 @@
 #include "MCPNetworkTools.h"
 #include "MCPDevTools.h"
 #include "MCPProjectTools.h"
+#include "MCPRenderTools.h"
 
 // NOT INCLUDED - these four families do not compile against the current MCPTool
 // base class and are excluded from the build until they are ported:
@@ -86,6 +87,12 @@ namespace MCP {
     // - ModifyConstraint: Modify constraint properties at runtime
     // - QueryPhysicsState: Query physics body state
     // - ApplyForce: Apply force/impulse/torque to physics body
+    // - GetRenderStats: Read the live rendering pipeline (culling, GI, upscaling, threads)
+    // - SetGPUCulling: Toggle GPU-driven cluster culling, HZB occlusion, cone culling, two-phase
+    // - SetGlobalIllumination: Tune the dynamic GI screen traces and world radiance cache
+    // - SetUpscaler: Set the FSR quality mode, sharpening, and jitter
+    // - ListMaterials / GetMaterialGraph / SetMaterialGraph: Author material node graphs
+    // - SetEditorViewport: Drive the editor camera, gizmo, and play/pause/step
     // Declared here, defined in MCPAllTools.cpp. Callers that only need to
     // register the tools should include this header and link; they do not pay to
     // instantiate every family's schema templates in their own object file.
@@ -141,6 +148,12 @@ namespace MCP {
         // file listing) so an agent can drive the project loop, not just runtime
         auto projectTools = CreateProjectTools();
         tools.insert(tools.end(), projectTools.begin(), projectTools.end());
+
+        // Add rendering/material/editor tools so an agent can inspect and drive
+        // the GPU-driven culling, GI, upscaling, material graph, and viewport
+        // instead of only authoring content that it cannot see.
+        auto renderTools = CreateRenderTools();
+        tools.insert(tools.end(), renderTools.begin(), renderTools.end());
 
         return tools;
     }
