@@ -222,8 +222,6 @@ add_library(EngineCore
     Core/Renderer/GlobalIllumination.cpp
     Core/Renderer/RayTracingManager.h
     Core/Renderer/RayTracingManager.cpp
-    Core/Renderer/VirtualShadows/VirtualShadowMapCache.h
-    Core/Renderer/VirtualShadows/VirtualShadowMapCache.cpp
     Core/Renderer/FrustumCulling.h
     Core/Renderer/FrustumCulling.cpp
     Core/Renderer/TAASystem.h

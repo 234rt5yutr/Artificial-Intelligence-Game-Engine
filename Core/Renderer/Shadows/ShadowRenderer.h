@@ -17,6 +17,7 @@
 #include "Core/RHI/Vulkan/VulkanGpuResources.h"
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 namespace Core {
@@ -44,6 +45,12 @@ namespace Renderer {
 
     // Shadow views culled per frame: cascades occupy [0, kMaxShadowCascades),
     // spot atlas tiles follow. Each view owns a draw buffer and a descriptor set.
+    // Cascade pages. A 2048 cascade at 128px pages is a 16x16 page grid, which
+    // is fine enough that one moving object dirties a handful of pages rather
+    // than the whole map.
+    inline constexpr uint32_t kShadowPageSize = 128;
+    inline constexpr uint32_t kMaxShadowPagesPerSide = 64;
+
     inline constexpr uint32_t kMaxShadowViews =
         kMaxShadowCascades + kMaxSpotShadows + kMaxPointShadows * kCubeFaceCount;
 
@@ -70,6 +77,16 @@ namespace Renderer {
         // shimmer as the camera moves.
         bool StabilizeCascades = true;
 
+        // Redraw only the cascade pages whose contents changed. A static scene
+        // then costs nothing after its first frame.
+        bool CacheCascades = true;
+        // Past this fraction of dirty pages, redrawing the whole cascade beats
+        // issuing a scissored draw per dirty region.
+        float CascadeFullRedrawFraction = 0.4f;
+        // Hard cap on scissor rectangles per cascade; more than this and the
+        // per-rect draw overhead outweighs the pages saved.
+        uint32_t MaxCascadeDirtyRects = 16;
+
         // Punctual (spot) shadows share one atlas. One tile per light, sized
         // atlas / tilesPerRow.
         bool SpotShadowsEnabled = true;
@@ -94,6 +111,21 @@ namespace Renderer {
         uint32_t AtlasTilesTotal = 0;
         uint32_t AtlasResolution = 0;
         uint32_t AtlasTileSize = 0;
+
+        // Cascade page cache, for the frame just recorded.
+        uint32_t PagesPerSide = 0;
+        uint32_t DirtyPages = 0;
+        uint32_t TotalPages = 0;
+        uint32_t CascadesRedrawn = 0;
+        uint32_t CascadesSkipped = 0;
+        uint32_t DirtyRects = 0;
+        uint32_t MovedInstances = 0;
+        // Monotonic. Per-frame counters are useless for observing a cache from
+        // outside the engine: by the time a tool call reads them, the frame that
+        // did the work is a hundred frames gone.
+        uint64_t TotalCascadeRedraws = 0;
+        uint64_t TotalCascadeSkips = 0;
+        uint64_t TotalOccluderChanges = 0;
     };
 
     // One spot light's slot in the shadow atlas, as the lit shader needs it.
@@ -151,6 +183,12 @@ namespace Renderer {
         // Rebuilds the cascade array after a resolution or cascade-count change.
         bool ApplySettings();
 
+        // Forces every cascade page dirty for one frame. The failure mode of a
+        // page cache is a stale page - a shadow that should have moved and did
+        // not - so there has to be a way to rule the cache in or out from a tool
+        // call rather than by rebuilding.
+        void InvalidateCache() { m_ForceFullRedraw = true; }
+
         ShadowSettings& GetSettings() { return m_Settings; }
         const ShadowSettings& GetSettings() const { return m_Settings; }
         const ShadowStats& GetStats() const { return m_Stats; }
@@ -184,6 +222,27 @@ namespace Renderer {
                           const Math::Mat4& viewProjection, const Math::Vec3& viewDirection);
         void FitCascades(const FrameRenderData& frame, const Math::Vec3& lightDirection);
 
+        // Diffs this frame's occluders against last frame's and marks the pages
+        // their shadows occupy. Instances have no stable id across frames, so
+        // identity comes from hashing (mesh, transform): anything that appears
+        // or disappears from that set moved, and both its old and new footprints
+        // have to be redrawn.
+        void UpdateCascadePages(const FrameRenderData& frame, GPUScene& scene);
+        void MarkPagesForBounds(uint32_t cascade, const Math::Vec3& center, float radius);
+        // Collapses the dirty page grid into row-run rectangles for scissoring.
+        void BuildDirtyRects(uint32_t cascade, std::vector<VkRect2D>& outRects) const;
+
+        struct OccluderBounds {
+            Math::Vec3 Center{0.0f};
+            float Radius = 0.0f;
+        };
+
+        struct CascadePageState {
+            Math::Mat4 LastMatrix{0.0f};
+            std::vector<uint8_t> DirtyPages;
+            bool EverDrawn = false;
+        };
+
         RHI::VulkanContext* m_Context = nullptr;
         ShadowSettings m_Settings{};
         ShadowStats m_Stats{};
@@ -195,7 +254,16 @@ namespace Renderer {
         VkFramebuffer m_AtlasFramebuffer = VK_NULL_HANDLE;
         std::vector<SpotShadowSlot> m_SpotSlots;
         std::vector<PointShadowSlot> m_PointSlots;
+
+        CascadePageState m_CascadePages[kMaxShadowCascades];
+        std::unordered_map<uint64_t, OccluderBounds> m_PreviousOccluders;
+        std::unordered_map<uint64_t, OccluderBounds> m_CurrentOccluders;
+        uint32_t m_PagesPerSide = 0;
+        bool m_ForceFullRedraw = true;
         VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+        // Identical but for the load op: a partial cascade redraw must keep the
+        // pages it is not touching.
+        VkRenderPass m_RenderPassLoad = VK_NULL_HANDLE;
         VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
         VkPipeline m_Pipeline = VK_NULL_HANDLE;
         VkSampler m_ComparisonSampler = VK_NULL_HANDLE;

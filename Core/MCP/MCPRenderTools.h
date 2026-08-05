@@ -222,6 +222,23 @@ namespace MCP {
             shadowJson["pointShadowsEnabled"] = shadowSettings.PointShadowsEnabled;
             shadowJson["atlasTilesUsed"] = shadows.AtlasTilesUsed;
             shadowJson["atlasTilesTotal"] = shadows.AtlasTilesTotal;
+            // Cascade page cache. dirtyPages 0 with cascadesSkipped equal to the
+            // cascade count means a fully static frame cost nothing.
+            Json cache;
+            cache["enabled"] = shadowSettings.CacheCascades;
+            cache["pagesPerSide"] = shadows.PagesPerSide;
+            cache["dirtyPages"] = shadows.DirtyPages;
+            cache["totalPages"] = shadows.TotalPages;
+            cache["cascadesRedrawn"] = shadows.CascadesRedrawn;
+            cache["cascadesSkipped"] = shadows.CascadesSkipped;
+            cache["dirtyRects"] = shadows.DirtyRects;
+            cache["movedOccluders"] = shadows.MovedInstances;
+            // Monotonic totals; take two readings and diff them to see whether
+            // the cache is actually holding.
+            cache["totalCascadeRedraws"] = shadows.TotalCascadeRedraws;
+            cache["totalCascadeSkips"] = shadows.TotalCascadeSkips;
+            cache["totalOccluderChanges"] = shadows.TotalOccluderChanges;
+            shadowJson["pageCache"] = cache;
             shadowJson["atlasResolution"] = shadows.AtlasResolution;
             shadowJson["atlasTileSize"] = shadows.AtlasTileSize;
             shadowJson["atlasTilesPerRow"] = shadowSettings.AtlasTilesPerRow;
@@ -561,6 +578,11 @@ namespace MCP {
                 "boolean", "Render shadow tiles for spot lights.");
             schema.Properties["pointShadows"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Render cube shadows for point lights. Each takes six atlas tiles.");
+            schema.Properties["cacheCascades"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Redraw only the cascade pages whose contents changed.");
+            schema.Properties["invalidateCache"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Force every cascade page dirty for one frame. Use this to tell a "
+                           "stale cached page apart from a genuine shading problem.");
             schema.Properties["atlasResolution"] = RenderToolsDetail::NumberProperty(
                 "Spot shadow atlas resolution in pixels.", 512, 8192);
             schema.Properties["atlasTilesPerRow"] = RenderToolsDetail::NumberProperty(
@@ -624,6 +646,13 @@ namespace MCP {
             if (arguments.contains("pointShadows") && arguments["pointShadows"].is_boolean()) {
                 settings.PointShadowsEnabled = arguments["pointShadows"].get<bool>();
             }
+            if (arguments.contains("cacheCascades") && arguments["cacheCascades"].is_boolean()) {
+                settings.CacheCascades = arguments["cacheCascades"].get<bool>();
+                shadows.InvalidateCache();
+            }
+            if (arguments.value("invalidateCache", false)) {
+                shadows.InvalidateCache();
+            }
             if (arguments.contains("atlasResolution") && arguments["atlasResolution"].is_number()) {
                 const uint32_t value = std::clamp(arguments["atlasResolution"].get<uint32_t>(), 512u, 8192u);
                 rebuild = rebuild || value != settings.AtlasResolution;
@@ -662,6 +691,9 @@ namespace MCP {
             state["pointShadowCount"] = stats.PointShadowCount;
             state["atlasTilesUsed"] = stats.AtlasTilesUsed;
             state["atlasTilesTotal"] = stats.AtlasTilesTotal;
+            state["cacheCascades"] = settings.CacheCascades;
+            state["dirtyPages"] = stats.DirtyPages;
+            state["totalPages"] = stats.TotalPages;
             return ToolResult::Success("Shadow settings updated", state);
         }
     };

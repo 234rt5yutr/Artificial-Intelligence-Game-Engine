@@ -82,6 +82,12 @@ shadow cascades + spot atlas -> GPU cluster cull -> G-buffer pass
       -> resolve -> FSR (EASU + RCAS) -> composite -> UI
 ```
 
+**Clustered lighting** (`Core/Renderer/Lighting/ClusteredLightCuller.*`).
+Punctual lights live in a storage buffer culled into a
+`ceil(w/16) x ceil(h/16) x 32` froxel grid, exponential in Z. That removed the
+old fixed 16-point/8-spot cap: verified with 40 point lights producing over a
+million light-to-froxel assignments with no overflow.
+
 **GPU-driven cluster culling** (`Core/Renderer/GPUDriven/`). Meshes are
 clusterised into runs of <= 128 triangles along a Morton curve and copied into a
 single merged vertex/index arena, so a frame is one vertex bind, one index bind,
@@ -119,7 +125,14 @@ folded into the projection. Not a binding of AMD's SDK, which is not a dependenc
 of this project.
 
 **Shadows** (`Core/Renderer/Shadows/ShadowRenderer.*`). Cascaded shadow maps for
-the directional light, plus a shared atlas for spot lights. Cascades use the
+the directional light, plus a shared atlas for spot lights and point-light cube
+shadows (six contiguous tiles each, face picked by major axis). Cascades are
+page-cached: a 16x16 page grid per cascade is invalidated only where occluders
+actually changed, so a static scene does no shadow work at all after its first
+frame. Occluder identity comes from hashing (mesh, transform) rather than an
+index, because the draw list is rebuilt every frame and its order is not stable;
+anything that appears *or disappears* from that set dirties both its old and new
+footprint, which is what stops a shadow standing where an object used to be. Cascades use the
 practical split scheme, fit a bounding sphere per frustum slice so their size
 does not change as the camera rotates, and snap to a texel grid so edges do not
 crawl. Spot tiles are allocated per frame by importance, so when there are more
@@ -257,10 +270,11 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Feature completeness and runtime stability vary by subsystem.
 - Security hardening for AI-exposed tool surfaces is not complete.
 - Automated test coverage and release packaging are still limited.
-- Point lights are lit but cast no shadows: cube shadows need six atlas tiles
-  and a face-selection lookup, which the spot path does not yet generalise to.
-- Virtual shadow maps have no page table or per-page invalidation, so every
-  cascade is redrawn in full each frame.
+- Shadow paging caches the *work*, not the memory: every cascade page is always
+  allocated. True sparse residency needs an optional device feature, and gating
+  shadows on it costs more than the memory it saves.
+- Point-light cube shadows are capped at two lights, because the uniform block
+  carries six matrices each.
 - No texture compression: images upload as RGBA8 with mips. `stb_dxt` is
   available for a BCn cook step but nothing calls it.
 - glTF import brings in geometry only. Materials, skeletons, and animations in

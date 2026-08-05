@@ -5,6 +5,7 @@
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Renderer/GPUDriven/ClusterCullShader.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
+#include "Core/ECS/Systems/RenderSystem.h"
 #include "Core/Renderer/Mesh.h"
 #include "Core/Renderer/SceneRenderer.h"
 
@@ -141,6 +142,16 @@ void main() {
 
         if (vkCreateRenderPass(m_Context->GetDevice(), &info, nullptr, &m_RenderPass) != VK_SUCCESS) {
             ENGINE_CORE_ERROR("ShadowRenderer: render pass creation failed");
+            return false;
+        }
+
+        // Same attachments, LOAD instead of CLEAR, so a partial cascade redraw
+        // keeps the pages it is not touching. Load/store ops do not affect
+        // render pass compatibility, so the pipeline built above works with both.
+        depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        depth.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        if (vkCreateRenderPass(m_Context->GetDevice(), &info, nullptr, &m_RenderPassLoad) != VK_SUCCESS) {
+            ENGINE_CORE_ERROR("ShadowRenderer: cached-cascade render pass creation failed");
             return false;
         }
         return true;
@@ -469,8 +480,196 @@ void main() {
 
         m_Stats.CascadeCount = cascades;
         m_Stats.Resolution = resolution;
+
+        // Page grid. A resolution change reshapes it, so every cached page is
+        // meaningless and the next frame redraws in full.
+        m_PagesPerSide = std::clamp(std::max(1u, resolution / kShadowPageSize),
+                                    1u, kMaxShadowPagesPerSide);
+        for (uint32_t cascade = 0; cascade < kMaxShadowCascades; ++cascade) {
+            m_CascadePages[cascade].DirtyPages.assign(
+                static_cast<std::size_t>(m_PagesPerSide) * m_PagesPerSide, 1u);
+            m_CascadePages[cascade].EverDrawn = false;
+            m_CascadePages[cascade].LastMatrix = Math::Mat4(0.0f);
+        }
+        m_PreviousOccluders.clear();
+        m_ForceFullRedraw = true;
+        m_Stats.PagesPerSide = m_PagesPerSide;
+        m_Stats.TotalPages = m_PagesPerSide * m_PagesPerSide * cascades;
+
         m_TargetsDirty = false;
         return true;
+    }
+
+    void ShadowRenderer::MarkPagesForBounds(uint32_t cascade, const Math::Vec3& center, float radius) {
+        if (m_PagesPerSide == 0 || cascade >= kMaxShadowCascades) {
+            return;
+        }
+        auto& pages = m_CascadePages[cascade].DirtyPages;
+        if (pages.empty()) {
+            return;
+        }
+
+        // Project the occluder's world bounding sphere into the cascade and take
+        // the page rectangle it covers. Conservative on purpose: a page that
+        // might have changed is redrawn, never skipped.
+        const Math::Mat4& matrix = m_CascadeMatrices[cascade];
+        Math::Vec2 uvMin(1e9f);
+        Math::Vec2 uvMax(-1e9f);
+
+        for (int corner = 0; corner < 8; ++corner) {
+            const Math::Vec3 point(center.x + ((corner & 1) ? radius : -radius),
+                                   center.y + ((corner & 2) ? radius : -radius),
+                                   center.z + ((corner & 4) ? radius : -radius));
+            const Math::Vec4 clip = matrix * Math::Vec4(point, 1.0f);
+            if (clip.w <= 1e-5f) {
+                // Straddles the light's near plane; cannot bound it, so treat
+                // the whole cascade as dirty rather than guess.
+                std::fill(pages.begin(), pages.end(), 1u);
+                return;
+            }
+            const Math::Vec3 ndc = Math::Vec3(clip) / clip.w;
+            const Math::Vec2 uv = Math::Vec2(ndc) * 0.5f + 0.5f;
+            uvMin = glm::min(uvMin, uv);
+            uvMax = glm::max(uvMax, uv);
+        }
+
+        uvMin = glm::clamp(uvMin, Math::Vec2(0.0f), Math::Vec2(1.0f));
+        uvMax = glm::clamp(uvMax, Math::Vec2(0.0f), Math::Vec2(1.0f));
+        if (uvMax.x < uvMin.x || uvMax.y < uvMin.y) {
+            return;
+        }
+
+        const float pages_f = static_cast<float>(m_PagesPerSide);
+        const int32_t minX = std::max(0, static_cast<int32_t>(std::floor(uvMin.x * pages_f)) - 1);
+        const int32_t minY = std::max(0, static_cast<int32_t>(std::floor(uvMin.y * pages_f)) - 1);
+        const int32_t maxX = std::min(static_cast<int32_t>(m_PagesPerSide) - 1,
+                                      static_cast<int32_t>(std::floor(uvMax.x * pages_f)) + 1);
+        const int32_t maxY = std::min(static_cast<int32_t>(m_PagesPerSide) - 1,
+                                      static_cast<int32_t>(std::floor(uvMax.y * pages_f)) + 1);
+
+        for (int32_t y = minY; y <= maxY; ++y) {
+            for (int32_t x = minX; x <= maxX; ++x) {
+                pages[static_cast<std::size_t>(y) * m_PagesPerSide + x] = 1u;
+            }
+        }
+    }
+
+    void ShadowRenderer::UpdateCascadePages(const FrameRenderData& frame, GPUScene& scene) {
+        const uint32_t cascades = std::clamp(m_Settings.CascadeCount, 1u, kMaxShadowCascades);
+
+        // A cascade whose matrix moved has nothing reusable in it.
+        for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
+            auto& state = m_CascadePages[cascade];
+            const bool matrixChanged = state.LastMatrix != m_CascadeMatrices[cascade];
+            if (m_ForceFullRedraw || matrixChanged || !state.EverDrawn ||
+                !m_Settings.CacheCascades) {
+                std::fill(state.DirtyPages.begin(), state.DirtyPages.end(), 1u);
+            }
+            state.LastMatrix = m_CascadeMatrices[cascade];
+        }
+
+        // Identity by content hash rather than by index: the draw list is
+        // rebuilt every frame and its order is not stable, so an index tells you
+        // nothing about whether the same object is still there.
+        m_CurrentOccluders.clear();
+        for (const auto& command : frame.DrawCommands) {
+            if (!command.Mesh || !command.CastShadows) {
+                continue;
+            }
+            const GpuMeshRecord* record = scene.EnsureResident(command.Mesh);
+            if (!record) {
+                continue;
+            }
+
+            uint64_t hash = reinterpret_cast<uint64_t>(command.Mesh);
+            const float* matrix = &command.Transform[0][0];
+            for (int i = 0; i < 16; ++i) {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &matrix[i], sizeof(bits));
+                hash ^= static_cast<uint64_t>(bits) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+            }
+
+            OccluderBounds bounds;
+            bounds.Center = Math::Vec3(command.Transform *
+                                       Math::Vec4(Math::Vec3(record->BoundsCenterRadius), 1.0f));
+            const float scale = std::max({glm::length(Math::Vec3(command.Transform[0])),
+                                          glm::length(Math::Vec3(command.Transform[1])),
+                                          glm::length(Math::Vec3(command.Transform[2]))});
+            bounds.Radius = record->BoundsCenterRadius.w * scale;
+            m_CurrentOccluders[hash] = bounds;
+        }
+
+        uint32_t moved = 0;
+        // Appeared or moved: its new footprint has to be drawn.
+        for (const auto& [hash, bounds] : m_CurrentOccluders) {
+            if (m_PreviousOccluders.find(hash) != m_PreviousOccluders.end()) {
+                continue;
+            }
+            ++moved;
+            for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
+                MarkPagesForBounds(cascade, bounds.Center, bounds.Radius);
+            }
+        }
+        // Disappeared or moved: the shadow it left behind has to be cleared, so
+        // its *old* footprint is dirty too. Missing this is what leaves a
+        // shadow standing where the object used to be.
+        for (const auto& [hash, bounds] : m_PreviousOccluders) {
+            if (m_CurrentOccluders.find(hash) != m_CurrentOccluders.end()) {
+                continue;
+            }
+            ++moved;
+            for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
+                MarkPagesForBounds(cascade, bounds.Center, bounds.Radius);
+            }
+        }
+
+        m_PreviousOccluders = m_CurrentOccluders;
+        m_ForceFullRedraw = false;
+        m_Stats.MovedInstances = moved;
+        m_Stats.TotalOccluderChanges += moved;
+
+        uint32_t dirty = 0;
+        for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
+            for (uint8_t page : m_CascadePages[cascade].DirtyPages) {
+                dirty += page ? 1u : 0u;
+            }
+        }
+        m_Stats.DirtyPages = dirty;
+        m_Stats.TotalPages = m_PagesPerSide * m_PagesPerSide * cascades;
+    }
+
+    void ShadowRenderer::BuildDirtyRects(uint32_t cascade, std::vector<VkRect2D>& outRects) const {
+        outRects.clear();
+        if (cascade >= kMaxShadowCascades || m_PagesPerSide == 0) {
+            return;
+        }
+        const auto& pages = m_CascadePages[cascade].DirtyPages;
+        if (pages.empty()) {
+            return;
+        }
+
+        // Contiguous runs within a page row. Cheap, and it collapses the common
+        // case - one object's footprint - into a handful of rectangles.
+        const int32_t pageTexels = static_cast<int32_t>(m_Stats.Resolution / m_PagesPerSide);
+        for (uint32_t y = 0; y < m_PagesPerSide; ++y) {
+            uint32_t x = 0;
+            while (x < m_PagesPerSide) {
+                if (!pages[static_cast<std::size_t>(y) * m_PagesPerSide + x]) {
+                    ++x;
+                    continue;
+                }
+                const uint32_t runStart = x;
+                while (x < m_PagesPerSide && pages[static_cast<std::size_t>(y) * m_PagesPerSide + x]) {
+                    ++x;
+                }
+                VkRect2D rect{};
+                rect.offset = {static_cast<int32_t>(runStart) * pageTexels,
+                               static_cast<int32_t>(y) * pageTexels};
+                rect.extent = {static_cast<uint32_t>((x - runStart) * pageTexels),
+                               static_cast<uint32_t>(pageTexels)};
+                outRects.push_back(rect);
+            }
+        }
     }
 
     bool ShadowRenderer::CreateAtlasTargets() {
@@ -607,8 +806,18 @@ void main() {
         // is usually far enough out to spend every cascade on empty sky.
         farPlane = std::min(farPlane, std::max(nearPlane + 1.0f, m_Settings.MaxShadowDistance));
 
+        // Fit against the *unjittered* projection. The temporal upscaler offsets
+        // [2][0] and [2][1] by a sub-pixel amount every frame; left in, that
+        // moves every frustum corner slightly, which reshapes the cascade, which
+        // invalidates the whole page cache every single frame. The shadow map
+        // does not want the jitter anyway - it is a main-view sampling trick.
+        Math::Mat4 unjitteredProjection = frame.Projection;
+        unjitteredProjection[2][0] = 0.0f;
+        unjitteredProjection[2][1] = 0.0f;
+
         // Unproject the full frustum once; each cascade is a slice along it.
-        const Math::Mat4 inverseViewProjection = glm::inverse(frame.ViewProjection);
+        const Math::Mat4 inverseViewProjection =
+            glm::inverse(unjitteredProjection * frame.View);
         Math::Vec3 nearCorners[4];
         Math::Vec3 farCorners[4];
         const Math::Vec2 ndc[4] = {
@@ -882,6 +1091,13 @@ void main() {
             }
         }
 
+        // Page invalidation has to follow the fit: it compares this frame's
+        // cascade matrices against last frame's, and projects occluders through
+        // them.
+        if (m_ShadowLightIndex >= 0) {
+            UpdateCascadePages(frame, scene);
+        }
+
         // Punctual tiles are independent of the directional cascades: a scene
         // with no sun can still have shadowed spots and points.
         FitPunctualShadows(frame);
@@ -1016,6 +1232,33 @@ void main() {
         VkClearValue clear{};
         clear.depthStencil = {1.0f, 0};
 
+        // Same draw, but the viewport still covers the whole cascade while the
+        // scissor restricts it to the dirty region - the projection must not
+        // change, or the depth written would not line up with what is already
+        // in the untouched pages.
+        auto recordViewScissored = [&](uint32_t viewIndex, const Math::Mat4& viewProjection,
+                                       const VkRect2D& scissorRect) {
+            VkViewport viewport{};
+            viewport.width = static_cast<float>(m_Stats.Resolution);
+            viewport.height = static_cast<float>(m_Stats.Resolution);
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissorRect);
+
+            vkCmdSetDepthBias(cmd, m_Settings.DepthBias, 0.0f, m_Settings.SlopeBias);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_Pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_PipelineLayout,
+                                    0, 1, &m_DrawSet, 0, nullptr);
+            vkCmdPushConstants(cmd, m_PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT,
+                               0, sizeof(Math::Mat4), &viewProjection[0][0]);
+
+            VkBuffer vertexBuffer = scene.GetVertexBuffer();
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+            vkCmdBindIndexBuffer(cmd, scene.GetIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexedIndirect(cmd, m_DrawBuffers[viewIndex].Buffer, 0, m_ClusterSlots, 20);
+        };
+
         auto recordView = [&](uint32_t viewIndex, const Math::Mat4& viewProjection,
                               int32_t offsetX, int32_t offsetY, uint32_t extent) {
             VkViewport viewport{};
@@ -1048,18 +1291,64 @@ void main() {
             vkCmdDrawIndexedIndirect(cmd, m_DrawBuffers[viewIndex].Buffer, 0, m_ClusterSlots, 20);
         };
 
+        m_Stats.CascadesRedrawn = 0;
+        m_Stats.CascadesSkipped = 0;
+        m_Stats.DirtyRects = 0;
+
+        const uint32_t pagesPerCascade = m_PagesPerSide * m_PagesPerSide;
+        std::vector<VkRect2D> dirtyRects;
+
         for (uint32_t cascade = 0; cascade < cascades; ++cascade) {
+            auto& pageState = m_CascadePages[cascade];
+
+            uint32_t dirtyPages = 0;
+            for (uint8_t page : pageState.DirtyPages) {
+                dirtyPages += page ? 1u : 0u;
+            }
+
+            // Nothing in this cascade changed: last frame's depth is still
+            // correct, so there is nothing to do at all.
+            if (m_Settings.CacheCascades && dirtyPages == 0 && pageState.EverDrawn) {
+                ++m_Stats.CascadesSkipped;
+                ++m_Stats.TotalCascadeSkips;
+                continue;
+            }
+
+            BuildDirtyRects(cascade, dirtyRects);
+            const bool fullRedraw =
+                !m_Settings.CacheCascades || !pageState.EverDrawn ||
+                pagesPerCascade == 0 ||
+                static_cast<float>(dirtyPages) / static_cast<float>(pagesPerCascade) >=
+                    m_Settings.CascadeFullRedrawFraction ||
+                dirtyRects.size() > m_Settings.MaxCascadeDirtyRects;
+
             VkRenderPassBeginInfo passBegin{};
             passBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            passBegin.renderPass = m_RenderPass;
+            // A full redraw clears; a partial one must load, or the pages it is
+            // not touching would come back as cleared depth.
+            passBegin.renderPass = fullRedraw ? m_RenderPass : m_RenderPassLoad;
             passBegin.framebuffer = m_Framebuffers[cascade];
             passBegin.renderArea.extent = {m_Stats.Resolution, m_Stats.Resolution};
-            passBegin.clearValueCount = 1;
-            passBegin.pClearValues = &clear;
+            passBegin.clearValueCount = fullRedraw ? 1u : 0u;
+            passBegin.pClearValues = fullRedraw ? &clear : nullptr;
 
             vkCmdBeginRenderPass(cmd, &passBegin, VK_SUBPASS_CONTENTS_INLINE);
-            recordView(cascade, m_CascadeMatrices[cascade], 0, 0, m_Stats.Resolution);
+            if (fullRedraw) {
+                recordView(cascade, m_CascadeMatrices[cascade], 0, 0, m_Stats.Resolution);
+            } else {
+                // One draw per dirty rectangle, scissored to it. The geometry is
+                // the same each time; the scissor is what makes it cheap.
+                for (const VkRect2D& rect : dirtyRects) {
+                    recordViewScissored(cascade, m_CascadeMatrices[cascade], rect);
+                }
+                m_Stats.DirtyRects += static_cast<uint32_t>(dirtyRects.size());
+            }
             vkCmdEndRenderPass(cmd);
+
+            std::fill(pageState.DirtyPages.begin(), pageState.DirtyPages.end(), 0u);
+            pageState.EverDrawn = true;
+            ++m_Stats.CascadesRedrawn;
+            ++m_Stats.TotalCascadeRedraws;
         }
         if (cascades > 0) {
             m_CascadeArray.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
@@ -1148,9 +1437,11 @@ void main() {
             vkDestroyPipelineLayout(device, m_PipelineLayout, nullptr);
             m_PipelineLayout = VK_NULL_HANDLE;
         }
-        if (m_RenderPass != VK_NULL_HANDLE) {
-            vkDestroyRenderPass(device, m_RenderPass, nullptr);
-            m_RenderPass = VK_NULL_HANDLE;
+        for (VkRenderPass* pass : {&m_RenderPass, &m_RenderPassLoad}) {
+            if (*pass != VK_NULL_HANDLE) {
+                vkDestroyRenderPass(device, *pass, nullptr);
+                *pass = VK_NULL_HANDLE;
+            }
         }
         for (VkSampler* sampler : {&m_ComparisonSampler, &m_DummySampler}) {
             if (*sampler != VK_NULL_HANDLE) {

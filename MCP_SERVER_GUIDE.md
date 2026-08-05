@@ -172,7 +172,7 @@ upscaling stack invisible to tooling. `MCPRenderTools.h` closes that.
 | `ListMaterials` | Read-only. Every material with its index, node/link counts, compile status, and texture slots |
 | `GetMaterialGraph` | Read-only. A material's graph as JSON, optionally with the GLSL it compiles to |
 | `SetMaterialGraph` | Create or replace a material's node graph; compiles it and rebuilds its pipeline next frame |
-| `SetShadows` | Cascade count and resolution, shadow distance, split distribution, depth/slope/normal bias, PCF radius, spot atlas size |
+| `SetShadows` | Cascade count and resolution, shadow distance, split distribution, depth/slope/normal bias, PCF radius, spot/point atlas size, cascade page caching, and `invalidateCache` to force a full redraw |
 | `SetEditorViewport` | Editor fly camera on/off, gizmo mode, frame the selection, pause/resume/single-step |
 | `LoadTexture` | Import an image (PNG/JPEG/TGA/BMP/PSD/GIF/HDR) with mips under a library name |
 | `ListTextures` | Read-only. Every imported texture with dimensions, mips, colour space, and GPU footprint |
@@ -235,6 +235,19 @@ broken material.
 
 `LoadTexture` and `LoadMesh` resolve paths against the project root and reject
 anything that escapes it, the same rule the project-tool family uses.
+
+`GetRenderStats` reports the shadow page cache under `shadows.pageCache`. The
+per-frame numbers there are close to useless from outside the engine - by the
+time a tool call reads them, the frame that did the work is a hundred frames
+gone - so the block also carries monotonic `totalCascadeRedraws`,
+`totalCascadeSkips`, and `totalOccluderChanges`. Take two readings and diff them:
+a static scene should show skips climbing and redraws flat, and moving one object
+should add exactly two occluder changes (its old footprint disappearing and its
+new one appearing).
+
+`clusteredLighting` reports the froxel grid. `maxLightsInCluster` sitting at 256
+or `overflowedClusters` above zero means lights are being dropped from crowded
+froxels.
 
 **Caveat:** textures upload as RGBA8 with mips; there is no BCn compression yet,
 so a large texture set costs more GPU memory than it needs to.

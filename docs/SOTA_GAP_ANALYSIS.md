@@ -353,6 +353,11 @@ Also done since:
 
 - ~~Shadows~~ — directional cascades and a spot atlas (Tier 2.3).
 - ~~Asset import~~ — texture import and glTF geometry (Tier 3.1).
+- ~~Point cube shadows and cascade paging~~ — (Tier 2.3).
+- ~~Clustered light culling~~ — (Tier 2.5), lifting the fixed light caps.
+- **A third root-cause fix:** cascade fitting used the jittered projection, so
+  the temporal upscaler reshaped every cascade every frame and the page cache
+  never settled. Shadows now fit against the unjittered projection.
 - **A second root-cause fix:** projections were built with OpenGL's `[-1, 1]`
   clip depth while Vulkan clips to `[0, 1]`, so the near half of every frustum
   was clipped away and the HZB and GI both misread depth. `GLM_FORCE_DEPTH_ZERO_TO_ONE`
@@ -360,16 +365,14 @@ Also done since:
 
 Remaining, in order:
 
-1. Point-light cube shadows, then virtual shadow map paging so cascades stop
-   being redrawn in full every frame.
-2. glTF materials and textures, plus a BCn cook step (`stb_dxt` is available and
+1. glTF materials and textures, plus a BCn cook step (`stb_dxt` is available and
    unused).
-3. Port passes onto the render graph (`PostProcessManager::Execute` is still not
+2. Port passes onto the render graph (`PostProcessManager::Execute` is still not
    called from the frame).
-4. Skinned geometry through the GPU-driven path, which needs GPU skinning to
+3. Skinned geometry through the GPU-driven path, which needs GPU skinning to
    write into the merged arena.
-5. Cluster LOD hierarchy and streaming, so the arena stops being fixed-capacity.
-6. Tier 4: the renderer, ECS, and networking still have no test coverage, and
+4. Cluster LOD hierarchy and streaming, so the arena stops being fixed-capacity.
+5. Tier 4: the renderer, ECS, and networking still have no test coverage, and
    there is no loopback integration test for the netcode.
 
 The structural gate is closed and the rendering gate is now closed too: the frame
