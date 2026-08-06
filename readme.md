@@ -157,6 +157,14 @@ roughness and metallic split out of the packed channels glTF specifies, normal
 and emissive — and because factors multiply their textures, an image the importer
 could not resolve is harmless rather than fatal.
 
+**Post-processing** (`Core/Renderer/PostProcess/Compute*.h`). Bloom (soft-knee
+threshold, 13-tap downsample, tent upsample), SSAO over the G-buffer depth and
+normal with a depth-aware blur, and colour grading folded into the composite
+alongside the tonemap. The engine's previous post stack could not run at all -
+four of its five passes never wrote their descriptor sets, and the pass interface
+had no way to hand SSAO the depth buffer it needs - so it was replaced rather
+than repaired.
+
 **Editor viewport** (`Core/Editor/Panels/ViewportPanel.*`). The renderer's own
 post-upscale output as an ImGui image, so the editor shows exactly what the game
 sees rather than a second render path that would drift. Fly camera, click-to-

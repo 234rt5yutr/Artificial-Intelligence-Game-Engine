@@ -434,25 +434,10 @@ add_library(EngineCore
     Core/ECS/Systems/UISystem.cpp
     # Phase 15: Post-Processing
     Core/ECS/Components/PostProcessComponent.h
-    Core/ECS/Systems/PostProcessSystem.h
-    Core/ECS/Systems/PostProcessSystem.cpp
-    Core/Renderer/PostProcess/PostProcessPass.h
-    Core/Renderer/PostProcess/FramebufferChain.h
-    Core/Renderer/PostProcess/FramebufferChain.cpp
+    Core/Renderer/PostProcess/ComputeSSAO.h
+    Core/Renderer/PostProcess/ComputeSSAO.cpp
     Core/Renderer/PostProcess/ComputeBloom.h
     Core/Renderer/PostProcess/ComputeBloom.cpp
-    Core/Renderer/PostProcess/PostProcessManager.h
-    Core/Renderer/PostProcess/PostProcessManager.cpp
-    Core/Renderer/PostProcess/BloomPass.h
-    Core/Renderer/PostProcess/BloomPass.cpp
-    Core/Renderer/PostProcess/SSAOPass.h
-    Core/Renderer/PostProcess/SSAOPass.cpp
-    Core/Renderer/PostProcess/ColorGradingPass.h
-    Core/Renderer/PostProcess/ColorGradingPass.cpp
-    Core/Renderer/PostProcess/DepthOfFieldPass.h
-    Core/Renderer/PostProcess/DepthOfFieldPass.cpp
-    Core/Renderer/PostProcess/MotionBlurPass.h
-    Core/Renderer/PostProcess/MotionBlurPass.cpp
     # World rendering: terrain, foliage, sky
     Core/Renderer/Terrain/TerrainChunk.h
     Core/Renderer/Terrain/TerrainGenerator.h

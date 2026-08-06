@@ -27,6 +27,7 @@
 #include "Core/ECS/Components/PostProcessComponent.h"
 #include "Core/Renderer/Lighting/ClusteredLightCuller.h"
 #include "Core/Renderer/PostProcess/ComputeBloom.h"
+#include "Core/Renderer/PostProcess/ComputeSSAO.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
 #include "Core/Renderer/Textures/TextureLibrary.h"
 #include "Core/Renderer/Upscaling/FSRUpscaler.h"
@@ -120,6 +121,7 @@ namespace Renderer {
         ShadowRenderer& GetShadowRenderer() { return m_Shadows; }
         ClusteredLightCuller& GetLightCuller() { return m_LightCuller; }
         ComputeBloom& GetBloom() { return m_Bloom; }
+        ComputeSSAO& GetSSAO() { return m_SSAO; }
         // Renderer-owned rather than per-frame: nothing in the ECS drives these
         // yet, and a tool that sets them should not have its change overwritten
         // by the next frame packet.
@@ -254,6 +256,7 @@ namespace Renderer {
         ShadowRenderer m_Shadows;
         ClusteredLightCuller m_LightCuller;
         ComputeBloom m_Bloom;
+        ComputeSSAO m_SSAO;
         ECS::PostProcessSettings m_PostProcessSettings{};
         // False until the chain runs at least once; the upscaler reads the
         // resolved image directly until then.

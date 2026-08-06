@@ -423,8 +423,9 @@ layout(binding = 2) uniform sampler2D uGI;
 layout(binding = 3, rgba16f) uniform writeonly image2D uResolved;
 layout(binding = 4) uniform ResolveParams {
     vec4 sizeParams;   // xy = render size, zw = 1/size
-    vec4 flags;        // x = GI enabled
+    vec4 flags;        // x = GI enabled, y = AO enabled
 } rp;
+layout(binding = 5) uniform sampler2D uOcclusion;
 
 void main() {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -434,12 +435,20 @@ void main() {
 
     vec2 uv = (vec2(pixel) + 0.5) * rp.sizeParams.zw;
     vec3 direct = texture(uSceneColor, uv).rgb;
+    vec4 albedoRoughness = texture(uAlbedo, uv);
 
     // Indirect light is bounced radiance, so it has to be modulated by the
     // surface albedo here rather than in the GI pass, which never saw it.
     vec3 indirect = vec3(0.0);
     if (rp.flags.x > 0.5) {
-        indirect = texture(uGI, uv).rgb * texture(uAlbedo, uv).rgb;
+        indirect = texture(uGI, uv).rgb * albedoRoughness.rgb;
+    }
+
+    // Ambient occlusion attenuates ambient and indirect light only. It describes
+    // how much sky and bounce light reaches a point; applying it to direct
+    // lighting too would darken surfaces the sun is plainly hitting.
+    if (rp.flags.y > 0.5) {
+        indirect *= texture(uOcclusion, uv).r;
     }
 
     imageStore(uResolved, pixel, vec4(direct + indirect, 1.0));
@@ -467,7 +476,8 @@ layout(location = 0) out vec4 outColor;
 layout(set = 0, binding = 0) uniform sampler2D uSource;
 
 layout(push_constant) uniform Push {
-    vec4 params;   // x = exposure, y = apply gamma, z = unused, w = unused
+    vec4 params;   // x = exposure, y = apply gamma, z = contrast, w = saturation
+    vec4 grading;  // rgb = colour filter, w = vignette strength
 } push;
 
 // Narkowicz's ACES fit: one polynomial, no LUT, and close enough to the full
@@ -483,7 +493,26 @@ vec3 ACESFilm(vec3 x) {
 
 void main() {
     vec3 color = texture(uSource, vUV).rgb * push.params.x;
+
+    // Colour filter before the tonemap, while the values are still linear and
+    // unbounded - tinting after the curve fights the curve.
+    color *= push.grading.rgb;
     color = ACESFilm(color);
+
+    // Contrast and saturation after the tonemap, in display space, which is
+    // where they behave the way an artist expects.
+    color = clamp((color - 0.5) * push.params.z + 0.5, 0.0, 1.0);
+    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+    color = clamp(mix(vec3(luma), color, push.params.w), 0.0, 1.0);
+
+    if (push.grading.w > 0.001) {
+        // Smooth radial falloff from the centre; squared so it stays subtle
+        // until well out toward the corners.
+        vec2 offset = vUV - 0.5;
+        float vignette = 1.0 - dot(offset, offset) * push.grading.w * 2.0;
+        color *= clamp(vignette, 0.0, 1.0);
+    }
+
     if (push.params.y > 0.5) {
         color = pow(color, vec3(1.0 / 2.2));
     }
@@ -549,6 +578,9 @@ void main() {
 
         if (!m_Bloom.Initialize(context)) {
             ENGINE_CORE_WARN("Compute bloom unavailable; the frame presents without it");
+        }
+        if (!m_SSAO.Initialize(context)) {
+            ENGINE_CORE_WARN("Compute SSAO unavailable; ambient light is unoccluded");
         }
 
         if (!m_LightCuller.Initialize(context)) {
@@ -675,6 +707,7 @@ void main() {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // ambient occlusion
         });
 
         VkDescriptorSetLayoutBinding compositeBinding{};
@@ -1096,6 +1129,7 @@ void main() {
         // scene-space effect, and running it after the upscale would both cost
         // more and smear what FSR just reconstructed.
         m_Bloom.Resize(renderWidth, renderHeight);
+        m_SSAO.Resize(renderWidth, renderHeight);
         m_GI.Resize(renderWidth, renderHeight);
         m_FSR.Resize(renderWidth, renderHeight, m_DisplayWidth, m_DisplayHeight);
 
@@ -1131,7 +1165,7 @@ void main() {
         VkPushConstantRange pushRange{};
         pushRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         pushRange.offset = 0;
-        pushRange.size = sizeof(Math::Vec4);
+        pushRange.size = sizeof(Math::Vec4) * 2;
 
         VkPipelineLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1998,6 +2032,21 @@ void main() {
         giInputs.FrameIndex = m_Frame.FrameIndex;
         m_GI.Render(cmd, giInputs);
 
+        // Ambient occlusion, before the resolve that consumes it. It reads the
+        // G-buffer depth and normal directly - the inputs the old SSAOPass had
+        // no way to receive.
+        if (m_SSAO.IsInitialized() && m_PostProcessSettings.ssaoEnabled) {
+            SSAOInputs ssaoInputs{};
+            ssaoInputs.DepthView = m_SceneDepth.View;
+            ssaoInputs.NormalView = m_SceneNormal.View;
+            ssaoInputs.Sampler = m_LinearSampler;
+            ssaoInputs.View = m_Frame.View;
+            ssaoInputs.Projection = m_Frame.Projection;
+            ssaoInputs.InverseViewProjection = glm::inverse(m_Frame.ViewProjection);
+            ssaoInputs.FrameIndex = m_Frame.FrameIndex;
+            m_SSAO.Render(cmd, ssaoInputs, m_PostProcessSettings);
+        }
+
         // Resolve: direct lighting plus albedo-modulated indirect.
         {
             Math::Vec4 resolveParams[2]{};
@@ -2005,7 +2054,9 @@ void main() {
                                           static_cast<float>(m_RenderHeight),
                                           1.0f / static_cast<float>(m_RenderWidth),
                                           1.0f / static_cast<float>(m_RenderHeight));
-            resolveParams[1] = Math::Vec4(m_GI.GetStats().Ready ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+            const bool occlusionReady = m_SSAO.GetStats().Active;
+            resolveParams[1] = Math::Vec4(m_GI.GetStats().Ready ? 1.0f : 0.0f,
+                                          occlusionReady ? 1.0f : 0.0f, 0.0f, 0.0f);
             if (m_ResolveUniformBuffer.Mapped) {
                 std::memcpy(m_ResolveUniformBuffer.Mapped, resolveParams, sizeof(resolveParams));
             }
@@ -2020,7 +2071,7 @@ void main() {
             imageInfos[3] = {VK_NULL_HANDLE, m_Resolved.View, VK_IMAGE_LAYOUT_GENERAL};
             VkDescriptorBufferInfo resolveInfo{m_ResolveUniformBuffer.Buffer, 0, sizeof(resolveParams)};
 
-            VkWriteDescriptorSet writes[5]{};
+            VkWriteDescriptorSet writes[6]{};
             for (uint32_t i = 0; i < 3; ++i) {
                 writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 writes[i].dstSet = m_ResolveSet;
@@ -2041,7 +2092,22 @@ void main() {
             writes[4].descriptorCount = 1;
             writes[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             writes[4].pBufferInfo = &resolveInfo;
-            vkUpdateDescriptorSets(m_Context->GetDevice(), 5, writes, 0, nullptr);
+
+            // Always a live view, even with AO off: the shader declares the
+            // sampler, and an unwritten descriptor in a bound set is undefined
+            // behaviour regardless of whether the branch runs.
+            VkDescriptorImageInfo occlusionInfo{
+                m_LinearSampler,
+                occlusionReady ? m_SSAO.GetOcclusionView() : m_DummyWhite.View,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[5].dstSet = m_ResolveSet;
+            writes[5].dstBinding = 5;
+            writes[5].descriptorCount = 1;
+            writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[5].pImageInfo = &occlusionInfo;
+
+            vkUpdateDescriptorSets(m_Context->GetDevice(), 6, writes, 0, nullptr);
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ResolvePipeline.Pipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ResolvePipeline.Layout,
@@ -2129,13 +2195,18 @@ void main() {
         // An sRGB swapchain encodes gamma in hardware; anything else needs it in
         // the shader, or the image presents roughly twice as dark as intended.
         const float applyGamma = IsSrgbFormat(m_Context->GetSwapchainImageFormat()) ? 0.0f : 1.0f;
-        const Math::Vec4 params(1.0f, applyGamma, 0.0f, 0.0f);
+        Math::Vec4 params[2];
+        params[0] = Math::Vec4(std::max(m_PostProcessSettings.exposure, 0.0f), applyGamma,
+                               std::max(m_PostProcessSettings.contrast, 0.0f),
+                               std::max(m_PostProcessSettings.saturation, 0.0f));
+        params[1] = Math::Vec4(m_PostProcessSettings.colorFilter,
+                               std::clamp(m_PostProcessSettings.vignetteIntensity, 0.0f, 4.0f));
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_CompositePipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_CompositeLayout,
                                 0, 1, &m_CompositeSet, 0, nullptr);
         vkCmdPushConstants(cmd, m_CompositeLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(Math::Vec4), &params);
+                           0, sizeof(params), params);
         vkCmdDraw(cmd, 3, 1, 0, 0);
     }
 
@@ -2157,6 +2228,7 @@ void main() {
         vkDeviceWaitIdle(device);
 
         m_Bloom.Shutdown();
+        m_SSAO.Shutdown();
         m_FSR.Shutdown();
         m_GI.Shutdown();
         m_Shadows.Shutdown();

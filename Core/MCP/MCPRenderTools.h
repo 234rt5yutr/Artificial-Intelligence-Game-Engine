@@ -710,8 +710,10 @@ namespace MCP {
                       "before upscaling: a soft-knee threshold, then a progressive blur down "
                       "and back up a mip chain. The older PostProcessManager passes (SSAO, "
                       "depth of field, motion blur, colour grading) are registered but cannot "
-                      "run - they never write their descriptor sets - so only bloom responds "
-                      "here.") {}
+                      "run - they never write their descriptor sets, and PostProcessPass has no "
+                      "way to receive a depth buffer - so bloom, SSAO, and colour grading are "
+                      "reimplemented here over the G-buffer and respond to these settings. Depth "
+                      "of field and motion blur do not exist yet.") {}
 
         ToolAnnotations GetAnnotations() const override {
             ToolAnnotations annotations;
@@ -733,6 +735,31 @@ namespace MCP {
                 "Softness of the threshold. 0 is a hard cutoff, which flickers in motion.", 0.0, 1.0);
             schema.Properties["bloomScatter"] = RenderToolsDetail::NumberProperty(
                 "How far the glow spreads during upsampling.", 0.1, 4.0);
+            schema.Properties["ssao"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Run screen-space ambient occlusion over the G-buffer.");
+            schema.Properties["ssaoRadius"] = RenderToolsDetail::NumberProperty(
+                "World-space sampling radius in metres.", 0.05, 10.0);
+            schema.Properties["ssaoIntensity"] = RenderToolsDetail::NumberProperty(
+                "How strongly occlusion darkens ambient and indirect light.", 0.0, 4.0);
+            schema.Properties["ssaoBias"] = RenderToolsDetail::NumberProperty(
+                "Depth bias that stops a surface occluding itself.", 0.0, 1.0);
+            schema.Properties["ssaoKernelSize"] = RenderToolsDetail::NumberProperty(
+                "Samples per pixel.", 4, 64);
+            schema.Properties["ssaoBlurPasses"] = RenderToolsDetail::NumberProperty(
+                "Depth-aware blur passes over the occlusion buffer.", 0, 4);
+            schema.Properties["exposure"] = RenderToolsDetail::NumberProperty(
+                "Linear exposure applied before the tonemap.", 0.0, 16.0);
+            schema.Properties["contrast"] = RenderToolsDetail::NumberProperty(
+                "Contrast applied after the tonemap.", 0.0, 4.0);
+            schema.Properties["saturation"] = RenderToolsDetail::NumberProperty(
+                "Saturation applied after the tonemap. 0 is greyscale.", 0.0, 4.0);
+            schema.Properties["vignette"] = RenderToolsDetail::NumberProperty(
+                "Corner darkening strength. 0 disables it.", 0.0, 4.0);
+            schema.Properties["colorFilter"] = Json{
+                {"type", "array"},
+                {"description", "Linear RGB tint applied before the tonemap."},
+                {"items", Json{{"type", "number"}}},
+                {"minItems", 3}, {"maxItems", 3}};
             return schema;
         }
 
@@ -760,6 +787,40 @@ namespace MCP {
             if (arguments.contains("bloomScatter") && arguments["bloomScatter"].is_number()) {
                 settings.bloomScatter = std::clamp(arguments["bloomScatter"].get<float>(), 0.1f, 4.0f);
             }
+            if (arguments.contains("ssao") && arguments["ssao"].is_boolean()) {
+                settings.ssaoEnabled = arguments["ssao"].get<bool>();
+            }
+            if (arguments.contains("ssaoRadius") && arguments["ssaoRadius"].is_number()) {
+                settings.ssaoRadius = std::clamp(arguments["ssaoRadius"].get<float>(), 0.05f, 10.0f);
+            }
+            if (arguments.contains("ssaoIntensity") && arguments["ssaoIntensity"].is_number()) {
+                settings.ssaoIntensity = std::clamp(arguments["ssaoIntensity"].get<float>(), 0.0f, 4.0f);
+            }
+            if (arguments.contains("ssaoBias") && arguments["ssaoBias"].is_number()) {
+                settings.ssaoBias = std::clamp(arguments["ssaoBias"].get<float>(), 0.0f, 1.0f);
+            }
+            if (arguments.contains("ssaoKernelSize") && arguments["ssaoKernelSize"].is_number()) {
+                settings.ssaoKernelSize = std::clamp(arguments["ssaoKernelSize"].get<int>(), 4, 64);
+            }
+            if (arguments.contains("ssaoBlurPasses") && arguments["ssaoBlurPasses"].is_number()) {
+                settings.ssaoBlurPasses = std::clamp(arguments["ssaoBlurPasses"].get<int>(), 0, 4);
+            }
+            if (arguments.contains("exposure") && arguments["exposure"].is_number()) {
+                settings.exposure = std::clamp(arguments["exposure"].get<float>(), 0.0f, 16.0f);
+            }
+            if (arguments.contains("contrast") && arguments["contrast"].is_number()) {
+                settings.contrast = std::clamp(arguments["contrast"].get<float>(), 0.0f, 4.0f);
+            }
+            if (arguments.contains("saturation") && arguments["saturation"].is_number()) {
+                settings.saturation = std::clamp(arguments["saturation"].get<float>(), 0.0f, 4.0f);
+            }
+            if (arguments.contains("vignette") && arguments["vignette"].is_number()) {
+                settings.vignetteIntensity = std::clamp(arguments["vignette"].get<float>(), 0.0f, 4.0f);
+            }
+            Math::Vec3 filter;
+            if (RenderToolsDetail::ReadVec3(arguments, "colorFilter", filter)) {
+                settings.colorFilter = filter;
+            }
 
             const auto& stats = renderer->GetBloom().GetStats();
             Json state;
@@ -770,6 +831,20 @@ namespace MCP {
             state["bloomScatter"] = settings.bloomScatter;
             state["mipCount"] = stats.MipCount;
             state["active"] = stats.Active;
+            const auto& ssao = renderer->GetSSAO().GetStats();
+            state["ssao"] = settings.ssaoEnabled;
+            state["ssaoActive"] = ssao.Active;
+            state["ssaoRadius"] = settings.ssaoRadius;
+            state["ssaoIntensity"] = settings.ssaoIntensity;
+            state["ssaoKernelSize"] = ssao.KernelSize;
+            state["ssaoBlurPasses"] = ssao.BlurPasses;
+            state["ssaoWidth"] = ssao.Width;
+            state["ssaoHeight"] = ssao.Height;
+            state["exposure"] = settings.exposure;
+            state["contrast"] = settings.contrast;
+            state["saturation"] = settings.saturation;
+            state["vignette"] = settings.vignetteIntensity;
+            state["colorFilter"] = RenderToolsDetail::Vec3ToJson(settings.colorFilter);
             return ToolResult::Success("Post-process settings updated", state);
         }
     };

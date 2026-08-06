@@ -134,11 +134,27 @@ separate output so the scene image is never both read and written. It runs befor
 upscaling, because bloom is a scene-space effect and running it after FSR would
 cost more and smear what FSR just reconstructed.
 
-**Remaining:** SSAO, depth of field, motion blur, and colour grading. All four
-need `PostProcessPass` widened to receive scene inputs, and all four need their
-descriptor sets written. The G-buffer already carries the depth and normals SSAO
-and DoF want; motion blur additionally needs a velocity buffer, which nothing
-produces.
+SSAO followed, the same way (`ComputeSSAO`): a cosine-weighted hemisphere kernel
+over the G-buffer depth and normal - the inputs the old pass had no way to
+receive - with a range check so silhouettes do not grow dark halos, and a
+depth-aware separable blur so occlusion does not bleed across them. It attenuates
+ambient and indirect light in the resolve pass only: occlusion describes how much
+sky and bounce light reaches a point, and applying it to direct light as well
+darkens surfaces the sun is plainly hitting.
+
+Colour grading moved into the composite shader, where the tonemap already was:
+colour filter before the curve while values are linear, contrast and saturation
+after it in display space, plus a vignette.
+
+With bloom, SSAO, and grading all covered, the entire RHI-era post stack was
+deleted - `PostProcessManager`, `PostProcessPass`, `FramebufferChain`, all five
+passes, and `PostProcessSystem`, which held a manager and had no consumer beyond
+an aggregate include.
+
+**Remaining:** depth of field and motion blur. DoF is straightforward from the
+existing depth target; motion blur needs a velocity buffer, which nothing
+produces - the geometry pass would have to write per-pixel motion from the
+current and previous view-projection.
 
 ---
 
