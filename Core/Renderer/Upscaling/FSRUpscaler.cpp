@@ -379,7 +379,7 @@ void main() {
         desc.Width = width;
         desc.Height = height;
         desc.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         desc.DebugName = "FSRIntermediate";
 
         VkDevice device = m_Context->GetDevice();

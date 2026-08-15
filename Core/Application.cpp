@@ -391,6 +391,8 @@ namespace Core {
                 frame.Projection[2][1] += jitter.y;
                 frame.ViewProjection = frame.Projection * frame.View;
             }
+            // Carried so the temporal passes can undo exactly what was applied.
+            frame.ProjectionJitter = jitter;
         }
     }
 

@@ -11,11 +11,42 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 namespace Core {
 namespace Renderer {
 
     namespace {
+
+        // The capture arrives as RGBA8 straight off a blit. PNG wants the same
+        // channel order, so the only work is dropping alpha - the frame is
+        // opaque, and a viewer that honours it would show the scene as
+        // transparent.
+        bool WriteCapturePNG(const std::string& path, const uint8_t* pixels,
+                             uint32_t width, uint32_t height, std::string& error) {
+            std::error_code ec;
+            const std::filesystem::path target(path);
+            if (target.has_parent_path()) {
+                std::filesystem::create_directories(target.parent_path(), ec);
+            }
+
+            std::vector<uint8_t> rgb(static_cast<std::size_t>(width) * height * 3);
+            for (std::size_t i = 0; i < static_cast<std::size_t>(width) * height; ++i) {
+                rgb[i * 3 + 0] = pixels[i * 4 + 0];
+                rgb[i * 3 + 1] = pixels[i * 4 + 1];
+                rgb[i * 3 + 2] = pixels[i * 4 + 2];
+            }
+            if (stbi_write_png(path.c_str(), static_cast<int>(width), static_cast<int>(height), 3,
+                               rgb.data(), static_cast<int>(width * 3)) == 0) {
+                error = "stbi_write_png failed for " + path;
+                return false;
+            }
+            return true;
+        }
+
 
         constexpr uint32_t kMaxMaterialTextures = 8;
         // Materials that can hold a texture descriptor set at once. Past this,
@@ -573,6 +604,9 @@ void main() {
         if (m_GPUDrivenEnabled && !m_Skinning.Initialize(context, 4096)) {
             ENGINE_CORE_WARN("GPU skinning unavailable; skeletal meshes render in bind pose");
         }
+        if (!m_TAA.Initialize(context)) {
+            ENGINE_CORE_WARN("Temporal antialiasing unavailable; the frame stays jittered but unresolved");
+        }
         if (m_GPUDrivenEnabled && !m_Culler.Initialize(context, m_GPUScene.GetLimits().MaxClusterSlots)) {
             ENGINE_CORE_WARN("GPU-driven culler unavailable; falling back to per-mesh direct draws");
             m_GPUDrivenEnabled = false;
@@ -1033,7 +1067,8 @@ void main() {
         }
 
         desc.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         desc.Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
         desc.DebugName = "SceneResolved";
         if (!RHI::CreateGpuImage(device, allocator, desc, m_Resolved)) {
@@ -1128,6 +1163,7 @@ void main() {
         }
 
         m_Culler.Resize(renderWidth, renderHeight);
+        m_TAA.Resize(renderWidth, renderHeight);
         m_LightCuller.Resize(renderWidth, renderHeight);
 
         // Post-processing runs at render resolution, before upscaling: bloom is a
@@ -1971,6 +2007,7 @@ void main() {
     }
 
     void SceneRenderer::RecordOffscreen(VkCommandBuffer cmd) {
+        std::lock_guard<std::mutex> captureGuard(m_CaptureMutex);
         if (!IsInitialized() || m_SceneFramebuffer == VK_NULL_HANDLE) {
             return;
         }
@@ -2169,6 +2206,33 @@ void main() {
             RHI::TransitionImage(cmd, m_Resolved, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
+        // Temporal resolve, before bloom: bloom should bleed from the settled
+        // image, and running it first would feed last frame's glow back into the
+        // history.
+        RHI::GpuImage* postSource = &m_Resolved;
+        {
+            Math::Mat4 unjitteredProjection = m_Frame.Projection;
+            unjitteredProjection[2][0] -= m_Frame.ProjectionJitter.x;
+            unjitteredProjection[2][1] -= m_Frame.ProjectionJitter.y;
+            const Math::Mat4 unjitteredViewProjection = unjitteredProjection * m_Frame.View;
+
+            TAAInputs taaInputs{};
+            taaInputs.DepthView = m_SceneDepth.View;
+            taaInputs.Sampler = m_LinearSampler;
+            taaInputs.InverseViewProjection = glm::inverse(unjitteredViewProjection);
+            taaInputs.PreviousViewProjection = m_PreviousUnjitteredViewProjection;
+            taaInputs.FrameIndex = m_Frame.FrameIndex;
+            m_TAA.Render(cmd, m_Resolved, taaInputs);
+            if (m_TAA.GetStats().Active) {
+                postSource = &m_TAA.GetOutputImage();
+            }
+            m_PreviousUnjitteredViewProjection = unjitteredViewProjection;
+        }
+        const TAAStats& taaStats = m_TAA.GetStats();
+        m_Stats.TAAEnabled = taaStats.Enabled;
+        m_Stats.TAAActive = taaStats.Active;
+        m_Stats.TAAFeedback = taaStats.Feedback;
+
         // Bloom, in the compute path the rest of the frame uses.
         //
         // `PostProcess/PostProcessManager` registers five passes and none of
@@ -2181,9 +2245,9 @@ void main() {
         // frame; fixing it is a port of five never-run passes, recorded in the
         // gap analysis rather than half-done here.
         m_PostProcessRanThisFrame = false;
-        VkImageView upscaleSource = m_Resolved.View;
+        VkImageView upscaleSource = postSource->View;
         if (m_Bloom.IsInitialized() && m_PostProcessSettings.bloomEnabled) {
-            m_Bloom.Render(cmd, m_Resolved, m_PostProcessSettings);
+            m_Bloom.Render(cmd, *postSource, m_PostProcessSettings);
             if (m_Bloom.GetStats().Active) {
                 upscaleSource = m_Bloom.GetOutputView();
                 m_PostProcessRanThisFrame = true;
@@ -2198,7 +2262,105 @@ void main() {
             m_FSR.Render(cmd, upscaleSource, m_LinearSampler);
         }
 
+        m_FinalImage = m_FSR.GetStats().Active ? &m_FSR.GetOutputTarget()
+                       : (m_PostProcessRanThisFrame ? &m_Bloom.GetOutputImage() : postSource);
+
         m_PreviousViewProjection = m_Frame.ViewProjection;
+    }
+
+    bool SceneRenderer::CaptureToFile(const std::string& path, std::string& error) {
+        std::lock_guard<std::mutex> captureGuard(m_CaptureMutex);
+        if (!IsInitialized()) {
+            error = "renderer is not initialised";
+            return false;
+        }
+        if (!m_FinalImage || !m_FinalImage->IsValid()) {
+            error = "no frame has been rendered yet";
+            return false;
+        }
+
+        VkDevice device = m_Context->GetDevice();
+        VmaAllocator allocator = m_Context->GetAllocator();
+        RHI::GpuImage& source = *m_FinalImage;
+        const uint32_t width = source.Extent.width;
+        const uint32_t height = source.Extent.height;
+        if (width == 0 || height == 0) {
+            error = "the final image has no extent";
+            return false;
+        }
+
+        // Blit into an 8-bit UNORM image rather than reading the frame target
+        // directly: it is RGBA16F, and decoding half floats here would duplicate
+        // what the blit does for free.
+        RHI::GpuImageDesc desc{};
+        desc.Width = width;
+        desc.Height = height;
+        desc.Format = VK_FORMAT_R8G8B8A8_UNORM;
+        desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        desc.DebugName = "CaptureStaging";
+        RHI::GpuImage staging{};
+        if (!RHI::CreateGpuImage(device, allocator, desc, staging)) {
+            error = "could not allocate the capture image";
+            return false;
+        }
+
+        RHI::GpuBuffer readback{};
+        const VkDeviceSize byteCount = static_cast<VkDeviceSize>(width) * height * 4;
+        if (!RHI::CreateGpuBuffer(allocator, byteCount, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true,
+                                  readback)) {
+            RHI::DestroyGpuImage(device, allocator, staging);
+            error = "could not allocate the readback buffer";
+            return false;
+        }
+
+        const VkImageLayout sourceLayout = source.Layout;
+        VkCommandBuffer captureCmd =
+            RHI::BeginImmediateCommands(device, m_Context->GetCommandPool());
+        bool recorded = captureCmd != VK_NULL_HANDLE;
+        if (recorded) {
+            RHI::TransitionImage(captureCmd, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            RHI::TransitionImage(captureCmd, staging, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+            VkImageBlit blit{};
+            blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            blit.srcSubresource.layerCount = 1;
+            blit.srcOffsets[1] = {static_cast<int32_t>(width), static_cast<int32_t>(height), 1};
+            blit.dstSubresource = blit.srcSubresource;
+            blit.dstOffsets[1] = blit.srcOffsets[1];
+            vkCmdBlitImage(captureCmd, source.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           staging.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                           VK_FILTER_NEAREST);
+
+            RHI::TransitionImage(captureCmd, staging, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            VkBufferImageCopy region{};
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.layerCount = 1;
+            region.imageExtent = {width, height, 1};
+            vkCmdCopyImageToBuffer(captureCmd, staging.Image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                   readback.Buffer, 1, &region);
+
+            // Put the frame image back where the render loop expects it, or the
+            // next frame starts from a layout its barriers do not describe.
+            RHI::TransitionImage(captureCmd, source, sourceLayout);
+            recorded = RHI::EndImmediateCommands(device, m_Context->GetCommandPool(),
+                                                 m_Context->GetGraphicsQueue(), captureCmd);
+        }
+
+        bool written = false;
+        if (recorded && readback.Mapped) {
+            written = WriteCapturePNG(path, static_cast<const uint8_t*>(readback.Mapped),
+                                      width, height, error);
+        } else if (error.empty()) {
+            error = "the capture commands did not complete";
+        }
+
+        RHI::DestroyGpuBuffer(allocator, readback);
+        RHI::DestroyGpuImage(device, allocator, staging);
+        if (written) {
+            ENGINE_CORE_INFO("Captured {}x{} frame to {}", width, height, path);
+        }
+        return written;
     }
 
     VkImageView SceneRenderer::GetViewportImageView() const {
@@ -2261,10 +2423,31 @@ void main() {
     }
 
     Math::Vec2 SceneRenderer::GetProjectionJitter(uint64_t frameIndex) const {
-        if (!m_FSR.IsInitialized() || m_RenderWidth == 0 || m_RenderHeight == 0) {
+        if (m_RenderWidth == 0 || m_RenderHeight == 0) {
             return Math::Vec2(0.0f);
         }
-        const Math::Vec2 pixelJitter = m_FSR.GetJitter(frameIndex);
+        Math::Vec2 pixelJitter = m_FSR.IsInitialized() ? m_FSR.GetJitter(frameIndex)
+                                                       : Math::Vec2(0.0f);
+        if (pixelJitter.x == 0.0f && pixelJitter.y == 0.0f && m_TAA.IsInitialized() &&
+            m_TAA.IsEnabled()) {
+            // TAA needs the offset just as much as the upscaler does; without it
+            // every frame samples the same point and there is nothing to resolve.
+            // Halton(2,3), the same sequence, so the two never disagree.
+            const uint32_t index = static_cast<uint32_t>(frameIndex % 8u) + 1u;
+            auto radicalInverse = [](uint32_t i, uint32_t base) {
+                float result = 0.0f;
+                float invBase = 1.0f / static_cast<float>(base);
+                float factor = invBase;
+                while (i > 0) {
+                    result += static_cast<float>(i % base) * factor;
+                    i /= base;
+                    factor *= invBase;
+                }
+                return result;
+            };
+            pixelJitter = Math::Vec2(radicalInverse(index, 2) - 0.5f,
+                                     radicalInverse(index, 3) - 0.5f);
+        }
         // Pixels to NDC: a full pixel is 2/width of clip space.
         return Math::Vec2(pixelJitter.x * 2.0f / static_cast<float>(m_RenderWidth),
                           pixelJitter.y * 2.0f / static_cast<float>(m_RenderHeight));
@@ -2277,6 +2460,7 @@ void main() {
         VkDevice device = m_Context->GetDevice();
         vkDeviceWaitIdle(device);
 
+        m_TAA.Shutdown();
         m_Bloom.Shutdown();
         m_SSAO.Shutdown();
         m_FSR.Shutdown();

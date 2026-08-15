@@ -81,6 +81,7 @@ namespace Renderer {
 
         VkImageView GetOutputView() const { return m_Output.View; }
         VkImage GetOutputImage() const { return m_Output.Image; }
+        RHI::GpuImage& GetOutputTarget() { return m_Output; }
         VkExtent2D GetOutputExtent() const { return m_Output.Extent; }
 
         // Halton(2,3) jitter in pixels for the current frame, or zero when

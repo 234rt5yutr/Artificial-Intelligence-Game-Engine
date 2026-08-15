@@ -12,6 +12,7 @@
 // is safe to mutate renderer state directly.
 
 #include "MCPTool.h"
+#include "MCPAssetTools.h"
 #include "Core/Application.h"
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/SystemPipeline.h"
@@ -138,6 +139,12 @@ namespace MCP {
             skinning["vertices"] = stats.SkinnedVertices;
             skinning["dropped"] = stats.SkinnedDropped;
             report["skinning"] = skinning;
+
+            Json temporal;
+            temporal["taaEnabled"] = stats.TAAEnabled;
+            temporal["taaActive"] = stats.TAAActive;
+            temporal["taaFeedback"] = stats.TAAFeedback;
+            report["temporal"] = temporal;
 
             Json culling;
             culling["clusterSlots"] = cull.ClusterSlots;
@@ -721,8 +728,10 @@ namespace MCP {
                       "depth of field, motion blur, colour grading) are registered but cannot "
                       "run - they never write their descriptor sets, and PostProcessPass has no "
                       "way to receive a depth buffer - so bloom, SSAO, and colour grading are "
-                      "reimplemented here over the G-buffer and respond to these settings. Depth "
-                      "of field and motion blur do not exist yet.") {}
+                      "reimplemented here over the G-buffer and respond to these settings. "
+                      "Temporal antialiasing resolves the sub-pixel jitter the frame is already "
+                      "rendered with; with it off the jitter is pure cost. Depth of field and "
+                      "motion blur do not exist yet.") {}
 
         ToolAnnotations GetAnnotations() const override {
             ToolAnnotations annotations;
@@ -756,6 +765,11 @@ namespace MCP {
                 "Samples per pixel.", 4, 64);
             schema.Properties["ssaoBlurPasses"] = RenderToolsDetail::NumberProperty(
                 "Depth-aware blur passes over the occlusion buffer.", 0, 4);
+            schema.Properties["taa"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Resolve the jittered frames into a temporally antialiased image.");
+            schema.Properties["taaFeedback"] = RenderToolsDetail::NumberProperty(
+                "Fraction of the history kept each frame. Higher is steadier and slower to "
+                "react; past about 0.98 a moving edge never catches up.", 0.0, 0.98);
             schema.Properties["exposure"] = RenderToolsDetail::NumberProperty(
                 "Linear exposure applied before the tonemap.", 0.0, 16.0);
             schema.Properties["contrast"] = RenderToolsDetail::NumberProperty(
@@ -814,6 +828,12 @@ namespace MCP {
             if (arguments.contains("ssaoBlurPasses") && arguments["ssaoBlurPasses"].is_number()) {
                 settings.ssaoBlurPasses = std::clamp(arguments["ssaoBlurPasses"].get<int>(), 0, 4);
             }
+            if (arguments.contains("taa") && arguments["taa"].is_boolean()) {
+                renderer->GetTAA().SetEnabled(arguments["taa"].get<bool>());
+            }
+            if (arguments.contains("taaFeedback") && arguments["taaFeedback"].is_number()) {
+                renderer->GetTAA().SetFeedback(arguments["taaFeedback"].get<float>());
+            }
             if (arguments.contains("exposure") && arguments["exposure"].is_number()) {
                 settings.exposure = std::clamp(arguments["exposure"].get<float>(), 0.0f, 16.0f);
             }
@@ -833,6 +853,8 @@ namespace MCP {
 
             const auto& stats = renderer->GetBloom().GetStats();
             Json state;
+            state["taa"] = renderer->GetTAA().IsEnabled();
+            state["taaFeedback"] = renderer->GetTAA().GetFeedback();
             state["bloom"] = settings.bloomEnabled;
             state["bloomThreshold"] = settings.bloomThreshold;
             state["bloomIntensity"] = settings.bloomIntensity;
@@ -1178,6 +1200,70 @@ namespace MCP {
         }
     };
 
+
+    // =========================================================================
+    // CaptureFrame - write the rendered image to a PNG
+    // =========================================================================
+
+    class CaptureFrameTool : public MCPTool {
+    public:
+        CaptureFrameTool()
+            : MCPTool("CaptureFrame",
+                      "Write the last rendered frame to a PNG under the project root. This is "
+                      "the only way anything outside the window can see what the renderer "
+                      "produced, which is what makes a visual change checkable at all - "
+                      "GetRenderStats reports that a pass ran, not what it drew.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Capture Frame";
+            annotations.ReadOnlyHint = false;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["path"] = RenderToolsDetail::SchemaProperty(
+                "string", "Destination PNG, relative to the project root.");
+            schema.Required = {"path"};
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+            if (!arguments.contains("path") || !arguments["path"].is_string()) {
+                return ToolResult::Error("path is required");
+            }
+
+            std::filesystem::path resolved;
+            std::string error;
+            if (!AssetToolsDetail::ResolveProjectPath(arguments["path"].get<std::string>(),
+                                                      resolved, error)) {
+                return ToolResult::Error("Capture path rejected: " + error);
+            }
+            if (!renderer->CaptureToFile(resolved.string(), error)) {
+                return ToolResult::Error("Capture failed: " + error);
+            }
+
+            const auto& stats = renderer->GetStats();
+            Json state;
+            state["path"] = arguments["path"];
+            state["width"] = stats.DisplayWidth;
+            state["height"] = stats.DisplayHeight;
+            state["renderWidth"] = stats.RenderWidth;
+            state["renderHeight"] = stats.RenderHeight;
+            state["upscaled"] = stats.DisplayWidth != stats.RenderWidth;
+            state["taaActive"] = stats.TAAActive;
+            return ToolResult::SuccessJson(state);
+        }
+    };
+
     // ========================================================================
     // Factory
     // ========================================================================
@@ -1193,6 +1279,7 @@ namespace MCP {
         tools.push_back(std::make_shared<SetMaterialGraphTool>());
         tools.push_back(std::make_shared<GetMaterialGraphTool>());
         tools.push_back(std::make_shared<SetEditorViewportTool>());
+        tools.push_back(std::make_shared<CaptureFrameTool>());
         return tools;
     }
 

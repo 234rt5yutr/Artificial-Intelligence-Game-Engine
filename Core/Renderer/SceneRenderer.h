@@ -29,6 +29,7 @@
 #include "Core/Renderer/Lighting/ClusteredLightCuller.h"
 #include "Core/Renderer/PostProcess/ComputeBloom.h"
 #include "Core/Renderer/PostProcess/ComputeSSAO.h"
+#include "Core/Renderer/PostProcess/ComputeTAA.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
 #include "Core/Renderer/Textures/TextureLibrary.h"
 #include "Core/Renderer/Upscaling/FSRUpscaler.h"
@@ -36,6 +37,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <mutex>
 #include <vector>
 
 namespace Core {
@@ -62,6 +64,10 @@ namespace Renderer {
         uint64_t FrameIndex = 0;
         // Copied from the scene's active post-process volume, or left at its
         // defaults when the scene has none.
+        // The sub-pixel offset folded into Projection this frame. Carried rather
+        // than recomputed, so the temporal passes reproject against exactly what
+        // was rendered.
+        Math::Vec2 ProjectionJitter{0.0f};
         ECS::PostProcessSettings PostProcess{};
         bool PostProcessEnabled = true;
 
@@ -93,6 +99,9 @@ namespace Renderer {
         uint32_t SkinnedInstances = 0;
         uint32_t SkinnedVertices = 0;
         uint32_t SkinnedDropped = 0;
+        bool TAAEnabled = false;
+        bool TAAActive = false;
+        float TAAFeedback = 0.0f;
     };
 
     class SceneRenderer {
@@ -122,6 +131,14 @@ namespace Renderer {
 
         // Jitter for this frame, in NDC units, to be folded into the projection.
         Math::Vec2 GetProjectionJitter(uint64_t frameIndex) const;
+
+        // Writes whatever the frame last produced to a PNG. Nothing could see the
+        // rendered image at all before this, which left every visual feature
+        // unverifiable except by a human looking at the window.
+        bool CaptureToFile(const std::string& path, std::string& error);
+
+        ComputeTAA& GetTAA() { return m_TAA; }
+        const ComputeTAA& GetTAA() const { return m_TAA; }
 
         // What the editor viewport samples. Valid after the first RecordOffscreen.
         VkImageView GetViewportImageView() const;
@@ -270,6 +287,7 @@ namespace Renderer {
         ClusteredLightCuller m_LightCuller;
         ComputeBloom m_Bloom;
         ComputeSSAO m_SSAO;
+        ComputeTAA m_TAA;
         ECS::PostProcessSettings m_PostProcessSettings{};
         // False until the chain runs at least once; the upscaler reads the
         // resolved image directly until then.
@@ -284,6 +302,18 @@ namespace Renderer {
 
         FrameRenderData m_Frame;
         Math::Mat4 m_PreviousViewProjection{1.0f};
+        // Jitter removed: reprojection must not chase the offset it exists to
+        // resolve, and the jittered pair differs by a sub-pixel shift every
+        // frame.
+        Math::Mat4 m_PreviousUnjitteredViewProjection{1.0f};
+
+        // The image the frame ended on, whichever pass produced it, so a capture
+        // does not have to re-derive the post chain.
+        RHI::GpuImage* m_FinalImage = nullptr;
+        // ponytail: one uncontended lock per frame, so a capture cannot read an
+        // image while the render thread is mid-transition. Recording the copy
+        // inside the frame would avoid it; captures are far too rare to care.
+        std::mutex m_CaptureMutex;
         std::vector<const ECS::DrawCommand*> m_DirectDraws;
 
         uint32_t m_DisplayWidth = 0;

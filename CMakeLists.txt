@@ -437,6 +437,7 @@ add_library(EngineCore
     Core/ECS/Components/PostProcessComponent.h
     Core/Renderer/PostProcess/ComputeSSAO.h
     Core/Renderer/PostProcess/ComputeSSAO.cpp
+    Core/Renderer/PostProcess/ComputeTAA.cpp
     Core/Renderer/PostProcess/ComputeBloom.h
     Core/Renderer/PostProcess/ComputeBloom.cpp
     # World rendering: terrain, foliage, sky

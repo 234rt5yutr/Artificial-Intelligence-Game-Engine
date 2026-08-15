@@ -277,7 +277,10 @@ void main() {
 
         RHI::GpuImageDesc desc{};
         desc.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        // TRANSFER_SRC because a frame can end on this image, and a capture
+        // blits from whichever image the post chain produced last.
+        desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         desc.Width = width;
         desc.Height = height;
         desc.DebugName = "BloomOutput";

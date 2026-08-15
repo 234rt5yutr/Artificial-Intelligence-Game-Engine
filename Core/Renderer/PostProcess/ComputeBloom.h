@@ -55,6 +55,7 @@ namespace Renderer {
                     const ECS::PostProcessSettings& settings);
 
         VkImageView GetOutputView() const { return m_Output.View; }
+        RHI::GpuImage& GetOutputImage() { return m_Output; }
         const BloomStats& GetStats() const { return m_Stats; }
 
     private:

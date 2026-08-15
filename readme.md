@@ -131,6 +131,24 @@ its submeshes correctly instead of painting all of them with the first material.
 pins this down: it imports as one mesh, two sections, two instances, two
 indirect draws.
 
+**Temporal antialiasing** (`Core/Renderer/PostProcess/ComputeTAA.*`). The frame
+was already being jittered every frame for the upscaler and nothing resolved it:
+each frame sampled a different sub-pixel offset and went straight to the screen,
+so the image crawled and the jitter was pure cost. History is reprojected from
+depth against the previous *unjittered* view-projection - reprojecting with the
+jittered pair would chase the very offset the pass exists to resolve - then
+constrained to the current 3x3 neighbourhood in YCoCg before blending. The clamp
+is what stops it smearing. Measured over captured frames of a static scene, the
+mean absolute difference between consecutive frames falls from 0.220 with TAA off
+to 0.157 at feedback 0.5 and 0.149 at 0.97.
+
+**Frame capture** (`SceneRenderer::CaptureToFile`, MCP `CaptureFrame`). Nothing
+outside the window could see what the renderer produced, so no visual change was
+checkable: `GetRenderStats` reports that a pass ran, not what it drew. This blits
+whatever image the frame ended on - upscaler output, bloom output, or the
+resolved scene - into an 8-bit staging image and writes a PNG. Every measurement
+quoted for TAA above came out of it.
+
 **GPU skinning** (`Core/Renderer/GPUDriven/GPUSkinningPass.*`). Skeletal meshes
 used to be rejected outright: the merged arena stores one vertex layout, and a
 skinned vertex is wider, so the engine could animate a skeleton and never draw
@@ -325,6 +343,13 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Animation blending fills local poses only. Global poses and skinning matrices
   are resolved in `RenderSystem` at draw-collection time, which is after
   `AnimatorSystem` and `IKSystem` have had their say.
+- TAA reprojects from depth alone. There is no velocity target, so a moving
+  object leans entirely on the neighbourhood clamp: correct for static geometry,
+  slightly soft on fast movers. The upgrade is a velocity attachment on the scene
+  pass plus a previous transform per instance.
+- `CaptureFrame` takes a lock the render thread also takes, so a capture stalls
+  one frame. Recording the copy inside the frame would avoid it; captures are far
+  too rare to be worth the complexity.
 - Vulkan validation is off in release builds; set `AIGE_VULKAN_VALIDATION=1` to
   force the layers on when they are installed.
 
