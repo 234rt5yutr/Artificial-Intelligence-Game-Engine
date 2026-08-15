@@ -253,7 +253,7 @@ namespace Renderer {
         bool LoadGLTF(const std::string& filepath, GltfImportResult* out = nullptr);
 
         // Load skeletal mesh with skeleton and animations from GLTF
-        bool LoadSkeletalGLTF(const std::string& filepath);
+        bool LoadSkeletalGLTF(const std::string& filepath, GltfImportResult* out = nullptr);
 
         // Upload the CPU vertex/index data to GPU buffers through the RHI.
         //

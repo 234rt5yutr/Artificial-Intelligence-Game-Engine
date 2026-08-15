@@ -213,6 +213,16 @@ bool Mesh::LoadGLTF(const std::string& filepath, GltfImportResult* out) {
         return false;
     }
 
+    // A rigged file goes to the skeletal loader. This path reads no joints or
+    // weights, so importing a character through it produced geometry frozen in
+    // its bind pose with the skeleton silently discarded. Re-parsing costs one
+    // file read and keeps the decision in the single entry point every caller
+    // already goes through.
+    if (data->skins_count > 0) {
+        cgltf_free(data);
+        return LoadSkeletalGLTF(filepath, out);
+    }
+
     uint32_t vertexOffset = 0;
     uint32_t indexOffset = 0;
 
@@ -302,7 +312,7 @@ bool Mesh::LoadGLTF(const std::string& filepath, GltfImportResult* out) {
 // Skeletal Mesh Loading
 // ============================================================================
 
-bool Mesh::LoadSkeletalGLTF(const std::string& filepath) {
+bool Mesh::LoadSkeletalGLTF(const std::string& filepath, GltfImportResult* out) {
     cgltf_options options = {};
     cgltf_data* data = nullptr;
     cgltf_result result = cgltf_parse_file(&options, filepath.c_str(), &data);
@@ -439,6 +449,24 @@ bool Mesh::LoadSkeletalGLTF(const std::string& filepath) {
             }
             primitives.push_back(p);
         }
+    }
+
+    // Mirror the bind pose into the static stream. GPUScene clusterises from
+    // `vertices` and the skinning pass writes posed vertices back into an arena
+    // laid out the same way, so a mesh with only the skinned stream was rejected
+    // outright - the rig loaded and nothing ever drew.
+    vertices.resize(skinnedVertices.size());
+    for (std::size_t i = 0; i < skinnedVertices.size(); ++i) {
+        const SkinnedVertex& source = skinnedVertices[i];
+        Vertex& target = vertices[i];
+        target.position = source.position;
+        target.normal = source.normal;
+        target.texCoord = source.texCoord;
+        target.tangent = source.tangent;
+    }
+
+    if (out) {
+        ExtractGltfMaterials(data, filepath, *out);
     }
 
     m_IsSkeletal = true;

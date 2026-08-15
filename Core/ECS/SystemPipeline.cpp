@@ -15,6 +15,7 @@
 #include "Core/Navigation/NavigationSystem.h"
 #include "Core/ECS/Systems/LightSystem.h"
 #include "Core/ECS/Systems/RenderSystem.h"
+#include "Core/ECS/Systems/SkeletalRenderSystem.h"
 #include "Core/ECS/Systems/TerrainSystem.h"
 #include "Core/ECS/Systems/FoliageSystem.h"
 #include "Core/ECS/Systems/SkyboxSystem.h"
@@ -127,6 +128,12 @@ namespace ECS {
         }
 
         if (m_Config.EnableRenderCollection) {
+            // Nothing advanced an animation clip into a pose: AnimatorSystem only
+            // runs for entities with an AnimatorComponent and a graph, and this
+            // system was never constructed. An imported character therefore
+            // played nothing.
+            m_SkeletalRenderSystem = std::make_unique<SkeletalRenderSystem>();
+
             m_RenderSystem = std::make_unique<RenderSystem>();
         }
 
@@ -171,6 +178,7 @@ namespace ECS {
         if (m_FoliageSystem) { m_FoliageSystem->Shutdown(); m_FoliageSystem.reset(); }
         if (m_TerrainSystem) { m_TerrainSystem->Shutdown(); m_TerrainSystem.reset(); }
         m_RenderSystem.reset();
+        m_SkeletalRenderSystem.reset();
         m_LightSystem.reset();
         m_CameraSystem.reset();
         m_CameraViewInterpolatorSystem.reset();
@@ -294,6 +302,11 @@ namespace ECS {
         // 4. Animation, then IK on top of the animated pose.
         if (m_AnimatorSystem) {
             m_AnimatorSystem->Update(scene, dt);
+        }
+        // After the animator and before IK, so a graph-driven pose wins and IK
+        // still gets the last word on the result.
+        if (m_SkeletalRenderSystem) {
+            m_SkeletalRenderSystem->UpdateAnimations(scene, dt);
         }
         if (m_IKSystem) {
             m_IKSystem->Update(scene, dt);

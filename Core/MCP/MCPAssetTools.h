@@ -474,12 +474,37 @@ namespace MCP {
             transform.Scale = Math::Vec3(scale);
             registry.emplace<ECS::TransformComponent>(entity, transform);
 
-            ECS::MeshComponent meshComponent;
-            meshComponent.MeshData = mesh;
-            meshComponent.MeshPath = arguments["path"].get<std::string>();
-            // The file's own first material wins unless the caller named one.
-            meshComponent.MaterialIndex = firstMaterialIndex;
-            registry.emplace<ECS::MeshComponent>(entity, meshComponent);
+            // A rigged mesh needs a SkeletalMeshComponent, or nothing advances its
+            // pose and nothing collects it as a skinned draw - it would import
+            // successfully and then sit in its bind pose forever.
+            std::string animationStarted;
+            if (mesh->IsSkeletal()) {
+                ECS::SkeletalMeshComponent skeletal;
+                skeletal.MeshData = mesh;
+                skeletal.MaterialIndex = firstMaterialIndex;
+                skeletal.CurrentPose.Resize(mesh->GetSkeleton().GetBoneCount());
+
+                // Play the first clip by default. A character that imports
+                // standing still looks like the animation import failed.
+                const auto& clips = mesh->GetAnimations();
+                if (!clips.empty() && arguments.value("playAnimation", true)) {
+                    ECS::AnimationInstance instance;
+                    instance.AnimationName = clips[0].Name;
+                    instance.Clip = &clips[0];
+                    instance.Loop = true;
+                    instance.State = ECS::AnimationPlaybackState::Playing;
+                    skeletal.ActiveAnimations.push_back(instance);
+                    animationStarted = clips[0].Name;
+                }
+                registry.emplace<ECS::SkeletalMeshComponent>(entity, skeletal);
+            } else {
+                ECS::MeshComponent meshComponent;
+                meshComponent.MeshData = mesh;
+                meshComponent.MeshPath = arguments["path"].get<std::string>();
+                // The file's own first material wins unless the caller named one.
+                meshComponent.MaterialIndex = firstMaterialIndex;
+                registry.emplace<ECS::MeshComponent>(entity, meshComponent);
+            }
 
             Json state;
             state["entityId"] = static_cast<uint32_t>(entity);
@@ -499,9 +524,14 @@ namespace MCP {
                     "slot in the file.";
             }
             state["skeletal"] = mesh->IsSkeletal();
-            if (mesh->IsSkeletal()) {
-                state["note"] = "Skeletal meshes are not drawn by the geometry pass yet; "
-                                "the merged arena stores one vertex layout.";
+            state["bones"] = mesh->GetSkeleton().GetBoneCount();
+            state["animations"] = mesh->GetAnimations().size();
+            if (!animationStarted.empty()) {
+                state["playing"] = animationStarted;
+            }
+            if (mesh->IsSkeletal() && mesh->GetAnimations().empty()) {
+                state["note"] = "The file has a rig but no animation clips, so the mesh renders "
+                                "in its bind pose.";
             }
             return ToolResult::Success("Mesh imported and spawned", state);
         }

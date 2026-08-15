@@ -36,6 +36,7 @@ namespace ECS {
     class IKSystem;
     class LightSystem;
     class RenderSystem;
+    class SkeletalRenderSystem;
     class TerrainSystem;
     class FoliageSystem;
     class SkyboxSystem;
@@ -124,6 +125,7 @@ namespace ECS {
         CameraSystem* GetCameraSystem() const { return m_CameraSystem.get(); }
         LightSystem* GetLightSystem() const { return m_LightSystem.get(); }
         RenderSystem* GetRenderSystem() const { return m_RenderSystem.get(); }
+        SkeletalRenderSystem* GetSkeletalRenderSystem() const { return m_SkeletalRenderSystem.get(); }
         AnimatorSystem* GetAnimatorSystem() const { return m_AnimatorSystem.get(); }
         PhysicsSystem* GetPhysicsSystem() const { return m_PhysicsSystem.get(); }
         TerrainSystem* GetTerrainSystem() const { return m_TerrainSystem.get(); }
@@ -154,6 +156,10 @@ namespace ECS {
         std::unique_ptr<IKSystem> m_IKSystem;
         std::unique_ptr<LightSystem> m_LightSystem;
         std::unique_ptr<RenderSystem> m_RenderSystem;
+        // Only its animation half runs. Its draw-collection half needs the old
+        // GPUSkinningSystem, which nothing else uses; RenderSystem collects
+        // skeletal draws now.
+        std::unique_ptr<SkeletalRenderSystem> m_SkeletalRenderSystem;
         std::unique_ptr<TerrainSystem> m_TerrainSystem;
         std::unique_ptr<FoliageSystem> m_FoliageSystem;
         std::unique_ptr<SkyboxSystem> m_SkyboxSystem;

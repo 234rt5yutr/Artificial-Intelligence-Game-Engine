@@ -131,6 +131,23 @@ its submeshes correctly instead of painting all of them with the first material.
 pins this down: it imports as one mesh, two sections, two instances, two
 indirect draws.
 
+**Rigged glTF import**. `LoadSkeletalGLTF` read joints, weights, inverse binds,
+and animation clips, and nothing could reach it: `LoadGLTF` was the only entry
+point anyone called and it dropped all of that on the floor, so a character
+imported as a frozen pile of triangles. `LoadGLTF` now delegates when the file
+has a skin, which fixes every caller rather than the one that happened to
+complain. It also mirrors the bind pose into the static vertex stream, because
+that is what the GPU scene clusterises and what the skinning pass writes back
+into - a mesh carrying only skinned vertices was rejected outright.
+
+Clips had no runtime either. `AnimatorSystem` only runs for entities with an
+animator graph, and `SkeletalRenderSystem` - which does sample clips onto a pose -
+was never constructed. Its animation half now runs in `SystemPipeline`, after the
+animator and before IK. Its draw half stays dead; `RenderSystem` collects skeletal
+draws. `assets/meshes/rigged_strip.gltf` is a two-joint strip with a bend clip:
+importing it starts the clip, and across three captures 18,947 and 12,875 pixels
+move, against exactly 0 for the same mesh with nothing playing.
+
 **Screen-space reflections** (`Core/Renderer/PostProcess/ComputeSSR.*`). Every
 surface was purely diffuse plus a direct highlight: a polished floor showed the
 light, never the room. The G-buffer already carried what a reflection needs -
@@ -363,9 +380,9 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
   carries six matrices each.
 - Texture compression is BC3 only. BC7 would look better at the same size but
   needs a different encoder than the one already vendored.
-- glTF skeletons and animations are ignored, so an imported character has
-  geometry and materials but no rig; skinning is exercised through
-  `Mesh::CreateSkinnedPrimitive` instead.
+- Animation clips play one at a time per mesh, sampled straight onto the pose.
+  Blending between clips is what `AnimatorSystem` and its graph are for, and that
+  path still needs an `AnimatorComponent`.
 - A submesh's material is resolved as the component's index plus the primitive's
   own slot in its file. That holds because the importer registers a file's
   materials contiguously; hand-assigning material indices to individual
