@@ -697,3 +697,10 @@ add_executable(EngineCoreFieldClosureTests
 )
 target_link_libraries(EngineCoreFieldClosureTests PRIVATE EngineCore)
 add_test(NAME EngineCoreFieldClosureTests COMMAND EngineCoreFieldClosureTests)
+
+add_executable(EngineCoreOpenWorldRuntimeTests
+    Core/Tests/World/OpenWorldRuntimeTests.cpp
+)
+target_link_libraries(EngineCoreOpenWorldRuntimeTests PRIVATE EngineCore)
+add_test(NAME EngineCoreOpenWorldRuntimeTests COMMAND EngineCoreOpenWorldRuntimeTests)
+
