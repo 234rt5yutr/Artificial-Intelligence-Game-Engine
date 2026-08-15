@@ -168,6 +168,7 @@ namespace Audio {
                            float deltaTime,
                            AudioSystem& audioSystem) 
         {
+            (void)entity;
             Math::Vec3 position{0.0f};
             Math::Quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
 
