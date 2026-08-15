@@ -546,10 +546,6 @@ namespace Scripting {
         const char* name = luaL_optstring(L, 1, "Entity");
         auto entity = engine->m_Scene->CreateEntity(name);
         
-        // Add NameComponent
-        auto& registry = engine->m_Scene->GetRegistry();
-        registry.emplace<MCP::NameComponent>(entity.GetHandle(), MCP::NameComponent{name});
-        
         lua_pushinteger(L, static_cast<lua_Integer>(static_cast<uint32_t>(entity.GetHandle())));
         return 1;
     }
@@ -599,14 +595,10 @@ namespace Scripting {
         }
 
         const char* name = luaL_checkstring(L, 1);
-        auto& registry = engine->m_Scene->GetRegistry();
-        auto view = registry.view<MCP::NameComponent>();
-        
-        for (auto entity : view) {
-            if (view.get<MCP::NameComponent>(entity).Name == name) {
-                lua_pushinteger(L, static_cast<lua_Integer>(static_cast<uint32_t>(entity)));
-                return 1;
-            }
+        auto entity = engine->m_Scene->FindEntityByName(name);
+        if (entity.IsValid()) {
+            lua_pushinteger(L, static_cast<lua_Integer>(static_cast<uint32_t>(entity.GetHandle())));
+            return 1;
         }
         
         lua_pushnil(L);
@@ -935,19 +927,13 @@ namespace Scripting {
         }
 
         const char* pattern = luaL_checkstring(L, 1);
-        std::string searchPattern = pattern;
-        auto& registry = engine->m_Scene->GetRegistry();
+        auto entities = engine->m_Scene->FindEntitiesByName(pattern);
         
         lua_newtable(L);
         int index = 1;
-        
-        auto view = registry.view<MCP::NameComponent>();
-        for (auto entity : view) {
-            const auto& nameComp = view.get<MCP::NameComponent>(entity);
-            if (nameComp.Name.find(searchPattern) != std::string::npos) {
-                lua_pushinteger(L, static_cast<lua_Integer>(static_cast<uint32_t>(entity)));
-                lua_rawseti(L, -2, index++);
-            }
+        for (auto entity : entities) {
+            lua_pushinteger(L, static_cast<lua_Integer>(static_cast<uint32_t>(entity.GetHandle())));
+            lua_rawseti(L, -2, index++);
         }
         
         return 1;

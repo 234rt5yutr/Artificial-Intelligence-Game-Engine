@@ -140,7 +140,7 @@ namespace ECS {
         std::vector<Entity> matches;
         auto view = m_Registry.view<NameComponent>();
         for (auto handle : view) {
-            if (view.get<NameComponent>(handle).Name == name) {
+            if (name.empty() || view.get<NameComponent>(handle).Name.find(name) != std::string::npos) {
                 matches.emplace_back(handle, this);
             }
         }

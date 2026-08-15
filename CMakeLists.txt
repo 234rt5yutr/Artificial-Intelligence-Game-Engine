@@ -722,6 +722,8 @@ add_executable(EngineCoreNavigationSystemsTests
 target_link_libraries(EngineCoreNavigationSystemsTests PRIVATE EngineCore)
 add_test(NAME EngineCoreNavigationSystemsTests COMMAND EngineCoreNavigationSystemsTests)
 
-
-
-
+add_executable(EngineCoreScriptingSystemsTests
+    Core/Tests/Scripting/ScriptingSystemsTests.cpp
+)
+target_link_libraries(EngineCoreScriptingSystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCoreScriptingSystemsTests COMMAND EngineCoreScriptingSystemsTests)
