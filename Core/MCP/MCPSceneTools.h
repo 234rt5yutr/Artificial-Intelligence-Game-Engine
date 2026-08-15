@@ -12,6 +12,7 @@
 #include "Core/ECS/Scene.h"
 #include "Core/ECS/Entity.h"
 #include "Core/ECS/Components/Components.h"
+#include "Core/ECS/Components/SkeletalMeshComponent.h"
 #include "Core/Scripting/LuaEngine.h"
 #include "Core/Log.h"
 
@@ -432,7 +433,7 @@ namespace MCP {
                 }},
                 {"template", {
                     {"type", "string"},
-                    {"enum", Json::array({"empty", "mesh", "light", "camera", 
+                    {"enum", Json::array({"empty", "mesh", "skinnedMesh", "light", "camera",
                                           "physicsBox", "physicsSphere", "trigger"})},
                     {"description", "Entity template to use as starting point"},
                     {"default", "empty"}
@@ -616,6 +617,7 @@ namespace MCP {
             
             if (registry.all_of<ECS::LightComponent>(entityHandle)) componentsCreated.push_back("light");
             if (registry.all_of<ECS::MeshComponent>(entityHandle)) componentsCreated.push_back("mesh");
+            if (registry.all_of<ECS::SkeletalMeshComponent>(entityHandle)) componentsCreated.push_back("skeletalMesh");
             if (registry.all_of<ECS::CameraComponent>(entityHandle)) componentsCreated.push_back("camera");
             if (registry.all_of<ECS::ColliderComponent>(entityHandle)) componentsCreated.push_back("collider");
             if (registry.all_of<ECS::RigidBodyComponent>(entityHandle)) componentsCreated.push_back("rigidBody");
@@ -677,6 +679,26 @@ namespace MCP {
                     }
                 }
                 registry.emplace<ECS::MeshComponent>(entity, mesh);
+            }
+            else if (templateType == "skinnedMesh") {
+                // A rigged cylinder. Nothing else in the engine can produce
+                // skinned geometry without a rigged glTF, so without this the
+                // skinning path cannot be exercised at all.
+                const Json& meshArgs = (arguments.contains("components") &&
+                                        arguments["components"].contains("mesh"))
+                                           ? arguments["components"]["mesh"]
+                                           : Json::object();
+                const uint32_t bones = meshArgs.value("bones", arguments.value("bones", 3u));
+                const uint32_t segments = meshArgs.value("segments", arguments.value("segments", 12u));
+                const uint32_t rings = meshArgs.value("rings", arguments.value("rings", 8u));
+
+                ECS::SkeletalMeshComponent skeletal;
+                if (auto generated = Renderer::Mesh::CreateSkinnedPrimitive(segments, rings, bones)) {
+                    skeletal.CurrentPose.Resize(generated->GetSkeleton().GetBoneCount());
+                    skeletal.MeshData = std::move(generated);
+                }
+                skeletal.MaterialIndex = meshArgs.value("materialIndex", 0u);
+                registry.emplace<ECS::SkeletalMeshComponent>(entity, skeletal);
             }
             else if (templateType == "light") {
                 // Create a point light by default

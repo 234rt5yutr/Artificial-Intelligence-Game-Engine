@@ -568,6 +568,11 @@ void main() {
             ENGINE_CORE_WARN("GPU scene unavailable; falling back to per-mesh direct draws");
             m_GPUDrivenEnabled = false;
         }
+        // 4096 matrices is 256 KB - enough for a crowd, and cheap enough that
+        // sizing it dynamically would be more code than it saves.
+        if (m_GPUDrivenEnabled && !m_Skinning.Initialize(context, 4096)) {
+            ENGINE_CORE_WARN("GPU skinning unavailable; skeletal meshes render in bind pose");
+        }
         if (m_GPUDrivenEnabled && !m_Culler.Initialize(context, m_GPUScene.GetLimits().MaxClusterSlots)) {
             ENGINE_CORE_WARN("GPU-driven culler unavailable; falling back to per-mesh direct draws");
             m_GPUDrivenEnabled = false;
@@ -1677,6 +1682,47 @@ void main() {
         }
     }
 
+    void SceneRenderer::DispatchSkinning(VkCommandBuffer cmd) {
+        m_Stats.SkinnedInstances = 0;
+        m_Stats.SkinnedVertices = 0;
+        m_Stats.SkinnedDropped = 0;
+        if (!m_Skinning.IsInitialized() || !m_GPUScene.IsInitialized()) {
+            return;
+        }
+
+        m_Skinning.BeginFrame();
+        for (const auto& pending : m_GPUScene.GetPendingSkins()) {
+            const std::size_t end =
+                static_cast<std::size_t>(pending.BoneOffset) + pending.BoneCount;
+            uint32_t boneOffset = UINT32_MAX;
+            if (pending.BoneCount > 0 && end <= m_Frame.BoneMatrices.size()) {
+                boneOffset = m_Skinning.PushBones(m_Frame.BoneMatrices.data() + pending.BoneOffset,
+                                                  pending.BoneCount);
+            }
+            if (boneOffset == UINT32_MAX) {
+                // No pose to apply. Point the instance back at the shared bind
+                // pose rather than at a slice nothing will write.
+                m_GPUScene.SetInstanceVertexOffset(pending.InstanceIndex, 0);
+                ++m_Stats.SkinnedDropped;
+                continue;
+            }
+
+            SkinningDispatch dispatch{};
+            dispatch.SourceVertexOffset = pending.SourceVertexOffset;
+            dispatch.TargetVertexOffset = pending.TargetVertexOffset;
+            dispatch.VertexCount = pending.VertexCount;
+            dispatch.BoneOffset = boneOffset;
+            dispatch.BoneCount = pending.BoneCount;
+            m_Skinning.PushDispatch(dispatch);
+        }
+
+        m_Skinning.Render(cmd, m_GPUScene);
+        const SkinningStats& stats = m_Skinning.GetStats();
+        m_Stats.SkinnedInstances = stats.Instances;
+        m_Stats.SkinnedVertices = stats.Vertices;
+        m_Stats.SkinnedDropped += stats.DroppedInstances;
+    }
+
     void SceneRenderer::BeginFrame(const FrameRenderData& frame) {
         if (!IsInitialized()) {
             return;
@@ -1717,12 +1763,12 @@ void main() {
                 continue;
             }
             if (mesh->GetUploadedVertexStride() != sizeof(Vertex)) {
-                // Skinned meshes upload a wider vertex; drawing them through the
-                // static layout would read garbage. Skipping is the honest
-                // behaviour until GPU skinning feeds this path.
+                // A skinned mesh that the GPU scene rejected. Its per-mesh
+                // buffer holds the wider vertex, so drawing it through the
+                // static layout would read garbage.
                 if (!m_WarnedSkinned) {
-                    ENGINE_CORE_WARN("Skeletal meshes are not drawn by SceneRenderer yet "
-                                     "(vertex stride {} != {})",
+                    ENGINE_CORE_WARN("Skeletal mesh not resident in the GPU scene, and its direct "
+                                     "buffer has stride {} != {}; skipping",
                                      mesh->GetUploadedVertexStride(), sizeof(Vertex));
                     m_WarnedSkinned = true;
                 }
@@ -1948,6 +1994,10 @@ void main() {
             RHI::TransitionImage(cmd, m_DummyAtlas, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
             m_DummyInitialized = true;
         }
+
+        // Skinning writes into the merged vertex arena, which the shadow passes
+        // and the main geometry pass both read, so it has to run first.
+        DispatchSkinning(cmd);
 
         // Both of these feed the lit pass, so they have to resolve before any
         // geometry shades.
@@ -2234,6 +2284,7 @@ void main() {
         m_Shadows.Shutdown();
         m_LightCuller.Shutdown();
         m_Culler.Shutdown();
+        m_Skinning.Shutdown();
         m_GPUScene.Shutdown();
 
         for (auto& [_, pipeline] : m_MaterialPipelines) {

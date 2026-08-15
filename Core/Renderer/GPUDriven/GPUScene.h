@@ -48,8 +48,16 @@ namespace Renderer {
         uint32_t ClusterCount = 0;
         uint32_t MaterialIndex = 0;
         uint32_t Flags = 0;                  // bit 0: cast shadows
+        // Non-zero for a skinned instance: the arena slice its posed vertices
+        // were written to. The cull shader emits this as the draw's
+        // vertexOffset, which is what lets skinned and static geometry share one
+        // indirect path.
+        uint32_t VertexOffset = 0;
+        uint32_t Pad0 = 0;
+        uint32_t Pad1 = 0;
+        uint32_t Pad2 = 0;
     };
-    static_assert(sizeof(GpuInstance) == 96, "GpuInstance must match the cull shader layout");
+    static_assert(sizeof(GpuInstance) == 112, "GpuInstance must match the cull shader layout");
 
     // Per-mesh residency record.
     struct GpuMeshRecord {
@@ -60,6 +68,13 @@ namespace Renderer {
         uint32_t ClusterBase = 0;
         uint32_t ClusterCount = 0;
         Math::Vec4 BoundsCenterRadius{0.0f};
+        // Skinned meshes keep their bind-pose copy in the arena for
+        // clusterisation, plus their source vertices in the skinned buffer. Each
+        // *instance* then gets its own dynamic slice, because two copies of a
+        // character hold different poses.
+        bool Skinned = false;
+        uint32_t SkinnedSourceOffset = 0;
+        uint32_t BoneCount = 0;
     };
 
     // A contiguous run of instances sharing one material, so the frame can issue
@@ -78,6 +93,9 @@ namespace Renderer {
         uint32_t FrameClusterSlots = 0;
         uint32_t FrameMaterialBatches = 0;
         uint32_t RejectedMeshes = 0;
+        uint32_t SkinnedInstances = 0;
+        uint32_t SkinnedVerticesUsed = 0;
+        uint32_t SkinnedVerticesCapacity = 0;
         uint64_t VertexBytesUsed = 0;
         uint64_t IndexBytesUsed = 0;
         uint64_t VertexBytesCapacity = 0;
@@ -94,6 +112,10 @@ namespace Renderer {
         uint32_t MaxInstances = 8192u;
         uint32_t MaxClusterSlots = 65536u;
         uint32_t MaxClusterTriangles = 128u;
+        // Vertices reserved at the top of the arena for per-instance skinning
+        // output. Taken out of MaxVertices, not added to it.
+        uint32_t MaxSkinnedVertices = 256u * 1024u;
+        uint32_t MaxSkinnedSourceVertices = 256u * 1024u;
     };
 
     class GPUScene {
@@ -130,6 +152,25 @@ namespace Renderer {
         // shader can map a flat thread id back to its instance with a binary
         // search instead of the CPU expanding every cluster every frame.
         VkBuffer GetInstanceOffsetBuffer() const { return m_InstanceOffsetBuffer.Buffer; }
+        VkBuffer GetSkinnedSourceBuffer() const { return m_SkinnedSourceBuffer.Buffer; }
+
+        // Skinning work the caller must dispatch this frame, produced by
+        // BeginFrame. Empty when nothing skinned is visible.
+        struct PendingSkin {
+            uint32_t InstanceIndex = 0;
+            uint32_t SourceVertexOffset = 0;
+            uint32_t TargetVertexOffset = 0;
+            uint32_t VertexCount = 0;
+            uint32_t BoneCount = 0;
+            // Range into FrameRenderData::BoneMatrices, copied straight from the
+            // draw command that produced this instance.
+            uint32_t BoneOffset = 0;
+            const Mesh* SourceMesh = nullptr;
+        };
+        const std::vector<PendingSkin>& GetPendingSkins() const { return m_PendingSkins; }
+        // Called after bone matrices are uploaded, so the instance's cluster
+        // draws point at its posed vertices rather than the bind pose.
+        void SetInstanceVertexOffset(uint32_t instanceIndex, uint32_t vertexOffset);
 
         const GpuSceneStats& GetStats() const { return m_Stats; }
         const GpuSceneLimits& GetLimits() const { return m_Limits; }
@@ -153,6 +194,14 @@ namespace Renderer {
 
         std::unordered_map<const Mesh*, GpuMeshRecord> m_Residency;
         std::unordered_map<const Mesh*, bool> m_Rejected;
+
+        RHI::GpuBuffer m_SkinnedSourceBuffer{};
+        uint32_t m_SkinnedSourceCursor = 0;
+        // Reset every frame: skinning output is per instance, so last frame's
+        // slices mean nothing.
+        uint32_t m_SkinnedVertexCursor = 0;
+        uint32_t m_SkinnedRegionStart = 0;
+        std::vector<PendingSkin> m_PendingSkins;
 
         std::vector<GpuInstance> m_FrameInstances;
         std::vector<uint32_t> m_FrameInstanceOffsets;

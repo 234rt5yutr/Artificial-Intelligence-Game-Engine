@@ -1,4 +1,5 @@
 #include "Core/ECS/Systems/RenderSystem.h"
+#include "Core/ECS/Components/SkeletalMeshComponent.h"
 #include "Core/JobSystem/JobSystem.h"
 
 namespace Core {
@@ -55,6 +56,8 @@ namespace ECS {
             m_DrawCommands.push_back(cmd);
             m_VisibleEntityCount++;
         }
+
+        CollectSkeletalDrawCommands(scene);
 
         ENGINE_CORE_TRACE("RenderSystem: {} visible / {} total entities", 
                           m_VisibleEntityCount.load(), m_TotalEntityCount.load());
@@ -144,8 +147,72 @@ namespace ECS {
                 return acc;
             });
 
+        CollectSkeletalDrawCommands(scene);
+
         ENGINE_CORE_TRACE("RenderSystem (parallel): {} visible / {} total entities", 
                           m_VisibleEntityCount.load(), m_TotalEntityCount.load());
+    }
+
+    void RenderSystem::CollectSkeletalDrawCommands(Scene& scene)
+    {
+        PROFILE_FUNCTION();
+
+        // Cleared here rather than in each caller: this is the only producer.
+        m_BoneMatrices.clear();
+
+        auto view = scene.View<TransformComponent, SkeletalMeshComponent>();
+        for (auto entity : view) {
+            auto& transform = view.get<TransformComponent>(entity);
+            auto& skeletal = view.get<SkeletalMeshComponent>(entity);
+
+            m_TotalEntityCount++;
+            if (!skeletal.MeshData || !skeletal.Visible) {
+                continue;
+            }
+            if (m_VisibilityTest && !m_VisibilityTest(transform.WorldMatrix, skeletal.MeshData.get())) {
+                continue;
+            }
+
+            const Renderer::Skeleton& skeleton = skeletal.MeshData->GetSkeleton();
+            const uint32_t boneCount = skeleton.GetBoneCount();
+
+            DrawCommand cmd{};
+            cmd.Mesh = skeletal.MeshData.get();
+            cmd.Transform = transform.WorldMatrix;
+            cmd.MaterialIndex = skeletal.MaterialIndex;
+            cmd.CastShadows = skeletal.CastShadows;
+            cmd.BoneOffset = static_cast<uint32_t>(m_BoneMatrices.size());
+            cmd.BoneCount = boneCount;
+
+            if (boneCount > 0) {
+                SkeletonPose& pose = skeletal.CurrentPose;
+                // A component can exist with no pose evaluated yet. The bind
+                // pose is the right answer then, and skinning by
+                // globalPose * inverseBind reproduces it exactly.
+                const bool hasPose = pose.LocalPoses.size() == boneCount;
+                if (pose.SkinningMatrices.size() != boneCount) {
+                    pose.Resize(boneCount);
+                }
+
+                // Local poses to global, then global times inverse bind. Bones
+                // are stored parents first, so one forward sweep resolves the
+                // whole hierarchy.
+                for (uint32_t i = 0; i < boneCount; ++i) {
+                    const Renderer::Bone& bone = skeleton.Bones[i];
+                    const Math::Mat4 local = hasPose ? pose.LocalPoses[i].ToMatrix()
+                                                     : bone.LocalTransform;
+                    pose.GlobalPoses[i] = bone.ParentIndex >= 0
+                        ? pose.GlobalPoses[bone.ParentIndex] * local
+                        : local;
+                    pose.SkinningMatrices[i] = pose.GlobalPoses[i] * bone.InverseBindMatrix;
+                }
+                m_BoneMatrices.insert(m_BoneMatrices.end(), pose.SkinningMatrices.begin(),
+                                      pose.SkinningMatrices.end());
+            }
+
+            m_DrawCommands.push_back(cmd);
+            m_VisibleEntityCount++;
+        }
     }
 
 } // namespace ECS

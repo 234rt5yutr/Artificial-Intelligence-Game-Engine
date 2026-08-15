@@ -124,6 +124,18 @@ standard quality presets driving the render resolution, and Halton(2,3) jitter
 folded into the projection. Not a binding of AMD's SDK, which is not a dependency
 of this project.
 
+**GPU skinning** (`Core/Renderer/GPUDriven/GPUSkinningPass.*`). Skeletal meshes
+used to be rejected outright: the merged arena stores one vertex layout, and a
+skinned vertex is wider, so the engine could animate a skeleton and never draw
+it. Rather than add a second draw path, each skinned instance gets its own slice
+of the same arena and a compute pass writes posed vertices into it before
+anything reads it. Downstream the result is ordinary static geometry - same
+clusters, same indirect draws, same shadow views - which is why skinned
+characters cast cascade shadows without a line of shadow-side code. Verified
+live over MCP: two rigged primitives produced exactly 234 skinned vertices and
+384 resident triangles through the indirect path, with the cascades redrawing
+once and then settling.
+
 **Shadows** (`Core/Renderer/Shadows/ShadowRenderer.*`). Cascaded shadow maps for
 the directional light, plus a shared atlas for spot lights and point-light cube
 shadows (six contiguous tiles each, face picked by major axis). Cascades are
@@ -295,10 +307,13 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
   first is applied.
 - Images embedded in a glTF as data URIs are skipped; GLB buffer-view images and
   external files both work.
-- Skeletal meshes do not go through the new geometry pass. The merged arena
-  stores one vertex layout, and GPU skinning is not wired into it yet.
-- Shadows are not part of the new frame. `ShadowPass` and `VirtualShadowMapCache`
-  still have no consumer.
+- A skinned instance owns arena space per *instance*, not per mesh, because two
+  copies of a character hold different poses. The skinning region is capped at
+  256K vertices; past that an instance renders in its bind pose rather than
+  disappearing.
+- Animation blending fills local poses only. Global poses and skinning matrices
+  are resolved in `RenderSystem` at draw-collection time, which is after
+  `AnimatorSystem` and `IKSystem` have had their say.
 - Vulkan validation is off in release builds; set `AIGE_VULKAN_VALIDATION=1` to
   force the layers on when they are installed.
 

@@ -133,6 +133,12 @@ namespace MCP {
             draws["postProcessActive"] = stats.PostProcessActive;
             report["draws"] = draws;
 
+            Json skinning;
+            skinning["instances"] = stats.SkinnedInstances;
+            skinning["vertices"] = stats.SkinnedVertices;
+            skinning["dropped"] = stats.SkinnedDropped;
+            report["skinning"] = skinning;
+
             Json culling;
             culling["clusterSlots"] = cull.ClusterSlots;
             culling["visibleEarly"] = cull.VisibleEarly;
@@ -153,6 +159,9 @@ namespace MCP {
             gpuScene["frameInstances"] = scene.FrameInstances;
             gpuScene["materialBatches"] = scene.FrameMaterialBatches;
             gpuScene["rejectedMeshes"] = scene.RejectedMeshes;
+            gpuScene["skinnedInstances"] = scene.SkinnedInstances;
+            gpuScene["skinnedVerticesUsed"] = scene.SkinnedVerticesUsed;
+            gpuScene["skinnedVerticesCapacity"] = scene.SkinnedVerticesCapacity;
             gpuScene["vertexBytesUsed"] = scene.VertexBytesUsed;
             gpuScene["vertexBytesCapacity"] = scene.VertexBytesCapacity;
             report["gpuScene"] = gpuScene;

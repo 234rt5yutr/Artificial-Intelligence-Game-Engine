@@ -36,6 +36,10 @@ struct Instance {
     uint clusterCount;
     uint materialIndex;
     uint flags;
+    uint vertexOffset;   // non-zero for a skinned instance's own arena slice
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 struct DrawCommand {
@@ -98,7 +102,11 @@ void main() {
 
     draws[slot].indexCount = cluster.indexCount;
     draws[slot].firstIndex = cluster.firstIndex;
-    draws[slot].vertexOffset = int(cluster.vertexOffset);
+    // A skinned instance overrides the cluster's vertex base with its own posed
+    // slice. Everything else about the draw is identical, which is the point:
+    // skinned and static geometry share one indirect path.
+    draws[slot].vertexOffset = int(inst.vertexOffset != 0u ? inst.vertexOffset
+                                                          : cluster.vertexOffset);
     draws[slot].firstInstance = instanceIndex;
 
     bool shadowView = pc.flags.z > 0.5;

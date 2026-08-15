@@ -23,6 +23,7 @@
 #include "Core/RHI/Vulkan/VulkanGpuResources.h"
 #include "Core/Renderer/GI/DynamicGlobalIllumination.h"
 #include "Core/Renderer/GPUDriven/GPUDrivenCuller.h"
+#include "Core/Renderer/GPUDriven/GPUSkinningPass.h"
 #include "Core/Renderer/GPUDriven/GPUScene.h"
 #include "Core/ECS/Components/PostProcessComponent.h"
 #include "Core/Renderer/Lighting/ClusteredLightCuller.h"
@@ -49,6 +50,10 @@ namespace Renderer {
         std::vector<ECS::DirectionalLightData> DirectionalLights;
         std::vector<ECS::PointLightData> PointLights;
         std::vector<ECS::SpotLightData> SpotLights;
+        // Skinning matrices for every skeletal draw command, indexed by
+        // DrawCommand::BoneOffset. Copied by value: the render thread must not
+        // read poses the sim thread is still writing.
+        std::vector<Math::Mat4> BoneMatrices;
         Math::Mat4 View{1.0f};
         Math::Mat4 Projection{1.0f};
         Math::Mat4 ViewProjection{1.0f};
@@ -65,6 +70,7 @@ namespace Renderer {
             DirectionalLights.clear();
             PointLights.clear();
             SpotLights.clear();
+            BoneMatrices.clear();
         }
     };
 
@@ -84,6 +90,9 @@ namespace Renderer {
         uint32_t SpotLights = 0;
         uint32_t PunctualLights = 0;
         bool GPUDrivenActive = false;
+        uint32_t SkinnedInstances = 0;
+        uint32_t SkinnedVertices = 0;
+        uint32_t SkinnedDropped = 0;
     };
 
     class SceneRenderer {
@@ -202,6 +211,9 @@ namespace Renderer {
         VkPipeline GetPipelineForMaterial(uint32_t materialIndex);
         void RecordGeometry(VkCommandBuffer cmd, bool latePhase);
         void RecordDirectDraws(VkCommandBuffer cmd);
+        // Poses every skinned instance the GPU scene queued this frame.
+        void DispatchSkinning(VkCommandBuffer cmd);
+
         void UpdateSceneUniforms(const FrameRenderData& frame);
 
         RHI::VulkanContext* m_Context = nullptr;
@@ -253,6 +265,7 @@ namespace Renderer {
 
         GPUScene m_GPUScene;
         GPUDrivenCuller m_Culler;
+        GPUSkinningPass m_Skinning;
         ShadowRenderer m_Shadows;
         ClusteredLightCuller m_LightCuller;
         ComputeBloom m_Bloom;

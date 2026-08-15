@@ -176,6 +176,12 @@ namespace Renderer {
             Shutdown();
             return false;
         }
+        // The skinning region sits at the top of the arena so static residency
+        // grows from the bottom and never collides with it.
+        const uint32_t skinnedRegion = std::min(m_Limits.MaxSkinnedVertices, m_Limits.MaxVertices / 2);
+        m_SkinnedRegionStart = m_Limits.MaxVertices - skinnedRegion;
+        m_Stats.SkinnedVerticesCapacity = skinnedRegion;
+
         m_Stats.VertexBytesCapacity = m_VertexBuffer.Size;
         m_Stats.IndexBytesCapacity = m_IndexBuffer.Size;
         ENGINE_CORE_INFO("GPUScene ready: {} MB vertices, {} MB indices, {} clusters, {} instances",
@@ -207,7 +213,11 @@ namespace Renderer {
                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, m_InstanceBuffer) &&
             RHI::CreateGpuBuffer(allocator,
                                  static_cast<VkDeviceSize>(m_Limits.MaxInstances + 1) * sizeof(uint32_t),
-                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, m_InstanceOffsetBuffer);
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, m_InstanceOffsetBuffer) &&
+            RHI::CreateGpuBuffer(allocator,
+                                 static_cast<VkDeviceSize>(m_Limits.MaxSkinnedSourceVertices) *
+                                     sizeof(SkinnedVertex),
+                                 VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, m_SkinnedSourceBuffer);
 
         if (!ok) {
             ENGINE_CORE_ERROR("GPUScene failed to allocate its merged geometry arenas");
@@ -225,6 +235,7 @@ namespace Renderer {
         RHI::DestroyGpuBuffer(allocator, m_ClusterBuffer);
         RHI::DestroyGpuBuffer(allocator, m_InstanceBuffer);
         RHI::DestroyGpuBuffer(allocator, m_InstanceOffsetBuffer);
+        RHI::DestroyGpuBuffer(allocator, m_SkinnedSourceBuffer);
 
         m_Residency.clear();
         m_Rejected.clear();
@@ -234,6 +245,9 @@ namespace Renderer {
         m_VertexCursor = 0;
         m_IndexCursor = 0;
         m_ClusterCursor = 0;
+        m_SkinnedSourceCursor = 0;
+        m_SkinnedVertexCursor = 0;
+        m_PendingSkins.clear();
         m_FrameClusterSlots = 0;
         m_Stats = GpuSceneStats{};
         m_Context = nullptr;
@@ -269,15 +283,36 @@ namespace Renderer {
     }
 
     bool GPUScene::UploadMesh(const Mesh* mesh, GpuMeshRecord& record) {
-        // Skinned meshes keep the per-mesh draw path: the merged arena stores one
-        // vertex layout, and a skinned vertex is a different size. They are drawn
-        // directly rather than through the indirect path.
-        if (mesh->IsSkeletal()) {
-            ENGINE_CORE_TRACE("GPUScene: skeletal mesh stays on the direct draw path");
-            return false;
-        }
         if (mesh->vertices.empty() || mesh->indices.size() < 3) {
             return false;
+        }
+
+        // A skinned mesh also uploads its source vertices once. Its bind-pose
+        // copy still goes into the arena below, because that is what the
+        // clusteriser measures and what an instance without a pose falls back to.
+        const bool skinned = mesh->IsSkeletal() && !mesh->skinnedVertices.empty();
+        if (skinned) {
+            const uint32_t sourceCount = static_cast<uint32_t>(mesh->skinnedVertices.size());
+            if (sourceCount != mesh->vertices.size()) {
+                ENGINE_CORE_WARN("GPUScene: skeletal mesh has {} skinned vertices but {} static "
+                                 "ones; skinning needs them to correspond one to one",
+                                 sourceCount, mesh->vertices.size());
+                return false;
+            }
+            if (m_SkinnedSourceCursor + sourceCount > m_Limits.MaxSkinnedSourceVertices) {
+                ENGINE_CORE_WARN("GPUScene: skinned source buffer is full");
+                return false;
+            }
+            auto* sourceArena = static_cast<SkinnedVertex*>(m_SkinnedSourceBuffer.Mapped);
+            if (!sourceArena) {
+                return false;
+            }
+            std::memcpy(sourceArena + m_SkinnedSourceCursor, mesh->skinnedVertices.data(),
+                        sourceCount * sizeof(SkinnedVertex));
+            record.SkinnedSourceOffset = m_SkinnedSourceCursor;
+            record.BoneCount = mesh->GetSkeleton().GetBoneCount();
+            record.Skinned = true;
+            m_SkinnedSourceCursor += sourceCount;
         }
 
         const MeshClusterSet clusters = BuildMeshClusters(
@@ -336,10 +371,24 @@ namespace Renderer {
         return true;
     }
 
+    void GPUScene::SetInstanceVertexOffset(uint32_t instanceIndex, uint32_t vertexOffset) {
+        if (instanceIndex >= m_FrameInstances.size()) {
+            return;
+        }
+        m_FrameInstances[instanceIndex].VertexOffset = vertexOffset;
+        // The instance buffer was already uploaded, so patch it in place rather
+        // than re-uploading the whole list.
+        if (auto* arena = static_cast<GpuInstance*>(m_InstanceBuffer.Mapped)) {
+            arena[instanceIndex].VertexOffset = vertexOffset;
+        }
+    }
+
     uint32_t GPUScene::BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount) {
         m_FrameInstances.clear();
         m_FrameInstanceOffsets.clear();
         m_MaterialBatches.clear();
+        m_PendingSkins.clear();
+        m_SkinnedVertexCursor = 0;
         m_FrameClusterSlots = 0;
 
         if (!m_Context || !commands || commandCount == 0) {
@@ -387,6 +436,30 @@ namespace Renderer {
 
             GpuInstance instance;
             instance.Transform = item.Command->Transform;
+            // Skinned instances get their own arena slice, so the clusters they
+            // share still index posed vertices unique to this instance.
+            if (item.Record->Skinned) {
+                const uint32_t vertexCount = item.Record->VertexCount;
+                if (m_SkinnedVertexCursor + vertexCount <= m_Stats.SkinnedVerticesCapacity) {
+                    const uint32_t target = m_SkinnedRegionStart + m_SkinnedVertexCursor;
+                    PendingSkin skin;
+                    skin.InstanceIndex = static_cast<uint32_t>(m_FrameInstances.size());
+                    skin.SourceVertexOffset = item.Record->SkinnedSourceOffset;
+                    skin.TargetVertexOffset = target;
+                    skin.VertexCount = vertexCount;
+                    skin.BoneCount = item.Record->BoneCount;
+                    skin.BoneOffset = item.Command->BoneOffset;
+                    skin.SourceMesh = item.Command->Mesh;
+                    m_PendingSkins.push_back(skin);
+
+                    instance.VertexOffset = target;
+                    m_SkinnedVertexCursor += vertexCount;
+                } else {
+                    // Out of skinning space: the instance still draws, in its
+                    // bind pose, rather than disappearing.
+                    ENGINE_CORE_WARN("GPUScene: skinning region full; an instance renders in bind pose");
+                }
+            }
             instance.BoundsCenterRadius = item.Record->BoundsCenterRadius;
             instance.ClusterBase = item.Record->ClusterBase;
             instance.ClusterCount = item.Record->ClusterCount;
@@ -418,6 +491,8 @@ namespace Renderer {
         m_Stats.FrameInstances = static_cast<uint32_t>(m_FrameInstances.size());
         m_Stats.FrameClusterSlots = m_FrameClusterSlots;
         m_Stats.FrameMaterialBatches = static_cast<uint32_t>(m_MaterialBatches.size());
+        m_Stats.SkinnedInstances = static_cast<uint32_t>(m_PendingSkins.size());
+        m_Stats.SkinnedVerticesUsed = m_SkinnedVertexCursor;
         return m_FrameClusterSlots;
     }
 

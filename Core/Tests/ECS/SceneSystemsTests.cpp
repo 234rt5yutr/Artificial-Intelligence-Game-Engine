@@ -10,6 +10,7 @@
 #include "Core/ECS/Components/LightComponent.h"
 #include "Core/ECS/Components/MeshComponent.h"
 #include "Core/ECS/Components/NameComponent.h"
+#include "Core/ECS/Components/SkeletalMeshComponent.h"
 #include "Core/ECS/Components/TransformComponent.h"
 #include "Core/ECS/Entity.h"
 #include "Core/ECS/Scene.h"
@@ -42,6 +43,18 @@ using namespace Core::ECS;
 
 bool NearlyEqual(const Math::Vec3& a, const Math::Vec3& b, float tolerance = 1e-3f) {
     return glm::length(a - b) < tolerance;
+}
+
+bool NearlyIdentity(const Math::Mat4& matrix, float tolerance = 1e-4f) {
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
+            const float expected = column == row ? 1.0f : 0.0f;
+            if (std::fabs(matrix[column][row] - expected) > tolerance) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 void TestEntityLifecycle() {
@@ -264,6 +277,59 @@ void TestLightSystemSeparatesLightTypes() {
     CHECK(lightSystem.GetTotalLightCount() == 3);
 }
 
+// The skinning matrices RenderSystem builds are what the GPU pass multiplies
+// every vertex by, so getting the local -> global -> inverse-bind chain wrong
+// silently deforms every character. CreateSkinnedPrimitive is rigged so that
+// its bind pose is exactly the identity, which makes the chain checkable.
+void TestSkeletalDrawCommandsCarryBoneMatrices() {
+    Scene scene("Skinning");
+    auto mesh = Renderer::Mesh::CreateSkinnedPrimitive(8, 4, 3);
+    CHECK(mesh != nullptr);
+    CHECK(mesh->IsSkeletal());
+    CHECK(mesh->GetSkeleton().GetBoneCount() == 3);
+    CHECK(mesh->skinnedVertices.size() == mesh->vertices.size());
+
+    Entity rig = scene.CreateEntity("Rig");
+    rig.AddComponent<TransformComponent>();
+    auto& skeletal = rig.AddComponent<SkeletalMeshComponent>();
+    skeletal.MeshData = mesh;
+
+    RenderSystem renderSystem;
+    renderSystem.Update(scene);
+
+    const auto& commands = renderSystem.GetDrawCommands();
+    CHECK(commands.size() == 1);
+    CHECK(commands[0].BoneCount == 3);
+    CHECK(commands[0].BoneOffset == 0);
+
+    const auto& bones = renderSystem.GetBoneMatrices();
+    CHECK(bones.size() == 3);
+    // No pose was evaluated, so the bind pose is what came back, and skinning by
+    // the bind pose must not move a vertex.
+    for (const auto& matrix : bones) {
+        CHECK(NearlyIdentity(matrix));
+    }
+
+    // Displacing the middle joint must leave the root untouched and carry the
+    // bone above it along by the same amount. That is the whole point of
+    // resolving the hierarchy parent-first: get the order wrong and the child
+    // keeps its bind position while its parent walks away.
+    auto& pose = skeletal.CurrentPose;
+    CHECK(pose.LocalPoses.size() == 3);
+    for (uint32_t i = 0; i < 3; ++i) {
+        pose.LocalPoses[i].Translation =
+            Math::Vec3(mesh->GetSkeleton().Bones[i].LocalTransform[3]);
+    }
+    pose.LocalPoses[1].Translation.x += 0.5f;
+
+    renderSystem.Update(scene);
+    const auto& posed = renderSystem.GetBoneMatrices();
+    CHECK(posed.size() == 3);
+    CHECK(NearlyIdentity(posed[0]));
+    CHECK(NearlyEqual(Math::Vec3(posed[1][3]), Math::Vec3(0.5f, 0.0f, 0.0f)));
+    CHECK(NearlyEqual(Math::Vec3(posed[2][3]), Math::Vec3(0.5f, 0.0f, 0.0f)));
+}
+
 } // namespace
 
 int main() {
@@ -275,6 +341,7 @@ int main() {
     TestRenderSystemCollectsVisibleMeshes();
     TestRenderSystemHonoursVisibilityTest();
     TestLightSystemSeparatesLightTypes();
+    TestSkeletalDrawCommandsCarryBoneMatrices();
 
     std::printf("SceneSystemsTests: all checks passed\n");
     return 0;

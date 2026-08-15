@@ -250,6 +250,7 @@ add_library(EngineCore
     Core/Renderer/Shadows/ShadowRenderer.cpp
     Core/Renderer/GPUDriven/GPUDrivenCuller.h
     Core/Renderer/GPUDriven/GPUDrivenCuller.cpp
+    Core/Renderer/GPUDriven/GPUSkinningPass.cpp
     Core/Renderer/GI/DynamicGlobalIllumination.h
     Core/Renderer/GI/DynamicGlobalIllumination.cpp
     Core/Renderer/Upscaling/FSRUpscaler.h

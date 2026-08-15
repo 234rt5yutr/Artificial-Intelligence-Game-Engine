@@ -1047,6 +1047,100 @@ namespace {
 
 } // namespace
 
+std::shared_ptr<Mesh> Mesh::CreateSkinnedPrimitive(uint32_t segments, uint32_t rings,
+                                                   uint32_t boneCount) {
+    segments = std::clamp(segments, 3u, 128u);
+    rings = std::clamp(rings, 2u, 128u);
+    boneCount = std::clamp(boneCount, 1u, MAX_BONES);
+
+    auto mesh = std::make_shared<Mesh>();
+    const float height = 2.0f;
+    const float radius = 0.35f;
+
+    for (uint32_t ring = 0; ring <= rings; ++ring) {
+        const float v = static_cast<float>(ring) / static_cast<float>(rings);
+        const float y = v * height - height * 0.5f;
+
+        // Bones run up the cylinder. A vertex between two joints is weighted
+        // between them, which is what makes the joint bend smoothly instead of
+        // creasing.
+        const float bonePosition = v * static_cast<float>(boneCount - 1);
+        const uint32_t lowerBone = std::min(static_cast<uint32_t>(bonePosition), boneCount - 1);
+        const uint32_t upperBone = std::min(lowerBone + 1, boneCount - 1);
+        const float blend = bonePosition - static_cast<float>(lowerBone);
+
+        for (uint32_t segment = 0; segment <= segments; ++segment) {
+            const float u = static_cast<float>(segment) / static_cast<float>(segments);
+            const float theta = u * 6.28318530718f;
+
+            SkinnedVertex vertex;
+            vertex.normal = Math::Vec3(std::cos(theta), 0.0f, std::sin(theta));
+            vertex.position = Math::Vec3(vertex.normal.x * radius, y, vertex.normal.z * radius);
+            vertex.texCoord = Math::Vec2(u, v);
+            vertex.tangent = Math::Vec4(-std::sin(theta), 0.0f, std::cos(theta), 1.0f);
+            vertex.boneIndices = Math::UVec4(lowerBone, upperBone, 0, 0);
+            vertex.boneWeights = Math::Vec4(1.0f - blend, blend, 0.0f, 0.0f);
+            vertex.NormalizeBoneWeights();
+            mesh->skinnedVertices.push_back(vertex);
+
+            // The static stream mirrors the bind pose. The GPU-driven path
+            // clusterises from it, and it is what a mesh falls back to when
+            // skinning is unavailable.
+            Vertex bindPose;
+            bindPose.position = vertex.position;
+            bindPose.normal = vertex.normal;
+            bindPose.texCoord = vertex.texCoord;
+            bindPose.tangent = vertex.tangent;
+            mesh->vertices.push_back(bindPose);
+        }
+    }
+
+    const uint32_t stride = segments + 1;
+    for (uint32_t ring = 0; ring < rings; ++ring) {
+        for (uint32_t segment = 0; segment < segments; ++segment) {
+            const uint32_t a = ring * stride + segment;
+            const uint32_t b = a + stride;
+            mesh->indices.insert(mesh->indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+        }
+    }
+
+    // A straight chain of bones along Y, each one `segmentLength` above the last.
+    Skeleton& skeleton = mesh->GetSkeleton();
+    skeleton.Name = "SkinnedPrimitive";
+    skeleton.Bones.clear();
+    skeleton.BoneNameToIndex.clear();
+    skeleton.RootBoneIndices.clear();
+
+    const float segmentLength = boneCount > 1 ? height / static_cast<float>(boneCount - 1) : height;
+    for (uint32_t i = 0; i < boneCount; ++i) {
+        Bone bone;
+        bone.Name = "Bone" + std::to_string(i);
+        bone.ParentIndex = i == 0 ? -1 : static_cast<int32_t>(i) - 1;
+        const float boneY = static_cast<float>(i) * segmentLength - height * 0.5f;
+        // Inverse bind takes a vertex from mesh space into this bone's space.
+        bone.InverseBindMatrix = glm::translate(Math::Mat4(1.0f), Math::Vec3(0.0f, -boneY, 0.0f));
+        bone.LocalTransform = glm::translate(
+            Math::Mat4(1.0f), Math::Vec3(0.0f, i == 0 ? boneY : segmentLength, 0.0f));
+        if (i > 0) {
+            skeleton.Bones[i - 1].ChildrenIndices.push_back(static_cast<int32_t>(i));
+        }
+        skeleton.BoneNameToIndex[bone.Name] = static_cast<int32_t>(i);
+        skeleton.Bones.push_back(bone);
+    }
+    skeleton.RootBoneIndices.push_back(0);
+    mesh->m_IsSkeletal = true;
+
+    Primitive primitive{};
+    primitive.firstIndex = 0;
+    primitive.indexCount = static_cast<uint32_t>(mesh->indices.size());
+    primitive.materialIndex = 0;
+    mesh->primitives.push_back(primitive);
+
+    ENGINE_CORE_INFO("Skinned primitive built: {} vertices, {} triangles, {} bones",
+                     mesh->skinnedVertices.size(), mesh->indices.size() / 3, boneCount);
+    return mesh;
+}
+
 std::shared_ptr<Mesh> Mesh::CreatePrimitive(const std::string& kind, uint32_t subdivisions) {
     auto mesh = std::make_shared<Mesh>();
 

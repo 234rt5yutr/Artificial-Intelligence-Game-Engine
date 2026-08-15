@@ -354,6 +354,7 @@ namespace Core {
         // being submitted.
         if (const auto* renderSystem = pipeline->GetRenderSystem()) {
             frame.DrawCommands = renderSystem->GetDrawCommands();
+            frame.BoneMatrices = renderSystem->GetBoneMatrices();
         }
         if (const auto* lightSystem = pipeline->GetLightSystem()) {
             frame.DirectionalLights = lightSystem->GetDirectionalLights();

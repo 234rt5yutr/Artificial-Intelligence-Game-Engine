@@ -235,6 +235,14 @@ namespace Renderer {
         static std::shared_ptr<Mesh> CreatePrimitive(const std::string& kind,
                                                      uint32_t subdivisions = 16);
 
+        // A rigged primitive: a vertical cylinder split into `boneCount` bones up
+        // its length, with weights blended across each joint. Nothing in the
+        // engine could produce skinned geometry without a rigged glTF, which
+        // made the skinning path impossible to exercise at all.
+        static std::shared_ptr<Mesh> CreateSkinnedPrimitive(uint32_t segments = 12,
+                                                            uint32_t rings = 8,
+                                                            uint32_t boneCount = 3);
+
         // Load static mesh from GLTF. `out` optionally receives the file's
         // materials and image references; the caller decides what to do with
         // them, because this class has no business knowing about the material
