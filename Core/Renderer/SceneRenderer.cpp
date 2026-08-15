@@ -1700,9 +1700,9 @@ void main() {
                                                   pending.BoneCount);
             }
             if (boneOffset == UINT32_MAX) {
-                // No pose to apply. Point the instance back at the shared bind
+                // No pose to apply. Point the instances back at the shared bind
                 // pose rather than at a slice nothing will write.
-                m_GPUScene.SetInstanceVertexOffset(pending.InstanceIndex, 0);
+                m_GPUScene.ClearSkinnedInstances(pending.TargetVertexOffset);
                 ++m_Stats.SkinnedDropped;
                 continue;
             }

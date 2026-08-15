@@ -489,8 +489,9 @@ namespace MCP {
             state["materialIndex"] = firstMaterialIndex;
             if (mesh->primitives.size() > 1 && materialsImported > 1) {
                 state["multiMaterialNote"] =
-                    "The mesh has several submeshes with different materials, but the geometry "
-                    "path shades a whole mesh with one material index. Only the first is applied.";
+                    "Each submesh is drawn as its own instance with its own material. The "
+                    "reported materialIndex is the base; a submesh shades with base + its own "
+                    "slot in the file.";
             }
             state["skeletal"] = mesh->IsSkeletal();
             if (mesh->IsSkeletal()) {

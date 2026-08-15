@@ -315,13 +315,79 @@ namespace Renderer {
             m_SkinnedSourceCursor += sourceCount;
         }
 
-        const MeshClusterSet clusters = BuildMeshClusters(
-            mesh->vertices.data(), sizeof(Vertex), mesh->vertices.size(),
-            mesh->indices, m_Limits.MaxClusterTriangles);
-        if (clusters.Clusters.empty()) {
+        // Each primitive is clusterised on its own so it can carry its own
+        // material. Meshes with no primitive list are treated as one.
+        struct SectionBuild {
+            uint32_t MaterialSlot = 0;
+            uint32_t FirstIndex = 0;   // into the mesh index array
+            uint32_t IndexCount = 0;
+        };
+        std::vector<SectionBuild> sectionBuilds;
+        for (const auto& primitive : mesh->primitives) {
+            if (primitive.indexCount >= 3 &&
+                primitive.firstIndex + primitive.indexCount <= mesh->indices.size()) {
+                sectionBuilds.push_back({primitive.materialIndex, primitive.firstIndex,
+                                         primitive.indexCount});
+            }
+        }
+        if (sectionBuilds.empty()) {
+            sectionBuilds.push_back({0u, 0u, static_cast<uint32_t>(mesh->indices.size())});
+        }
+
+        std::vector<uint32_t> mergedIndices;
+        std::vector<GpuCluster> mergedClusters;
+        std::vector<GpuMeshSection> sections;
+        Math::Vec4 meshBounds{0.0f};
+        mergedIndices.reserve(mesh->indices.size());
+        for (const auto& build : sectionBuilds) {
+            const std::vector<uint32_t> sectionIndices(
+                mesh->indices.begin() + build.FirstIndex,
+                mesh->indices.begin() + build.FirstIndex + build.IndexCount);
+            const MeshClusterSet clusterSet = BuildMeshClusters(
+                mesh->vertices.data(), sizeof(Vertex), mesh->vertices.size(),
+                sectionIndices, m_Limits.MaxClusterTriangles);
+            if (clusterSet.Clusters.empty()) {
+                continue;
+            }
+
+            GpuMeshSection section;
+            section.MaterialSlot = build.MaterialSlot;
+            section.ClusterBase = static_cast<uint32_t>(mergedClusters.size());
+            section.ClusterCount = static_cast<uint32_t>(clusterSet.Clusters.size());
+
+            // The section keeps its own bounds, from the union of its cluster
+            // spheres. Using the whole mesh bounds would make every submesh of a
+            // large model survive culling as a unit.
+            Math::Vec3 sectionMin(std::numeric_limits<float>::max());
+            Math::Vec3 sectionMax(std::numeric_limits<float>::lowest());
+            const uint32_t indexBase = static_cast<uint32_t>(mergedIndices.size());
+            for (GpuCluster cluster : clusterSet.Clusters) {
+                const Math::Vec3 centre(cluster.CenterRadius);
+                const float radius = cluster.CenterRadius.w;
+                sectionMin = glm::min(sectionMin, centre - radius);
+                sectionMax = glm::max(sectionMax, centre + radius);
+                cluster.FirstIndex += indexBase;
+                mergedClusters.push_back(cluster);
+            }
+            const Math::Vec3 sectionCentre = (sectionMin + sectionMax) * 0.5f;
+            section.BoundsCenterRadius =
+                Math::Vec4(sectionCentre, glm::length(sectionMax - sectionCentre));
+            sections.push_back(section);
+
+            mergedIndices.insert(mergedIndices.end(), clusterSet.ReorderedIndices.begin(),
+                                 clusterSet.ReorderedIndices.end());
+            meshBounds = clusterSet.BoundsCenterRadius;
+        }
+
+        if (mergedClusters.empty()) {
             ENGINE_CORE_WARN("GPUScene: clusterisation produced no clusters; mesh stays on the direct path");
             return false;
         }
+
+        MeshClusterSet clusters;
+        clusters.Clusters = std::move(mergedClusters);
+        clusters.ReorderedIndices = std::move(mergedIndices);
+        clusters.BoundsCenterRadius = meshBounds;
 
         const uint32_t vertexCount = static_cast<uint32_t>(mesh->vertices.size());
         const uint32_t indexCount = static_cast<uint32_t>(clusters.ReorderedIndices.size());
@@ -364,6 +430,14 @@ namespace Renderer {
         record.ClusterBase = m_ClusterCursor;
         record.ClusterCount = clusterCount;
         record.BoundsCenterRadius = clusters.BoundsCenterRadius;
+        for (auto& section : sections) {
+            section.ClusterBase += m_ClusterCursor;
+        }
+        record.Sections = std::move(sections);
+        if (record.Sections.size() > 1) {
+            ENGINE_CORE_INFO("GPUScene: mesh resident as {} sections, one per material",
+                             record.Sections.size());
+        }
 
         m_VertexCursor += vertexCount;
         m_IndexCursor += indexCount;
@@ -371,15 +445,21 @@ namespace Renderer {
         return true;
     }
 
-    void GPUScene::SetInstanceVertexOffset(uint32_t instanceIndex, uint32_t vertexOffset) {
-        if (instanceIndex >= m_FrameInstances.size()) {
+    void GPUScene::ClearSkinnedInstances(uint32_t targetVertexOffset) {
+        if (targetVertexOffset == 0) {
             return;
         }
-        m_FrameInstances[instanceIndex].VertexOffset = vertexOffset;
-        // The instance buffer was already uploaded, so patch it in place rather
-        // than re-uploading the whole list.
-        if (auto* arena = static_cast<GpuInstance*>(m_InstanceBuffer.Mapped)) {
-            arena[instanceIndex].VertexOffset = vertexOffset;
+        auto* arena = static_cast<GpuInstance*>(m_InstanceBuffer.Mapped);
+        for (std::size_t i = 0; i < m_FrameInstances.size(); ++i) {
+            if (m_FrameInstances[i].VertexOffset != targetVertexOffset) {
+                continue;
+            }
+            m_FrameInstances[i].VertexOffset = 0;
+            // The instance buffer was already uploaded, so patch it in place
+            // rather than re-uploading the whole list.
+            if (arena) {
+                arena[i].VertexOffset = 0;
+            }
         }
     }
 
@@ -398,29 +478,59 @@ namespace Renderer {
         // Sort by material so each material becomes one contiguous cluster-slot
         // range and therefore one indirect draw.
         struct PendingInstance {
-            const GpuMeshRecord* Record;
+            const GpuMeshSection* Section;
             const ECS::DrawCommand* Command;
+            uint32_t MaterialIndex;
+            uint32_t SkinnedVertexOffset;   // 0 for static geometry
         };
         std::vector<PendingInstance> pending;
         pending.reserve(commandCount);
 
-        for (std::size_t i = 0; i < commandCount; ++i) {
+        bool instanceLimitHit = false;
+        for (std::size_t i = 0; i < commandCount && !instanceLimitHit; ++i) {
             const ECS::DrawCommand& command = commands[i];
             const GpuMeshRecord* record = EnsureResident(command.Mesh);
             if (!record) {
                 continue;
             }
-            if (pending.size() >= m_Limits.MaxInstances) {
-                ENGINE_CORE_WARN("GPUScene instance limit ({}) reached; remaining draws are dropped this frame",
-                                 m_Limits.MaxInstances);
-                break;
+
+            // A skinned mesh takes one slice for the whole mesh, not one per
+            // section: every section reads the same posed vertices.
+            uint32_t skinnedOffset = 0;
+            if (record->Skinned) {
+                if (m_SkinnedVertexCursor + record->VertexCount <= m_Stats.SkinnedVerticesCapacity) {
+                    skinnedOffset = m_SkinnedRegionStart + m_SkinnedVertexCursor;
+                    PendingSkin skin;
+                    skin.SourceVertexOffset = record->SkinnedSourceOffset;
+                    skin.TargetVertexOffset = skinnedOffset;
+                    skin.VertexCount = record->VertexCount;
+                    skin.BoneCount = record->BoneCount;
+                    skin.BoneOffset = command.BoneOffset;
+                    skin.SourceMesh = command.Mesh;
+                    m_PendingSkins.push_back(skin);
+                    m_SkinnedVertexCursor += record->VertexCount;
+                } else {
+                    // Out of skinning space: the instance still draws, in its
+                    // bind pose, rather than disappearing.
+                    ENGINE_CORE_WARN("GPUScene: skinning region full; an instance renders in bind pose");
+                }
             }
-            pending.push_back({record, &command});
+
+            for (const auto& section : record->Sections) {
+                if (pending.size() >= m_Limits.MaxInstances) {
+                    ENGINE_CORE_WARN("GPUScene instance limit ({}) reached; remaining draws are dropped this frame",
+                                     m_Limits.MaxInstances);
+                    instanceLimitHit = true;
+                    break;
+                }
+                pending.push_back({&section, &command,
+                                   command.MaterialIndex + section.MaterialSlot, skinnedOffset});
+            }
         }
 
         std::stable_sort(pending.begin(), pending.end(),
                          [](const PendingInstance& lhs, const PendingInstance& rhs) {
-                             return lhs.Command->MaterialIndex < rhs.Command->MaterialIndex;
+                             return lhs.MaterialIndex < rhs.MaterialIndex;
                          });
 
         m_FrameInstances.reserve(pending.size());
@@ -428,7 +538,7 @@ namespace Renderer {
 
         uint32_t slotCursor = 0;
         for (const auto& item : pending) {
-            if (slotCursor + item.Record->ClusterCount > m_Limits.MaxClusterSlots) {
+            if (slotCursor + item.Section->ClusterCount > m_Limits.MaxClusterSlots) {
                 ENGINE_CORE_WARN("GPUScene cluster-slot limit ({}) reached; remaining draws are dropped this frame",
                                  m_Limits.MaxClusterSlots);
                 break;
@@ -436,45 +546,22 @@ namespace Renderer {
 
             GpuInstance instance;
             instance.Transform = item.Command->Transform;
-            // Skinned instances get their own arena slice, so the clusters they
-            // share still index posed vertices unique to this instance.
-            if (item.Record->Skinned) {
-                const uint32_t vertexCount = item.Record->VertexCount;
-                if (m_SkinnedVertexCursor + vertexCount <= m_Stats.SkinnedVerticesCapacity) {
-                    const uint32_t target = m_SkinnedRegionStart + m_SkinnedVertexCursor;
-                    PendingSkin skin;
-                    skin.InstanceIndex = static_cast<uint32_t>(m_FrameInstances.size());
-                    skin.SourceVertexOffset = item.Record->SkinnedSourceOffset;
-                    skin.TargetVertexOffset = target;
-                    skin.VertexCount = vertexCount;
-                    skin.BoneCount = item.Record->BoneCount;
-                    skin.BoneOffset = item.Command->BoneOffset;
-                    skin.SourceMesh = item.Command->Mesh;
-                    m_PendingSkins.push_back(skin);
-
-                    instance.VertexOffset = target;
-                    m_SkinnedVertexCursor += vertexCount;
-                } else {
-                    // Out of skinning space: the instance still draws, in its
-                    // bind pose, rather than disappearing.
-                    ENGINE_CORE_WARN("GPUScene: skinning region full; an instance renders in bind pose");
-                }
-            }
-            instance.BoundsCenterRadius = item.Record->BoundsCenterRadius;
-            instance.ClusterBase = item.Record->ClusterBase;
-            instance.ClusterCount = item.Record->ClusterCount;
-            instance.MaterialIndex = item.Command->MaterialIndex;
+            instance.VertexOffset = item.SkinnedVertexOffset;
+            instance.BoundsCenterRadius = item.Section->BoundsCenterRadius;
+            instance.ClusterBase = item.Section->ClusterBase;
+            instance.ClusterCount = item.Section->ClusterCount;
+            instance.MaterialIndex = item.MaterialIndex;
             instance.Flags = item.Command->CastShadows ? 1u : 0u;
 
             if (m_MaterialBatches.empty() ||
                 m_MaterialBatches.back().MaterialIndex != instance.MaterialIndex) {
                 m_MaterialBatches.push_back({instance.MaterialIndex, slotCursor, 0});
             }
-            m_MaterialBatches.back().ClusterSlotCount += item.Record->ClusterCount;
+            m_MaterialBatches.back().ClusterSlotCount += item.Section->ClusterCount;
 
             m_FrameInstanceOffsets.push_back(slotCursor);
             m_FrameInstances.push_back(instance);
-            slotCursor += item.Record->ClusterCount;
+            slotCursor += item.Section->ClusterCount;
         }
         m_FrameInstanceOffsets.push_back(slotCursor);
         m_FrameClusterSlots = slotCursor;

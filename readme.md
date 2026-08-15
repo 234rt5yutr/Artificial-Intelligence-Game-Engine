@@ -124,6 +124,13 @@ standard quality presets driving the render resolution, and Halton(2,3) jitter
 folded into the projection. Not a binding of AMD's SDK, which is not a dependency
 of this project.
 
+Each primitive of a mesh is clusterised separately and drawn as its own
+instance with its own material and its own bounds, so an imported model shades
+its submeshes correctly instead of painting all of them with the first material.
+`assets/meshes/two_materials.gltf` is the two-triangle, two-material asset that
+pins this down: it imports as one mesh, two sections, two instances, two
+indirect draws.
+
 **GPU skinning** (`Core/Renderer/GPUDriven/GPUSkinningPass.*`). Skeletal meshes
 used to be rejected outright: the merged arena stores one vertex layout, and a
 skinned vertex is wider, so the engine could animate a skeleton and never draw
@@ -302,9 +309,13 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
   carries six matrices each.
 - Texture compression is BC3 only. BC7 would look better at the same size but
   needs a different encoder than the one already vendored.
-- glTF skeletons and animations are ignored. A multi-material mesh imports every
-  material, but the geometry path shades a whole mesh with one index, so only the
-  first is applied.
+- glTF skeletons and animations are ignored, so an imported character has
+  geometry and materials but no rig; skinning is exercised through
+  `Mesh::CreateSkinnedPrimitive` instead.
+- A submesh's material is resolved as the component's index plus the primitive's
+  own slot in its file. That holds because the importer registers a file's
+  materials contiguously; hand-assigning material indices to individual
+  submeshes is not expressible.
 - Images embedded in a glTF as data URIs are skipped; GLB buffer-view images and
   external files both work.
 - A skinned instance owns arena space per *instance*, not per mesh, because two

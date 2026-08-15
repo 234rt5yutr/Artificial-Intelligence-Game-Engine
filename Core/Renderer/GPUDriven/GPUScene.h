@@ -60,6 +60,19 @@ namespace Renderer {
     static_assert(sizeof(GpuInstance) == 112, "GpuInstance must match the cull shader layout");
 
     // Per-mesh residency record.
+    // One primitive of a mesh. A mesh with several primitives shades each with
+    // its own material, which is what glTF files actually contain; drawing the
+    // whole mesh with one material index applied the first one to everything.
+    struct GpuMeshSection {
+        uint32_t ClusterBase = 0;
+        uint32_t ClusterCount = 0;
+        // The primitive's material *within its own file*. The global index is
+        // this plus the draw command's, because the importer registers a file's
+        // materials contiguously and stores the first one on the component.
+        uint32_t MaterialSlot = 0;
+        Math::Vec4 BoundsCenterRadius{0.0f};
+    };
+
     struct GpuMeshRecord {
         uint32_t VertexOffset = 0;   // in vertices
         uint32_t VertexCount = 0;
@@ -68,6 +81,7 @@ namespace Renderer {
         uint32_t ClusterBase = 0;
         uint32_t ClusterCount = 0;
         Math::Vec4 BoundsCenterRadius{0.0f};
+        std::vector<GpuMeshSection> Sections;
         // Skinned meshes keep their bind-pose copy in the arena for
         // clusterisation, plus their source vertices in the skinned buffer. Each
         // *instance* then gets its own dynamic slice, because two copies of a
@@ -157,7 +171,6 @@ namespace Renderer {
         // Skinning work the caller must dispatch this frame, produced by
         // BeginFrame. Empty when nothing skinned is visible.
         struct PendingSkin {
-            uint32_t InstanceIndex = 0;
             uint32_t SourceVertexOffset = 0;
             uint32_t TargetVertexOffset = 0;
             uint32_t VertexCount = 0;
@@ -168,9 +181,11 @@ namespace Renderer {
             const Mesh* SourceMesh = nullptr;
         };
         const std::vector<PendingSkin>& GetPendingSkins() const { return m_PendingSkins; }
-        // Called after bone matrices are uploaded, so the instance's cluster
-        // draws point at its posed vertices rather than the bind pose.
-        void SetInstanceVertexOffset(uint32_t instanceIndex, uint32_t vertexOffset);
+        // Sends every instance sharing this skinning slice back to the shared
+        // bind pose, for when the pose could not be uploaded. Matched by slice
+        // rather than by index because one mesh contributes one instance per
+        // primitive, and those are not adjacent once sorted by material.
+        void ClearSkinnedInstances(uint32_t targetVertexOffset);
 
         const GpuSceneStats& GetStats() const { return m_Stats; }
         const GpuSceneLimits& GetLimits() const { return m_Limits; }
