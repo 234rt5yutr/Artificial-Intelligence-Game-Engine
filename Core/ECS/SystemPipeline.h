@@ -40,6 +40,8 @@ namespace ECS {
     class TerrainSystem;
     class FoliageSystem;
     class SkyboxSystem;
+    class BehaviorTreeSystem;
+    class FSMSystem;
 
     struct SystemPipelineConfig {
         // Simulation
@@ -52,6 +54,10 @@ namespace ECS {
         bool EnableCharacterController = true;
         bool EnableAnimation = true;
         bool EnableInverseKinematics = true;
+        // AI: Behavior trees and finite state machines
+        bool EnableAI = true;
+        // Audio: 3D spatial audio listener, sources, and physics collision audio
+        bool EnableAudio = true;
         // Recast/Detour navigation: crowd agents, patrol routes, dynamic obstacles.
         bool EnableNavigation = true;
         // World rendering systems. These need an RHI device; when none is
@@ -131,6 +137,8 @@ namespace ECS {
         TerrainSystem* GetTerrainSystem() const { return m_TerrainSystem.get(); }
         FoliageSystem* GetFoliageSystem() const { return m_FoliageSystem.get(); }
         SkyboxSystem* GetSkyboxSystem() const { return m_SkyboxSystem.get(); }
+        BehaviorTreeSystem* GetBehaviorTreeSystem() const { return m_BehaviorTreeSystem.get(); }
+        FSMSystem* GetFSMSystem() const { return m_FSMSystem.get(); }
 
         // Frame statistics
         float GetLastUpdateSeconds() const { return m_LastUpdateSeconds; }
@@ -154,6 +162,8 @@ namespace ECS {
         std::unique_ptr<CameraViewInterpolatorSystem> m_CameraViewInterpolatorSystem;
         std::unique_ptr<AnimatorSystem> m_AnimatorSystem;
         std::unique_ptr<IKSystem> m_IKSystem;
+        std::unique_ptr<BehaviorTreeSystem> m_BehaviorTreeSystem;
+        std::unique_ptr<FSMSystem> m_FSMSystem;
         std::unique_ptr<LightSystem> m_LightSystem;
         std::unique_ptr<RenderSystem> m_RenderSystem;
         // Only its animation half runs. Its draw-collection half needs the old
@@ -168,6 +178,7 @@ namespace ECS {
         // NavigationSystem is a singleton, so the pipeline only tracks whether it
         // owns the lifetime rather than holding a pointer.
         bool m_NavigationActive = false;
+        bool m_AudioActive = false;
 
         float m_LastUpdateSeconds = 0.0f;
         uint64_t m_FrameCount = 0;

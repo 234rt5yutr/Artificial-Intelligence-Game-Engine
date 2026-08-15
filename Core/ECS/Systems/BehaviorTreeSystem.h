@@ -54,14 +54,14 @@ namespace ECS {
 
         /// Initialize the behavior tree system
         void Initialize() {
-            LOG_INFO("BehaviorTreeSystem initialized");
+            ENGINE_CORE_INFO("BehaviorTreeSystem initialized");
             m_Initialized = true;
         }
 
         /// Shutdown and release resources
         void Shutdown() {
             m_Initialized = false;
-            LOG_INFO("BehaviorTreeSystem shutdown");
+            ENGINE_CORE_INFO("BehaviorTreeSystem shutdown");
         }
 
         //---------------------------------------------------------------------
@@ -110,7 +110,7 @@ namespace ECS {
                 return true;
             }
 
-            LOG_WARNING("Failed to create behavior tree instance from template: {}", 
+            ENGINE_CORE_WARN("Failed to create behavior tree instance from template: {}", 
                        btComp.TemplateId);
             return false;
         }

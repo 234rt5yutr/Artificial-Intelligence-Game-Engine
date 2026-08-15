@@ -289,5 +289,17 @@ namespace AI {
         return tree;
     }
 
+    // SubTreeNode Tick implementation
+    inline BTStatus SubTreeNode::Tick(float deltaTime, Blackboard& blackboard) {
+        (void)blackboard;
+        if (!m_CachedTree && m_LookupFunc) {
+            m_CachedTree = m_LookupFunc(m_TreeId);
+        }
+        if (!m_CachedTree) {
+            return BTStatus::Failure;
+        }
+        return m_CachedTree->Tick(deltaTime);
+    }
+
 } // namespace AI
 } // namespace Core

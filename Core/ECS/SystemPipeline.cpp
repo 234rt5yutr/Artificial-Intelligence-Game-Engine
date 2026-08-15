@@ -19,6 +19,13 @@
 #include "Core/ECS/Systems/TerrainSystem.h"
 #include "Core/ECS/Systems/FoliageSystem.h"
 #include "Core/ECS/Systems/SkyboxSystem.h"
+#include "Core/ECS/Systems/BehaviorTreeSystem.h"
+#include "Core/ECS/Systems/FSMSystem.h"
+#include "Core/Audio/AudioSystem.h"
+#include "Core/Audio/AudioSourceSystem.h"
+#include "Core/Audio/PhysicsAudioIntegration.h"
+#include "Core/ECS/Components/AudioListenerComponent.h"
+#include "Core/ECS/Components/AudioSourceComponent.h"
 #include "Core/RHI/RHIDevice.h"
 #include "Core/Physics/PhysicsWorld.h"
 #include "Core/InputMapper.h"
@@ -123,6 +130,19 @@ namespace ECS {
             }
         }
 
+        if (m_Config.EnableAI) {
+            m_BehaviorTreeSystem = std::make_unique<BehaviorTreeSystem>();
+            m_BehaviorTreeSystem->Initialize();
+
+            m_FSMSystem = std::make_unique<FSMSystem>();
+            m_FSMSystem->Initialize();
+        }
+
+        if (m_Config.EnableAudio) {
+            Audio::GetAudioSourceSystem().Initialize();
+            m_AudioActive = true;
+        }
+
         if (m_Config.EnableLighting) {
             m_LightSystem = std::make_unique<LightSystem>();
         }
@@ -158,9 +178,10 @@ namespace ECS {
         }
 
         m_Initialized = true;
-        ENGINE_CORE_INFO("SystemPipeline initialized (physics={}, input={}, animation={}, navigation={}, cameras={})",
+        ENGINE_CORE_INFO("SystemPipeline initialized (physics={}, input={}, animation={}, ai={}, audio={}, navigation={}, cameras={})",
                          m_PhysicsWorld != nullptr, m_InputMapper != nullptr,
-                         m_AnimatorSystem != nullptr, m_NavigationActive,
+                         m_AnimatorSystem != nullptr, m_BehaviorTreeSystem != nullptr,
+                         m_AudioActive, m_NavigationActive,
                          m_CameraSystem != nullptr);
         ENGINE_CORE_INFO("SystemPipeline world systems (terrain={}, foliage={}, skybox={})",
                          m_TerrainSystem != nullptr, m_FoliageSystem != nullptr,
@@ -174,6 +195,10 @@ namespace ECS {
         }
 
         // Reverse of construction: systems first, then the resources they point at.
+        if (m_AudioActive) {
+            Audio::GetAudioSourceSystem().Shutdown();
+            m_AudioActive = false;
+        }
         if (m_SkyboxSystem) { m_SkyboxSystem->Shutdown(); m_SkyboxSystem.reset(); }
         if (m_FoliageSystem) { m_FoliageSystem->Shutdown(); m_FoliageSystem.reset(); }
         if (m_TerrainSystem) { m_TerrainSystem->Shutdown(); m_TerrainSystem.reset(); }
@@ -194,6 +219,14 @@ namespace ECS {
         if (m_AnimatorSystem) {
             m_AnimatorSystem->Shutdown();
             m_AnimatorSystem.reset();
+        }
+        if (m_FSMSystem) {
+            m_FSMSystem->Shutdown();
+            m_FSMSystem.reset();
+        }
+        if (m_BehaviorTreeSystem) {
+            m_BehaviorTreeSystem->Shutdown();
+            m_BehaviorTreeSystem.reset();
         }
         if (m_PlayerControllerSystem) {
             m_PlayerControllerSystem.reset();
@@ -278,6 +311,14 @@ namespace ECS {
             m_InputMapper->Update(dt);
         }
 
+        // 1b. AI decision making: behavior trees and finite state machines.
+        if (m_BehaviorTreeSystem) {
+            m_BehaviorTreeSystem->Update(scene, dt);
+        }
+        if (m_FSMSystem) {
+            m_FSMSystem->Update(scene, dt);
+        }
+
         // 2. Gameplay intent -> character motion.
         if (m_PlayerControllerSystem) {
             m_PlayerControllerSystem->Update(scene, dt);
@@ -297,6 +338,9 @@ namespace ECS {
         }
         if (m_PhysicsSyncSystem) {
             m_PhysicsSyncSystem->Update(scene);
+        }
+        if (m_AudioActive && Audio::PhysicsAudioManager::Get().IsInitialized()) {
+            Audio::PhysicsAudioManager::Get().Update(dt);
         }
 
         // 4. Animation, then IK on top of the animated pose.
@@ -357,6 +401,32 @@ namespace ECS {
         }
         if (m_RenderSystem) {
             m_RenderSystem->Update(scene);
+        }
+
+        // 7b. Audio listener orientation and spatial source updates.
+        if (m_AudioActive) {
+            if (Audio::AudioSystem::Get().IsInitialized()) {
+                auto listenerView = scene.GetRegistry().view<AudioListenerComponent, TransformComponent>();
+                bool listenerFound = false;
+                for (auto entity : listenerView) {
+                    const auto& [listener, transform] = listenerView.get<AudioListenerComponent, TransformComponent>(entity);
+                    if (listener.IsActive) {
+                        Audio::AudioSystem::Get().SetListenerPosition(transform.Position, listener.ListenerIndex);
+                        Audio::AudioSystem::Get().SetListenerOrientation(Math::Quat(transform.Rotation), listener.ListenerIndex);
+                        listenerFound = true;
+                        break;
+                    }
+                }
+                if (!listenerFound && m_CameraSystem) {
+                    const auto activeCameraEntity = m_CameraSystem->GetActiveCameraEntity();
+                    if (activeCameraEntity != entt::null && scene.GetRegistry().all_of<TransformComponent>(activeCameraEntity)) {
+                        const auto& cameraTransform = scene.GetRegistry().get<TransformComponent>(activeCameraEntity);
+                        Audio::AudioSystem::Get().SetListenerPosition(cameraTransform.Position, 0);
+                        Audio::AudioSystem::Get().SetListenerOrientation(Math::Quat(cameraTransform.Rotation), 0);
+                    }
+                }
+            }
+            Audio::GetAudioSourceSystem().Update(&scene, dt);
         }
 
         const auto frameEnd = std::chrono::high_resolution_clock::now();

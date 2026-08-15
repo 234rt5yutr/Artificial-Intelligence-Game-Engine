@@ -4,7 +4,13 @@
 // subtly wrong.
 
 #include "Core/ECS/Scene.h"
+#include "Core/ECS/Entity.h"
 #include "Core/ECS/SystemPipeline.h"
+#include "Core/ECS/Components/TransformComponent.h"
+#include "Core/ECS/Components/AudioListenerComponent.h"
+#include "Core/ECS/Components/AudioSourceComponent.h"
+#include "Core/ECS/Components/BehaviorTreeComponent.h"
+#include "Core/ECS/Components/FSMComponent.h"
 #include "Core/Log.h"
 
 #include <cstdio>
@@ -109,6 +115,52 @@ int main() {
     scene.ShutdownSystems();
     scene.ShutdownSystems();
     CHECK(scene.GetSystemPipeline() == nullptr);
+
+    // AI & Audio Pipeline Stage Integration Test
+    {
+        Scene aiAudioScene("AIAudioPipelineScene");
+        SystemPipelineConfig config = HeadlessConfig();
+        config.EnableAI = true;
+        config.EnableAudio = true;
+        config.EnableCameras = true;
+
+        CHECK(aiAudioScene.InitializeSystems(config));
+        SystemPipeline* p = aiAudioScene.GetSystemPipeline();
+        CHECK(p != nullptr);
+        CHECK(p->GetBehaviorTreeSystem() != nullptr);
+        CHECK(p->GetFSMSystem() != nullptr);
+        CHECK(p->GetCameraSystem() != nullptr);
+
+        // Spawn entity with AudioListener and Camera
+        auto listenerEntity = aiAudioScene.CreateEntity("AudioListener");
+        auto& listener = listenerEntity.AddComponent<AudioListenerComponent>();
+        listener.IsActive = true;
+        auto& listenerTrans = listenerEntity.AddComponent<TransformComponent>();
+        listenerTrans.Position = glm::vec3(10.0f, 2.0f, 5.0f);
+
+        // Spawn entity with AudioSource
+        auto sourceEntity = aiAudioScene.CreateEntity("AudioEmitter");
+        auto& source = sourceEntity.AddComponent<AudioSourceComponent>();
+        source.Volume = 0.8f;
+        auto& sourceTrans = sourceEntity.AddComponent<TransformComponent>();
+        sourceTrans.Position = glm::vec3(12.0f, 2.0f, 5.0f);
+
+        // Spawn entity with AI components
+        auto aiEntity = aiAudioScene.CreateEntity("AIAgent");
+        auto& btComp = aiEntity.AddComponent<BehaviorTreeComponent>();
+        btComp.TemplateId = "TestGuardAI";
+        auto& fsmComp = aiEntity.AddComponent<FSMComponent>();
+        fsmComp.TemplateId = "TestPatrolFSM";
+
+        // Step simulation
+        for (int i = 0; i < 5; ++i) {
+            aiAudioScene.OnUpdate(1.0f / 60.0f);
+        }
+        CHECK(p->GetFrameCount() == 5);
+
+        aiAudioScene.ShutdownSystems();
+        CHECK(aiAudioScene.GetSystemPipeline() == nullptr);
+    }
 
     return 0;
 }

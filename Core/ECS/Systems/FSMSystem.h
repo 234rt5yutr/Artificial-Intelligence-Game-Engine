@@ -50,14 +50,14 @@ namespace ECS {
 
         /// Initialize the FSM system
         void Initialize() {
-            LOG_INFO("FSMSystem initialized");
+            ENGINE_CORE_INFO("FSMSystem initialized");
             m_Initialized = true;
         }
 
         /// Shutdown and release resources
         void Shutdown() {
             m_Initialized = false;
-            LOG_INFO("FSMSystem shutdown");
+            ENGINE_CORE_INFO("FSMSystem shutdown");
         }
 
         //---------------------------------------------------------------------
@@ -107,7 +107,7 @@ namespace ECS {
                 return true;
             }
 
-            LOG_WARNING("Failed to create FSM instance from template: {}", 
+            ENGINE_CORE_WARN("Failed to create FSM instance from template: {}", 
                        fsmComp.TemplateId);
             return false;
         }
