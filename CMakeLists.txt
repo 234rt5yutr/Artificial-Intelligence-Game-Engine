@@ -727,3 +727,10 @@ add_executable(EngineCoreScriptingSystemsTests
 )
 target_link_libraries(EngineCoreScriptingSystemsTests PRIVATE EngineCore)
 add_test(NAME EngineCoreScriptingSystemsTests COMMAND EngineCoreScriptingSystemsTests)
+
+add_executable(EngineCorePhysicsSystemsTests
+    Core/Tests/Physics/PhysicsSystemsTests.cpp
+)
+target_link_libraries(EngineCorePhysicsSystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCorePhysicsSystemsTests COMMAND EngineCorePhysicsSystemsTests)
+

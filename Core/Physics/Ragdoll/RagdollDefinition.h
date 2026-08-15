@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Physics/Constraints/ConstraintTypes.h"
 #include <string>
 #include <vector>
 #include <optional>
@@ -26,22 +27,13 @@ namespace Core::Physics
     /**
      * @brief Defines the type of physics collider used for a ragdoll bone.
      */
-    enum class ColliderType : uint8_t
+    enum class RagdollColliderType : uint8_t
     {
         Capsule,    ///< Capsule collider - ideal for limbs
         Box,        ///< Box collider - suitable for torso/chest
         Sphere      ///< Sphere collider - good for joints/head
     };
-
-    /**
-     * @brief Defines the constraint type between parent and child bones.
-     */
-    enum class ConstraintType : uint8_t
-    {
-        Cone,       ///< Cone constraint - allows rotation within a cone
-        Hinge,      ///< Hinge constraint - single axis rotation (elbows, knees)
-        Fixed       ///< Fixed constraint - no relative movement allowed
-    };
+    using ColliderType = RagdollColliderType;
 
     /**
      * @brief Predefined ragdoll skeleton profiles for common creature types.

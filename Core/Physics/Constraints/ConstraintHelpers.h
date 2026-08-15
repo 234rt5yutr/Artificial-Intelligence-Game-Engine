@@ -26,8 +26,11 @@
  */
 
 #include "Core/Math/Math.h"
+#include <Jolt/Jolt.h>
+#include <Jolt/Math/Vec3.h>
+#include <Jolt/Math/Quat.h>
 
-// Jolt Physics forward declarations - avoid including full Jolt headers
+// Jolt Physics forward declarations
 namespace JPH
 {
     class PhysicsSystem;
@@ -36,8 +39,6 @@ namespace JPH
     class SliderConstraint;
     class DistanceConstraint;
     class BodyID;
-    class Vec3;
-    class Quat;
 
     template<typename T>
     class Ref;
@@ -60,58 +61,35 @@ namespace Core::Physics::JoltConstraintHelpers
 
 /**
  * @brief Converts an engine Math::Vec3 to a Jolt Physics JPH::Vec3.
- *
- * This is the primary vector conversion function for interfacing with Jolt Physics.
- * The conversion is direct as both types use the same underlying component layout.
- *
- * @param v The engine vector to convert.
- * @return A Jolt Physics vector with the same component values.
- *
- * @note This function is marked inline for performance-critical code paths.
- *
- * @example
- * @code
- * Math::Vec3 pivot{1.0f, 2.0f, 3.0f};
- * JPH::Vec3 joltPivot = ToJPHVec3(pivot);
- * @endcode
  */
-[[nodiscard]] inline JPH::Vec3 ToJPHVec3(const Math::Vec3& v);
+[[nodiscard]] inline JPH::Vec3 ToJPHVec3(const Math::Vec3& v)
+{
+    return JPH::Vec3(v.x, v.y, v.z);
+}
 
 /**
  * @brief Converts an engine Math::Quat to a Jolt Physics JPH::Quat.
- *
- * Handles the quaternion conversion between GLM and Jolt Physics.
- * Note that Jolt uses (x, y, z, w) component ordering internally.
- *
- * @param q The engine quaternion to convert.
- * @return A Jolt Physics quaternion with equivalent rotation.
- *
- * @note Ensure the input quaternion is normalized for correct physics behavior.
- *
- * @example
- * @code
- * Math::Quat rotation = glm::angleAxis(PI * 0.5f, Math::Vec3{0, 1, 0});
- * JPH::Quat joltRot = ToJPHQuat(rotation);
- * @endcode
  */
-[[nodiscard]] inline JPH::Quat ToJPHQuat(const Math::Quat& q);
+[[nodiscard]] inline JPH::Quat ToJPHQuat(const Math::Quat& q)
+{
+    return JPH::Quat(q.x, q.y, q.z, q.w);
+}
 
 /**
  * @brief Converts a Jolt Physics JPH::Vec3 to an engine Math::Vec3.
- *
- * The inverse operation of ToJPHVec3, used when reading data back from
- * the physics simulation.
- *
- * @param v The Jolt Physics vector to convert.
- * @return An engine vector with the same component values.
- *
- * @example
- * @code
- * JPH::Vec3 joltForce = constraint->GetTotalLambdaPosition();
- * Math::Vec3 engineForce = FromJPHVec3(joltForce);
- * @endcode
  */
-[[nodiscard]] inline Math::Vec3 FromJPHVec3(const JPH::Vec3& v);
+[[nodiscard]] inline Math::Vec3 FromJPHVec3(const JPH::Vec3& v)
+{
+    return Math::Vec3(v.GetX(), v.GetY(), v.GetZ());
+}
+
+/**
+ * @brief Converts a Jolt Physics JPH::Quat to an engine Math::Quat.
+ */
+[[nodiscard]] inline Math::Quat FromJPHQuat(const JPH::Quat& q)
+{
+    return Math::Quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ());
+}
 
 // =============================================================================
 // Constraint Creation Functions
