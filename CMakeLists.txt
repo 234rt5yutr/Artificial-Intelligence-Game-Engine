@@ -710,4 +710,11 @@ add_executable(EngineCoreGameplaySystemsTests
 target_link_libraries(EngineCoreGameplaySystemsTests PRIVATE EngineCore)
 add_test(NAME EngineCoreGameplaySystemsTests COMMAND EngineCoreGameplaySystemsTests)
 
+add_executable(EngineCoreAnimationSystemsTests
+    Core/Tests/Animation/AnimationSystemsTests.cpp
+)
+target_link_libraries(EngineCoreAnimationSystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCoreAnimationSystemsTests COMMAND EngineCoreAnimationSystemsTests)
+
+
 
