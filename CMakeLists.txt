@@ -704,3 +704,10 @@ add_executable(EngineCoreOpenWorldRuntimeTests
 target_link_libraries(EngineCoreOpenWorldRuntimeTests PRIVATE EngineCore)
 add_test(NAME EngineCoreOpenWorldRuntimeTests COMMAND EngineCoreOpenWorldRuntimeTests)
 
+add_executable(EngineCoreGameplaySystemsTests
+    Core/Tests/Gameplay/GameplaySystemsTests.cpp
+)
+target_link_libraries(EngineCoreGameplaySystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCoreGameplaySystemsTests COMMAND EngineCoreGameplaySystemsTests)
+
+
