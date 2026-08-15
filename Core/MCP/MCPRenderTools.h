@@ -140,6 +140,12 @@ namespace MCP {
             skinning["dropped"] = stats.SkinnedDropped;
             report["skinning"] = skinning;
 
+            Json reflections;
+            reflections["ssrEnabled"] = stats.SSREnabled;
+            reflections["ssrActive"] = stats.SSRActive;
+            reflections["ssrSteps"] = stats.SSRSteps;
+            report["reflections"] = reflections;
+
             Json temporal;
             temporal["taaEnabled"] = stats.TAAEnabled;
             temporal["taaActive"] = stats.TAAActive;
@@ -767,6 +773,21 @@ namespace MCP {
                 "Samples per pixel.", 4, 64);
             schema.Properties["ssaoBlurPasses"] = RenderToolsDetail::NumberProperty(
                 "Depth-aware blur passes over the occlusion buffer.", 0, 4);
+            schema.Properties["ssr"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Trace screen-space reflections over the G-buffer.");
+            schema.Properties["ssrMaxDistance"] = RenderToolsDetail::NumberProperty(
+                "Longest reflection ray in world units.", 1.0, 500.0);
+            schema.Properties["ssrSteps"] = RenderToolsDetail::NumberProperty(
+                "March steps per ray before giving up.", 4, 128);
+            schema.Properties["ssrThickness"] = RenderToolsDetail::NumberProperty(
+                "How far behind a depth sample still counts as a hit. Too small and rays pass "
+                "through thin geometry; too large and they hit the air in front of it.",
+                0.01, 10.0);
+            schema.Properties["ssrIntensity"] = RenderToolsDetail::NumberProperty(
+                "Scales the reflection added on top of the lit image.", 0.0, 4.0);
+            schema.Properties["ssrRoughnessCutoff"] = RenderToolsDetail::NumberProperty(
+                "Roughness above which a surface scatters too widely for one mirror ray.",
+                0.0, 1.0);
             schema.Properties["taa"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Resolve the jittered frames into a temporally antialiased image.");
             schema.Properties["taaFeedback"] = RenderToolsDetail::NumberProperty(
@@ -830,6 +851,28 @@ namespace MCP {
             if (arguments.contains("ssaoBlurPasses") && arguments["ssaoBlurPasses"].is_number()) {
                 settings.ssaoBlurPasses = std::clamp(arguments["ssaoBlurPasses"].get<int>(), 0, 4);
             }
+            auto& ssr = renderer->GetSSR().GetSettings();
+            if (arguments.contains("ssr") && arguments["ssr"].is_boolean()) {
+                ssr.Enabled = arguments["ssr"].get<bool>();
+            }
+            if (arguments.contains("ssrMaxDistance") && arguments["ssrMaxDistance"].is_number()) {
+                ssr.MaxDistance = std::clamp(arguments["ssrMaxDistance"].get<float>(), 1.0f, 500.0f);
+            }
+            if (arguments.contains("ssrSteps") && arguments["ssrSteps"].is_number()) {
+                ssr.StepCount = static_cast<uint32_t>(
+                    std::clamp(arguments["ssrSteps"].get<int>(), 4, 128));
+            }
+            if (arguments.contains("ssrThickness") && arguments["ssrThickness"].is_number()) {
+                ssr.Thickness = std::clamp(arguments["ssrThickness"].get<float>(), 0.01f, 10.0f);
+            }
+            if (arguments.contains("ssrIntensity") && arguments["ssrIntensity"].is_number()) {
+                ssr.Intensity = std::clamp(arguments["ssrIntensity"].get<float>(), 0.0f, 4.0f);
+            }
+            if (arguments.contains("ssrRoughnessCutoff") &&
+                arguments["ssrRoughnessCutoff"].is_number()) {
+                ssr.RoughnessCutoff =
+                    std::clamp(arguments["ssrRoughnessCutoff"].get<float>(), 0.0f, 1.0f);
+            }
             if (arguments.contains("taa") && arguments["taa"].is_boolean()) {
                 renderer->GetTAA().SetEnabled(arguments["taa"].get<bool>());
             }
@@ -855,6 +898,12 @@ namespace MCP {
 
             const auto& stats = renderer->GetBloom().GetStats();
             Json state;
+            state["ssr"] = ssr.Enabled;
+            state["ssrMaxDistance"] = ssr.MaxDistance;
+            state["ssrSteps"] = ssr.StepCount;
+            state["ssrThickness"] = ssr.Thickness;
+            state["ssrIntensity"] = ssr.Intensity;
+            state["ssrRoughnessCutoff"] = ssr.RoughnessCutoff;
             state["taa"] = renderer->GetTAA().IsEnabled();
             state["taaFeedback"] = renderer->GetTAA().GetFeedback();
             state["bloom"] = settings.bloomEnabled;

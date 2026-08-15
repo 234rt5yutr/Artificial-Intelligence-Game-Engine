@@ -29,6 +29,7 @@
 #include "Core/Renderer/Lighting/ClusteredLightCuller.h"
 #include "Core/Renderer/PostProcess/ComputeBloom.h"
 #include "Core/Renderer/PostProcess/ComputeSSAO.h"
+#include "Core/Renderer/PostProcess/ComputeSSR.h"
 #include "Core/Renderer/PostProcess/ComputeTAA.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
 #include "Core/Renderer/Textures/TextureLibrary.h"
@@ -99,6 +100,9 @@ namespace Renderer {
         uint32_t SkinnedInstances = 0;
         uint32_t SkinnedVertices = 0;
         uint32_t SkinnedDropped = 0;
+        bool SSREnabled = false;
+        bool SSRActive = false;
+        uint32_t SSRSteps = 0;
         bool TAAEnabled = false;
         bool TAAActive = false;
         float TAAFeedback = 0.0f;
@@ -136,6 +140,9 @@ namespace Renderer {
         // rendered image at all before this, which left every visual feature
         // unverifiable except by a human looking at the window.
         bool CaptureToFile(const std::string& path, std::string& error);
+
+        ComputeSSR& GetSSR() { return m_SSR; }
+        const ComputeSSR& GetSSR() const { return m_SSR; }
 
         ComputeTAA& GetTAA() { return m_TAA; }
         const ComputeTAA& GetTAA() const { return m_TAA; }
@@ -291,6 +298,7 @@ namespace Renderer {
         ClusteredLightCuller m_LightCuller;
         ComputeBloom m_Bloom;
         ComputeSSAO m_SSAO;
+        ComputeSSR m_SSR;
         ComputeTAA m_TAA;
         ECS::PostProcessSettings m_PostProcessSettings{};
         // False until the chain runs at least once; the upscaler reads the

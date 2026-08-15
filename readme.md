@@ -131,6 +131,18 @@ its submeshes correctly instead of painting all of them with the first material.
 pins this down: it imports as one mesh, two sections, two instances, two
 indirect draws.
 
+**Screen-space reflections** (`Core/Renderer/PostProcess/ComputeSSR.*`). Every
+surface was purely diffuse plus a direct highlight: a polished floor showed the
+light, never the room. The G-buffer already carried what a reflection needs -
+depth, a world normal with metallic in its alpha, and albedo with roughness in
+its alpha - so this is a march over buffers that already exist rather than a
+second view of the scene. It runs after the resolve, so what it reflects is fully
+lit including indirect light, and before the temporal pass, so its per-pixel
+jitter is what TAA settles. A hit is refined by five halvings, then faded at the
+screen edges, with ray distance, and with roughness up to a cutoff where a single
+mirror ray stops meaning anything. Verified by capture on eight chrome spheres:
+135,565 pixels change when it is switched on, 96.2% of them brighter.
+
 **Alpha modes**. The engine drew every surface as if it were opaque, so a leaf
 texture rendered as a rectangle and glass as a wall. Materials now carry glTF's
 three modes. *Masked* bakes a `discard` below its cutoff into the material's own
@@ -367,6 +379,10 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Animation blending fills local poses only. Global poses and skinning matrices
   are resolved in `RenderSystem` at draw-collection time, which is after
   `AnimatorSystem` and `IKSystem` have had their say.
+- Reflections are screen space only. Anything off-screen or hidden behind what
+  is on screen cannot be reflected; the pass fades toward the frame edge rather
+  than pretending otherwise. Reflection probes are the fix, and they are a
+  different feature rather than a bigger version of this one.
 - Blended surfaces sort per instance, not per triangle. Two panes intersecting
   each other composite in whichever order their centres fall, which is the
   approximation every engine makes until it needs order-independent transparency.

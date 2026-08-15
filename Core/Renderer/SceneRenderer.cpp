@@ -605,6 +605,9 @@ void main() {
         if (m_GPUDrivenEnabled && !m_Skinning.Initialize(context, 4096)) {
             ENGINE_CORE_WARN("GPU skinning unavailable; skeletal meshes render in bind pose");
         }
+        if (!m_SSR.Initialize(context)) {
+            ENGINE_CORE_WARN("Screen-space reflections unavailable; surfaces stay purely diffuse");
+        }
         if (!m_TAA.Initialize(context)) {
             ENGINE_CORE_WARN("Temporal antialiasing unavailable; the frame stays jittered but unresolved");
         }
@@ -1164,6 +1167,7 @@ void main() {
         }
 
         m_Culler.Resize(renderWidth, renderHeight);
+        m_SSR.Resize(renderWidth, renderHeight);
         m_TAA.Resize(renderWidth, renderHeight);
         m_LightCuller.Resize(renderWidth, renderHeight);
 
@@ -2264,10 +2268,34 @@ void main() {
             RHI::TransitionImage(cmd, m_Resolved, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
+        // Reflections read the resolved image, so what they reflect is fully lit
+        // rather than direct light alone, and they run before the temporal pass
+        // so their per-pixel jitter is what TAA settles.
+        RHI::GpuImage* postSource = &m_Resolved;
+        {
+            SSRInputs ssrInputs{};
+            ssrInputs.DepthView = m_SceneDepth.View;
+            ssrInputs.NormalView = m_SceneNormal.View;
+            ssrInputs.AlbedoView = m_SceneAlbedo.View;
+            ssrInputs.Sampler = m_LinearSampler;
+            ssrInputs.View = m_Frame.View;
+            ssrInputs.Projection = m_Frame.Projection;
+            ssrInputs.InverseViewProjection = glm::inverse(m_Frame.ViewProjection);
+            ssrInputs.CameraPosition = m_Frame.CameraPosition;
+            ssrInputs.FrameIndex = m_Frame.FrameIndex;
+            m_SSR.Render(cmd, m_Resolved, ssrInputs);
+            if (m_SSR.GetStats().Active) {
+                postSource = &m_SSR.GetOutputImage();
+            }
+        }
+        const SSRStats& ssrStats = m_SSR.GetStats();
+        m_Stats.SSREnabled = ssrStats.Enabled;
+        m_Stats.SSRActive = ssrStats.Active;
+        m_Stats.SSRSteps = ssrStats.StepCount;
+
         // Temporal resolve, before bloom: bloom should bleed from the settled
         // image, and running it first would feed last frame's glow back into the
         // history.
-        RHI::GpuImage* postSource = &m_Resolved;
         {
             Math::Mat4 unjitteredProjection = m_Frame.Projection;
             unjitteredProjection[2][0] -= m_Frame.ProjectionJitter.x;
@@ -2280,7 +2308,7 @@ void main() {
             taaInputs.InverseViewProjection = glm::inverse(unjitteredViewProjection);
             taaInputs.PreviousViewProjection = m_PreviousUnjitteredViewProjection;
             taaInputs.FrameIndex = m_Frame.FrameIndex;
-            m_TAA.Render(cmd, m_Resolved, taaInputs);
+            m_TAA.Render(cmd, *postSource, taaInputs);
             if (m_TAA.GetStats().Active) {
                 postSource = &m_TAA.GetOutputImage();
             }
@@ -2518,6 +2546,7 @@ void main() {
         VkDevice device = m_Context->GetDevice();
         vkDeviceWaitIdle(device);
 
+        m_SSR.Shutdown();
         m_TAA.Shutdown();
         m_Bloom.Shutdown();
         m_SSAO.Shutdown();
