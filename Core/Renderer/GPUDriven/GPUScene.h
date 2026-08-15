@@ -63,7 +63,21 @@ namespace Renderer {
     // One primitive of a mesh. A mesh with several primitives shades each with
     // its own material, which is what glTF files actually contain; drawing the
     // whole mesh with one material index applied the first one to everything.
+    // How many levels of detail a section keeps. Three covers the useful range:
+    // full, half, quarter. A fourth is mostly a bounding box.
+    constexpr uint32_t kMaxSectionLods = 3;
+
     struct GpuMeshSection {
+        // Level 0 is the source geometry; each further level is a simplified
+        // index buffer over the same vertices, clusterised on its own.
+        struct Lod {
+            uint32_t ClusterBase = 0;
+            uint32_t ClusterCount = 0;
+            uint32_t TriangleCount = 0;
+        };
+        Lod Lods[kMaxSectionLods];
+        uint32_t LodCount = 1;
+
         uint32_t ClusterBase = 0;
         uint32_t ClusterCount = 0;
         // The primitive's material *within its own file*. The global index is
@@ -115,6 +129,15 @@ namespace Renderer {
         uint32_t SkinnedVerticesCapacity = 0;
         uint32_t TransparentInstances = 0;
         uint32_t TransparentBatches = 0;
+        uint32_t LodInstances[kMaxSectionLods] = {};
+        // What the selector actually saw, so a level that looks wrong can be
+        // traced to the number it was chosen from.
+        float LodScale = 0.0f;
+        float MinProjectedPixels = 0.0f;
+        float MaxProjectedPixels = 0.0f;
+        uint32_t FrameTriangles = 0;
+        // What the same frame would have cost with every instance at level 0.
+        uint32_t FrameTrianglesAtLod0 = 0;
         uint64_t VertexBytesUsed = 0;
         uint64_t IndexBytesUsed = 0;
         uint64_t VertexBytesCapacity = 0;
@@ -135,6 +158,14 @@ namespace Renderer {
         // output. Taken out of MaxVertices, not added to it.
         uint32_t MaxSkinnedVertices = 256u * 1024u;
         uint32_t MaxSkinnedSourceVertices = 256u * 1024u;
+    };
+
+    // Screen coverage, in pixels of projected radius, at which each level takes
+    // over. An instance covering fewer pixels than a threshold drops to the next
+    // level down.
+    struct GpuLodSettings {
+        bool Enabled = true;
+        float Thresholds[kMaxSectionLods - 1] = {220.0f, 70.0f};
     };
 
     class GPUScene {
@@ -160,8 +191,15 @@ namespace Renderer {
         // The camera position orders blended instances back to front; without it
         // transparency composites in whatever order the draw list happened to
         // arrive in.
+        // `lodScale` converts a world radius at unit distance into projected
+        // pixels: projection[1][1] * renderHeight * 0.5. Zero disables selection
+        // and everything draws at level 0.
         uint32_t BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount,
-                            const Math::Vec3& cameraPosition = Math::Vec3(0.0f));
+                            const Math::Vec3& cameraPosition = Math::Vec3(0.0f),
+                            float lodScale = 0.0f);
+
+        GpuLodSettings& GetLodSettings() { return m_Lod; }
+        const GpuLodSettings& GetLodSettings() const { return m_Lod; }
 
         const std::vector<GpuMaterialBatch>& GetMaterialBatches() const { return m_MaterialBatches; }
         uint32_t GetFrameInstanceCount() const { return static_cast<uint32_t>(m_FrameInstances.size()); }
@@ -226,6 +264,7 @@ namespace Renderer {
         uint32_t m_SkinnedVertexCursor = 0;
         uint32_t m_SkinnedRegionStart = 0;
         std::vector<PendingSkin> m_PendingSkins;
+        GpuLodSettings m_Lod{};
 
         std::vector<GpuInstance> m_FrameInstances;
         std::vector<uint32_t> m_FrameInstanceOffsets;

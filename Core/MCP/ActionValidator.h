@@ -214,7 +214,15 @@ namespace MCP {
             // Validate position
             if (transform.contains("position")) {
                 auto& pos = transform["position"];
-                if (pos.is_object()) {
+                if (pos.is_array()) {
+                    auto& sanitized = result.SanitizedInput["position"];
+                    for (std::size_t i = 0; i < pos.size() && i < 3; ++i) {
+                        if (pos[i].is_number()) {
+                            sanitized[i] = ClampFloat(pos[i].get<float>(),
+                                -m_Limits.MaxPosition, m_Limits.MaxPosition, "position", result);
+                        }
+                    }
+                } else if (pos.is_object()) {
                     auto& sanitized = result.SanitizedInput["position"];
                     if (pos.contains("x")) {
                         sanitized["x"] = ClampFloat(pos.value("x", 0.0f), 

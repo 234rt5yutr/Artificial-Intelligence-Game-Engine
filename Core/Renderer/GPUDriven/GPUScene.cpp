@@ -2,6 +2,8 @@
 
 #include "Core/ECS/Systems/RenderSystem.h"
 #include "Core/Log.h"
+
+#include <meshoptimizer.h>
 #include "Core/Renderer/Material/MaterialGraph.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Renderer/Mesh.h"
@@ -353,30 +355,84 @@ namespace Renderer {
 
             GpuMeshSection section;
             section.MaterialSlot = build.MaterialSlot;
-            section.ClusterBase = static_cast<uint32_t>(mergedClusters.size());
-            section.ClusterCount = static_cast<uint32_t>(clusterSet.Clusters.size());
 
-            // The section keeps its own bounds, from the union of its cluster
-            // spheres. Using the whole mesh bounds would make every submesh of a
-            // large model survive culling as a unit.
             Math::Vec3 sectionMin(std::numeric_limits<float>::max());
             Math::Vec3 sectionMax(std::numeric_limits<float>::lowest());
-            const uint32_t indexBase = static_cast<uint32_t>(mergedIndices.size());
-            for (GpuCluster cluster : clusterSet.Clusters) {
-                const Math::Vec3 centre(cluster.CenterRadius);
-                const float radius = cluster.CenterRadius.w;
-                sectionMin = glm::min(sectionMin, centre - radius);
-                sectionMax = glm::max(sectionMax, centre + radius);
-                cluster.FirstIndex += indexBase;
-                mergedClusters.push_back(cluster);
+
+            // Level 0 is the geometry as authored; each further level is a
+            // simplified index buffer over the *same* vertices, so switching
+            // level costs nothing but a different cluster range - no second
+            // vertex copy, no re-upload.
+            auto appendLevel = [&](const MeshClusterSet& set, uint32_t level) {
+                GpuMeshSection::Lod lod;
+                lod.ClusterBase = static_cast<uint32_t>(mergedClusters.size());
+                lod.ClusterCount = static_cast<uint32_t>(set.Clusters.size());
+                lod.TriangleCount = static_cast<uint32_t>(set.ReorderedIndices.size() / 3);
+
+                const uint32_t indexBase = static_cast<uint32_t>(mergedIndices.size());
+                for (GpuCluster cluster : set.Clusters) {
+                    if (level == 0) {
+                        // Bounds come from level 0 only. A simplified level sits
+                        // inside the original, and letting it shrink the bounds
+                        // would make culling depend on which level was picked.
+                        const Math::Vec3 centre(cluster.CenterRadius);
+                        const float radius = cluster.CenterRadius.w;
+                        sectionMin = glm::min(sectionMin, centre - radius);
+                        sectionMax = glm::max(sectionMax, centre + radius);
+                    }
+                    cluster.FirstIndex += indexBase;
+                    mergedClusters.push_back(cluster);
+                }
+                mergedIndices.insert(mergedIndices.end(), set.ReorderedIndices.begin(),
+                                     set.ReorderedIndices.end());
+                section.Lods[level] = lod;
+                section.LodCount = level + 1;
+            };
+
+            appendLevel(clusterSet, 0);
+
+            // Half then a quarter of the triangles. meshopt_simplify preserves
+            // the vertex buffer and only rewrites indices, which is exactly what
+            // a shared arena wants.
+            std::vector<uint32_t> previousIndices = sectionIndices;
+            for (uint32_t level = 1; level < kMaxSectionLods; ++level) {
+                const std::size_t targetIndices = (previousIndices.size() / 2 / 3) * 3;
+                // Below this a level is not worth an arena slot: the simplifier
+                // has nothing left to remove that the cluster bounds do not
+                // already approximate.
+                if (targetIndices < 96) {
+                    break;
+                }
+
+                std::vector<uint32_t> simplified(previousIndices.size());
+                float resultError = 0.0f;
+                const std::size_t count = meshopt_simplify(
+                    simplified.data(), previousIndices.data(), previousIndices.size(),
+                    &mesh->vertices[0].position.x, mesh->vertices.size(), sizeof(Vertex),
+                    targetIndices, 0.05f, 0, &resultError);
+                // A simplifier that cannot hit the target returns roughly what it
+                // was given; another level of the same geometry is pure waste.
+                if (count < 3 || count > previousIndices.size() * 3 / 4) {
+                    break;
+                }
+                simplified.resize(count);
+
+                const MeshClusterSet simplifiedSet = BuildMeshClusters(
+                    mesh->vertices.data(), sizeof(Vertex), mesh->vertices.size(),
+                    simplified, m_Limits.MaxClusterTriangles);
+                if (simplifiedSet.Clusters.empty()) {
+                    break;
+                }
+                appendLevel(simplifiedSet, level);
+                previousIndices = std::move(simplified);
             }
+
+            section.ClusterBase = section.Lods[0].ClusterBase;
+            section.ClusterCount = section.Lods[0].ClusterCount;
             const Math::Vec3 sectionCentre = (sectionMin + sectionMax) * 0.5f;
             section.BoundsCenterRadius =
                 Math::Vec4(sectionCentre, glm::length(sectionMax - sectionCentre));
             sections.push_back(section);
-
-            mergedIndices.insert(mergedIndices.end(), clusterSet.ReorderedIndices.begin(),
-                                 clusterSet.ReorderedIndices.end());
             meshBounds = clusterSet.BoundsCenterRadius;
         }
 
@@ -433,6 +489,9 @@ namespace Renderer {
         record.BoundsCenterRadius = clusters.BoundsCenterRadius;
         for (auto& section : sections) {
             section.ClusterBase += m_ClusterCursor;
+            for (uint32_t level = 0; level < section.LodCount; ++level) {
+                section.Lods[level].ClusterBase += m_ClusterCursor;
+            }
         }
         record.Sections = std::move(sections);
         if (record.Sections.size() > 1) {
@@ -465,13 +524,16 @@ namespace Renderer {
     }
 
     uint32_t GPUScene::BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount,
-                                  const Math::Vec3& cameraPosition) {
+                                  const Math::Vec3& cameraPosition, float lodScale) {
         m_FrameInstances.clear();
         m_FrameInstanceOffsets.clear();
         m_MaterialBatches.clear();
         m_PendingSkins.clear();
         m_SkinnedVertexCursor = 0;
         m_FrameClusterSlots = 0;
+        m_Stats.LodScale = lodScale;
+        m_Stats.MinProjectedPixels = 0.0f;
+        m_Stats.MaxProjectedPixels = 0.0f;
 
         if (!m_Context || !commands || commandCount == 0) {
             return 0;
@@ -486,6 +548,7 @@ namespace Renderer {
             uint32_t SkinnedVertexOffset;   // 0 for static geometry
             bool Transparent = false;
             float ViewDistance = 0.0f;      // only meaningful when transparent
+            uint32_t Lod = 0;
         };
         std::vector<PendingInstance> pending;
         pending.reserve(commandCount);
@@ -538,8 +601,36 @@ namespace Renderer {
                 const Math::Vec3 worldCentre =
                     Math::Vec3(command.Transform *
                                Math::Vec4(Math::Vec3(section.BoundsCenterRadius), 1.0f));
+                // Scale enters through the transform, so the bounds radius has
+                // to be scaled with it or a giant object would pick the same
+                // level as a small one.
+                const float scale = std::sqrt(std::max({
+                    glm::length2(Math::Vec3(command.Transform[0])),
+                    glm::length2(Math::Vec3(command.Transform[1])),
+                    glm::length2(Math::Vec3(command.Transform[2]))}));
+                const float distance = glm::length(worldCentre - cameraPosition);
+                const float radius = section.BoundsCenterRadius.w * scale;
+
+                const float projectedPixels = radius * lodScale / std::max(distance, 1e-3f);
+                m_Stats.MinProjectedPixels = m_FrameInstances.empty() && pending.empty()
+                    ? projectedPixels
+                    : std::min(m_Stats.MinProjectedPixels, projectedPixels);
+                m_Stats.MaxProjectedPixels = std::max(m_Stats.MaxProjectedPixels, projectedPixels);
+
+                uint32_t lod = 0;
+                if (m_Lod.Enabled && lodScale > 0.0f && section.LodCount > 1) {
+                    // Projected radius in pixels. Everything past the near plane
+                    // shrinks with distance, so one divide picks the level.
+                    for (uint32_t level = 0; level + 1 < section.LodCount; ++level) {
+                        if (projectedPixels < m_Lod.Thresholds[level]) {
+                            lod = level + 1;
+                        }
+                    }
+                    lod = std::min(lod, section.LodCount - 1);
+                }
+
                 pending.push_back({&section, &command, materialIndex, skinnedOffset, transparent,
-                                   glm::length(worldCentre - cameraPosition)});
+                                   distance, lod});
             }
         }
 
@@ -562,8 +653,14 @@ namespace Renderer {
         m_FrameInstanceOffsets.reserve(pending.size() + 1);
 
         uint32_t slotCursor = 0;
+        uint32_t frameTriangles = 0;
+        uint32_t frameTrianglesAtLod0 = 0;
+        for (auto& count : m_Stats.LodInstances) {
+            count = 0;
+        }
         for (const auto& item : pending) {
-            if (slotCursor + item.Section->ClusterCount > m_Limits.MaxClusterSlots) {
+            const GpuMeshSection::Lod& lod = item.Section->Lods[item.Lod];
+            if (slotCursor + lod.ClusterCount > m_Limits.MaxClusterSlots) {
                 ENGINE_CORE_WARN("GPUScene cluster-slot limit ({}) reached; remaining draws are dropped this frame",
                                  m_Limits.MaxClusterSlots);
                 break;
@@ -573,8 +670,11 @@ namespace Renderer {
             instance.Transform = item.Command->Transform;
             instance.VertexOffset = item.SkinnedVertexOffset;
             instance.BoundsCenterRadius = item.Section->BoundsCenterRadius;
-            instance.ClusterBase = item.Section->ClusterBase;
-            instance.ClusterCount = item.Section->ClusterCount;
+            instance.ClusterBase = lod.ClusterBase;
+            instance.ClusterCount = lod.ClusterCount;
+            ++m_Stats.LodInstances[item.Lod];
+            frameTriangles += lod.TriangleCount;
+            frameTrianglesAtLod0 += item.Section->Lods[0].TriangleCount;
             instance.MaterialIndex = item.MaterialIndex;
             // A blended surface casting an opaque shadow is worse than it
             // casting none: the shadow pass has no alpha, so a window would
@@ -592,11 +692,11 @@ namespace Renderer {
                 m_MaterialBatches.push_back({instance.MaterialIndex, slotCursor, 0,
                                              item.Transparent});
             }
-            m_MaterialBatches.back().ClusterSlotCount += item.Section->ClusterCount;
+            m_MaterialBatches.back().ClusterSlotCount += lod.ClusterCount;
 
             m_FrameInstanceOffsets.push_back(slotCursor);
             m_FrameInstances.push_back(instance);
-            slotCursor += item.Section->ClusterCount;
+            slotCursor += lod.ClusterCount;
         }
         m_FrameInstanceOffsets.push_back(slotCursor);
         m_FrameClusterSlots = slotCursor;
@@ -615,6 +715,8 @@ namespace Renderer {
         m_Stats.FrameMaterialBatches = static_cast<uint32_t>(m_MaterialBatches.size());
         m_Stats.SkinnedInstances = static_cast<uint32_t>(m_PendingSkins.size());
         m_Stats.SkinnedVerticesUsed = m_SkinnedVertexCursor;
+        m_Stats.FrameTriangles = frameTriangles;
+        m_Stats.FrameTrianglesAtLod0 = frameTrianglesAtLod0;
         m_Stats.TransparentInstances = 0;
         m_Stats.TransparentBatches = 0;
         for (const auto& instance : m_FrameInstances) {

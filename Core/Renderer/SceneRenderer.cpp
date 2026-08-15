@@ -1829,8 +1829,13 @@ void main() {
         m_Stats.SkippedDraws = 0;
 
         if (m_GPUDrivenEnabled && m_GPUScene.IsInitialized()) {
+            // projection[1][1] is cot(fovY/2); times half the render height it
+            // turns a world radius at unit distance into pixels of screen
+            // coverage, which is what picks the level of detail.
+            const float lodScale = m_Frame.Projection[1][1] *
+                                   static_cast<float>(m_RenderHeight) * 0.5f;
             m_GPUScene.BeginFrame(m_Frame.DrawCommands.data(), m_Frame.DrawCommands.size(),
-                                  m_Frame.CameraPosition);
+                                  m_Frame.CameraPosition, std::abs(lodScale));
             // Shadow cascades cull against the same cluster slots the GPU scene
             // just published, so this has to follow it.
             m_Shadows.BeginFrame(m_Frame, m_GPUScene);

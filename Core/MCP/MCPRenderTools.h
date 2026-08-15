@@ -177,6 +177,16 @@ namespace MCP {
             gpuScene["skinnedVerticesCapacity"] = scene.SkinnedVerticesCapacity;
             gpuScene["transparentInstances"] = scene.TransparentInstances;
             gpuScene["transparentBatches"] = scene.TransparentBatches;
+            gpuScene["frameTriangles"] = scene.FrameTriangles;
+            gpuScene["frameTrianglesAtLod0"] = scene.FrameTrianglesAtLod0;
+            Json lodInstances = Json::array();
+            for (uint32_t i = 0; i < Renderer::kMaxSectionLods; ++i) {
+                lodInstances.push_back(scene.LodInstances[i]);
+            }
+            gpuScene["lodInstances"] = lodInstances;
+            gpuScene["lodScale"] = scene.LodScale;
+            gpuScene["minProjectedPixels"] = scene.MinProjectedPixels;
+            gpuScene["maxProjectedPixels"] = scene.MaxProjectedPixels;
             gpuScene["vertexBytesUsed"] = scene.VertexBytesUsed;
             gpuScene["vertexBytesCapacity"] = scene.VertexBytesCapacity;
             report["gpuScene"] = gpuScene;
@@ -328,6 +338,15 @@ namespace MCP {
                 "boolean", "Hierarchical-Z occlusion culling.");
             schema.Properties["coneCulling"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Backface cluster cone culling.");
+            schema.Properties["lod"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Pick a level of detail per instance from its projected screen size. "
+                           "Off, everything draws at full density however small it is.");
+            schema.Properties["lodThresholds"] = Json{
+                {"type", "array"},
+                {"description", "Projected radius in pixels at which each level takes over, "
+                                "highest first. Two entries for three levels."},
+                {"items", Json{{"type", "number"}}},
+                {"minItems", 2}, {"maxItems", 2}};
             schema.Properties["twoPhase"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Second culling pass against the HZB built from this frame's depth.");
             return schema;
@@ -342,6 +361,19 @@ namespace MCP {
             }
 
             auto& culler = renderer->GetCuller();
+            auto& lod = renderer->GetGPUScene().GetLodSettings();
+            if (arguments.contains("lod") && arguments["lod"].is_boolean()) {
+                lod.Enabled = arguments["lod"].get<bool>();
+            }
+            if (arguments.contains("lodThresholds") && arguments["lodThresholds"].is_array() &&
+                arguments["lodThresholds"].size() == 2) {
+                for (uint32_t i = 0; i < 2; ++i) {
+                    if (arguments["lodThresholds"][i].is_number()) {
+                        lod.Thresholds[i] = std::max(0.0f,
+                                                     arguments["lodThresholds"][i].get<float>());
+                    }
+                }
+            }
             if (arguments.contains("gpuDriven") && arguments["gpuDriven"].is_boolean()) {
                 renderer->SetGPUDrivenEnabled(arguments["gpuDriven"].get<bool>());
             }
@@ -357,6 +389,8 @@ namespace MCP {
 
             Json state;
             state["gpuDriven"] = renderer->IsGPUDrivenEnabled();
+            state["lod"] = lod.Enabled;
+            state["lodThresholds"] = Json::array({lod.Thresholds[0], lod.Thresholds[1]});
             state["occlusion"] = culler.IsOcclusionEnabled();
             state["coneCulling"] = culler.IsConeCullingEnabled();
             state["twoPhase"] = culler.IsTwoPhaseEnabled();

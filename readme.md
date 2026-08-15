@@ -131,6 +131,23 @@ its submeshes correctly instead of painting all of them with the first material.
 pins this down: it imports as one mesh, two sections, two instances, two
 indirect draws.
 
+**Level of detail** (`GPUScene`, via meshoptimizer). Every mesh drew at full
+density however small it was on screen. Each section now keeps up to three
+levels: level 0 as authored, then halvings produced by `meshopt_simplify`, which
+rewrites only indices and leaves the vertex buffer alone - exactly what a shared
+arena wants, since switching level costs a different cluster range and nothing
+else. Selection is per instance from projected radius in pixels
+(`projection[1][1] * renderHeight * 0.5 / distance`, scaled by the instance's own
+scale), and bounds always come from level 0, or culling would depend on which
+level was picked. Shadow views inherit the choice for free, because they cull the
+same cluster ranges. Measured on seven spheres spread from the camera to 95 units
+out: 2,368 triangles against 6,400 with selection off, and 1,600 when every
+instance is forced to the coarsest level.
+
+This is per-object LOD, not Nanite's per-cluster DAG: a single instance switches
+as a unit, so a large object crossing a threshold pops rather than refining the
+half of itself that is far away.
+
 **Rigged glTF import**. `LoadSkeletalGLTF` read joints, weights, inverse binds,
 and animation clips, and nothing could reach it: `LoadGLTF` was the only entry
 point anyone called and it dropped all of that on the floor, so a character

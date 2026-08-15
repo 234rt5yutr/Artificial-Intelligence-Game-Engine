@@ -399,7 +399,20 @@ namespace MCP {
         return {{"x", v.x}, {"y", v.y}, {"z", v.z}};
     }
 
+    // Accepts either {x,y,z} or [x,y,z]. The array form is what the asset and
+    // render tools have always used and what a caller writes by default, and it
+    // silently produced the origin here - so every entity spawned with an array
+    // position landed on top of every other one.
     inline Math::Vec3 DeserializeVec3(const Json& j, const Math::Vec3& defaultVal = Math::Vec3(0.0f)) {
+        if (j.is_array() && j.size() >= 3) {
+            return Math::Vec3(j[0].is_number() ? j[0].get<float>() : defaultVal.x,
+                              j[1].is_number() ? j[1].get<float>() : defaultVal.y,
+                              j[2].is_number() ? j[2].get<float>() : defaultVal.z);
+        }
+        if (j.is_number()) {
+            // A single number means uniform, which is what "scale": 2 should do.
+            return Math::Vec3(j.get<float>());
+        }
         if (!j.is_object()) return defaultVal;
         return Math::Vec3(
             j.value("x", defaultVal.x),
@@ -451,6 +464,10 @@ namespace MCP {
     }
 
     inline Math::Vec3 DeserializeEulerDegrees(const Json& j, const Math::Vec3& defaultDegrees = Math::Vec3(0.0f)) {
+        // Same array form as position, in pitch/yaw/roll order.
+        if (j.is_array() && j.size() >= 3) {
+            return glm::radians(DeserializeVec3(j, defaultDegrees));
+        }
         if (!j.is_object()) return glm::radians(defaultDegrees);
         return Math::Vec3(
             glm::radians(j.value("pitch", defaultDegrees.x)),

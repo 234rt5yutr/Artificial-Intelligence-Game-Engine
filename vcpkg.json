@@ -26,6 +26,7 @@
       "features": ["vulkan-binding", "sdl3-binding", "docking-experimental"]
     },
     "stb",
+    "meshoptimizer",
     "recastnavigation"
   ]
 }

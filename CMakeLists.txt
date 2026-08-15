@@ -46,6 +46,7 @@ find_package(Lua REQUIRED)
 find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
 find_package(imgui CONFIG REQUIRED)
 find_package(Stb REQUIRED)
+find_package(meshoptimizer CONFIG REQUIRED)
 find_package(recastnavigation CONFIG REQUIRED)
 
 # Core Engine Library
@@ -538,7 +539,7 @@ add_library(EngineCore
     Core/Editor/Sequencer/TimelineAsset.h
 )
 
-target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui RecastNavigation::Recast RecastNavigation::Detour RecastNavigation::DetourCrowd RecastNavigation::DetourTileCache)
+target_link_libraries(EngineCore PUBLIC spdlog::spdlog glm::glm Tracy::TracyClient SDL3::SDL3 Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator unofficial::shaderc::shaderc EnTT::EnTT Jolt::Jolt GameNetworkingSockets::GameNetworkingSockets httplib::httplib OpenSSL::SSL OpenSSL::Crypto nlohmann_json::nlohmann_json ${LUA_LIBRARIES} imgui::imgui RecastNavigation::Recast RecastNavigation::Detour RecastNavigation::DetourCrowd RecastNavigation::DetourTileCache meshoptimizer::meshoptimizer)
 
 # Vulkan depth range. Must be global and PUBLIC: a translation unit that sees a
 # different value builds a differently-shaped glm::mat4 for the same projection,
@@ -587,6 +588,12 @@ add_executable(EngineCoreRenderPipelineTests
 )
 target_link_libraries(EngineCoreRenderPipelineTests PRIVATE EngineCore)
 add_test(NAME EngineCoreRenderPipelineTests COMMAND EngineCoreRenderPipelineTests)
+
+add_executable(EngineCoreSceneSerializationTests
+    Core/Tests/MCP/SceneSerializationTests.cpp
+)
+target_link_libraries(EngineCoreSceneSerializationTests PRIVATE EngineCore)
+add_test(NAME EngineCoreSceneSerializationTests COMMAND EngineCoreSceneSerializationTests)
 
 add_executable(EngineCoreTraceExportTests
     Core/Tests/Diagnostics/TraceExportTests.cpp
