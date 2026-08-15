@@ -183,6 +183,9 @@ namespace Renderer {
             Math::Vec4 CameraPosition;
             Math::Vec4 Resolution;
             Math::Vec4 AmbientColor;
+            // Sky radiance for the environment term, taken from the GI settings
+            // so there is one sky in the frame rather than two that disagree.
+            Math::Vec4 SkyColor;
             Math::Vec4 DirectionalDirection[4];
             Math::Vec4 DirectionalColor[4];
             Math::UVec4 LightCounts;

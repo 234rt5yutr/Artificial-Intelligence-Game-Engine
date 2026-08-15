@@ -228,6 +228,39 @@ void TestBackfaceConeCulling() {
     CHECK(!ClusterIsBackfacing(axis, cutoff, Vec3(0.0f, 0.0f, 10.0f), 1.0f, Vec3(0.0f)));
 }
 
+void TestEnvironmentBRDFApproximation() {
+    const Vec3 goldF0(1.00f, 0.78f, 0.34f);
+    const Vec3 dielectricF0(0.04f, 0.04f, 0.04f);
+    const Vec3 sky(0.2f, 0.5f, 0.9f);
+    const Vec3 ground(0.1f, 0.08f, 0.05f);
+
+    // 1. EnvBRDFApprox at normal incidence (NdotV = 1) for a mirror (roughness = 0).
+    // Result should closely preserve F0.
+    const Vec3 mirrorGold = EnvBRDFApprox(goldF0, 0.0f, 1.0f);
+    CHECK(std::abs(mirrorGold.r - goldF0.r) < 0.05f);
+    CHECK(std::abs(mirrorGold.g - goldF0.g) < 0.05f);
+    CHECK(std::abs(mirrorGold.b - goldF0.b) < 0.05f);
+
+    // 2. Glancing angle Fresnel boost (NdotV ~ 0). Dielectrics should approach 1.0 specular reflection.
+    const Vec3 glancingDielectric = EnvBRDFApprox(dielectricF0, 0.0f, 0.01f);
+    CHECK(glancingDielectric.r > dielectricF0.r);
+    CHECK(glancingDielectric.r > 0.8f);
+
+    // 3. Environment radiance transitions smoothly from ground to sky.
+    const Vec3 radUp = EnvironmentRadiance(Vec3(0.0f, 1.0f, 0.0f), sky, ground);
+    const Vec3 radDown = EnvironmentRadiance(Vec3(0.0f, -1.0f, 0.0f), sky, ground);
+    const Vec3 radHorizon = EnvironmentRadiance(Vec3(1.0f, 0.0f, 0.0f), sky, ground);
+
+    CHECK(glm::distance(radUp, sky) < 1e-4f);
+    CHECK(glm::distance(radDown, ground) < 1e-4f);
+    CHECK(radHorizon.r >= ground.r && radHorizon.r <= sky.r);
+
+    // 4. Full specular computation.
+    const Vec3 spec = EnvironmentSpecular(Vec3(0.0f, 1.0f, 0.0f), Vec3(0.0f, 1.0f, 0.0f),
+                                          goldF0, 0.1f, sky, ground);
+    CHECK(spec.r > 0.0f && spec.g > 0.0f && spec.b > 0.0f);
+}
+
 } // namespace
 
 int main() {
@@ -240,6 +273,7 @@ int main() {
     TestCascadeSplitsRejectBadRanges();
     TestZSlicesCoverTheDepthRange();
     TestBackfaceConeCulling();
+    TestEnvironmentBRDFApproximation();
 
     std::printf("RenderMathTests: all checks passed\n");
     return 0;

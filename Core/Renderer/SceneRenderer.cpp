@@ -6,6 +6,7 @@
 #include "Core/RHI/ShaderCompiler.h"
 #include "Core/RHI/Vulkan/VulkanBuffer.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
+#include "Core/Renderer/EnvironmentBRDF.h"
 #include "Core/Renderer/Material/MaterialGraph.h"
 #include "Core/Renderer/Mesh.h"
 
@@ -66,6 +67,7 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     vec4 CameraPosition;
     vec4 Resolution;
     vec4 AmbientColor;
+    vec4 SkyColor;
     vec4 DirectionalDirection[4];
     vec4 DirectionalColor[4];
     uvec4 LightCounts;
@@ -146,6 +148,8 @@ layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outNormal;
 
 %SCENE_UNIFORMS%
+
+%ENVIRONMENT_BRDF%
 
 layout(set = 1, binding = 0) uniform sampler2D uMaterialTextures[8];
 
@@ -436,7 +440,14 @@ void main() {
 
     // A small constant ambient keeps unlit scenes readable. Indirect light is
     // added in the resolve pass from the GI buffer, not here.
-    vec3 ambient = uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w * surf.BaseColor;
+    // Metals have no diffuse lobe at all. Applying ambient as pure diffuse gave
+    // them a colour they should not have and denied them the one they should:
+    // what their mirror lobe picks up from the environment.
+    vec3 ambient = uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w *
+                   surf.BaseColor * (1.0 - surf.Metallic);
+    ambient += EnvironmentSpecular(n, v, f0, surf.Roughness,
+                                   uMaterial.SkyColor.rgb * uMaterial.SkyColor.w,
+                                   uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w);
 
     outColor = vec4(direct + ambient + surf.Emissive, surf.Opacity);
     outAlbedo = vec4(surf.BaseColor, surf.Roughness);
@@ -1370,6 +1381,8 @@ void main() {
             const std::string body = material->Compiled.Succeeded ? material->Compiled.FragmentBody
                                                                   : std::string();
             std::string fragmentSource = Substitute(kGeometryFragmentShader, "%SCENE_UNIFORMS%", sceneUniforms);
+            fragmentSource = Substitute(fragmentSource, "%ENVIRONMENT_BRDF%",
+                                        kEnvironmentSpecularGLSL);
             fragmentSource = Substitute(fragmentSource, "%MATERIAL_BODY%", body);
             // Masked materials cut the fragment out entirely rather than
             // blending, which is what lets foliage keep depth writes and stay in
@@ -1652,6 +1665,8 @@ void main() {
                                          m_RenderWidth > 0 ? 1.0f / m_RenderWidth : 0.0f,
                                          m_RenderHeight > 0 ? 1.0f / m_RenderHeight : 0.0f);
         uniforms.AmbientColor = Math::Vec4(0.05f, 0.06f, 0.08f, 1.0f);
+        const auto& giSettings = m_GI.GetSettings();
+        uniforms.SkyColor = Math::Vec4(giSettings.SkyColor, giSettings.SkyIntensity);
         uniforms.TimeSeconds = frame.TimeSeconds;
 
         const uint32_t directionalCount =

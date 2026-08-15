@@ -116,5 +116,29 @@ namespace Renderer {
         return glm::dot(toCluster / distance, coneAxis) >= coneCutoff;
     }
 
+    // Karis' analytic fit to the split-sum environment BRDF for C++ callers.
+    inline Math::Vec3 EnvBRDFApprox(const Math::Vec3& f0, float roughness, float ndotv) {
+        const Math::Vec4 c0(-1.0f, -0.0275f, -0.572f, 0.022f);
+        const Math::Vec4 c1(1.0f, 0.0425f, 1.04f, -0.04f);
+        const Math::Vec4 r = roughness * c0 + c1;
+        const float a004 = std::min(r.x * r.x, std::exp2(-9.28f * ndotv)) * r.x + r.y;
+        const Math::Vec2 ab = Math::Vec2(-1.04f, 1.04f) * a004 + Math::Vec2(r.z, r.w);
+        return f0 * ab.x + Math::Vec3(ab.y);
+    }
+
+    // Two-color environment radiance: sky above, ground below.
+    inline Math::Vec3 EnvironmentRadiance(const Math::Vec3& direction, const Math::Vec3& skyColor, const Math::Vec3& groundColor) {
+        const float up = std::clamp(direction.y * 0.5f + 0.5f, 0.0f, 1.0f);
+        return glm::mix(groundColor, skyColor, up * up);
+    }
+
+    inline Math::Vec3 EnvironmentSpecular(const Math::Vec3& normal, const Math::Vec3& viewDir,
+                                          const Math::Vec3& f0, float roughness,
+                                          const Math::Vec3& skyColor, const Math::Vec3& groundColor) {
+        const Math::Vec3 reflection = glm::reflect(-viewDir, normal);
+        const float ndotv = std::clamp(glm::dot(normal, viewDir), 0.0f, 1.0f);
+        return EnvironmentRadiance(reflection, skyColor, groundColor) * EnvBRDFApprox(f0, roughness, ndotv);
+    }
+
 } // namespace Renderer
 } // namespace Core

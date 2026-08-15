@@ -234,6 +234,7 @@ add_library(EngineCore
     Core/RHI/Vulkan/VulkanGpuResources.h
     Core/RHI/Vulkan/VulkanGpuResources.cpp
     Core/Renderer/RenderMath.h
+    Core/Renderer/EnvironmentBRDF.h
     Core/Renderer/SceneRenderer.h
     Core/Renderer/SceneRenderer.cpp
     Core/Renderer/RenderThread.h
