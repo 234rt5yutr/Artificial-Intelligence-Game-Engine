@@ -358,6 +358,7 @@ void main() {
 
 %MATERIAL_BODY%
 
+%ALPHA_TEST%
     vec3 n = normalize(inWorldNormal);
     if (surf.HasTangentNormal) {
         vec3 t = normalize(inTangent.xyz - n * dot(n, inTangent.xyz));
@@ -1302,6 +1303,25 @@ void main() {
     // Material pipelines
     // ========================================================================
 
+    namespace {
+        // Everything the graphics pipeline is built from. Two materials with the
+        // same graph but different blending are different pipelines.
+        uint64_t MaterialStateHash(const MaterialInstance& material) {
+            uint64_t hash = material.Compiled.Hash;
+            auto mix = [&hash](uint64_t value) {
+                hash ^= value + 0x9e3779b97f4a7c15ull + (hash << 6) + (hash >> 2);
+            };
+            mix(static_cast<uint64_t>(material.AlphaMode));
+            mix(material.DoubleSided ? 1ull : 0ull);
+            // The cutoff is baked into the shader as a literal, so a change to it
+            // is a change to the SPIR-V.
+            uint32_t cutoffBits = 0;
+            std::memcpy(&cutoffBits, &material.AlphaCutoff, sizeof(cutoffBits));
+            mix(cutoffBits);
+            return hash;
+        }
+    } // namespace
+
     void SceneRenderer::EnsureMaterialPipelines() {
         auto& library = MaterialLibrary::Get();
         library.CompileDirty();
@@ -1328,11 +1348,12 @@ void main() {
                 continue;
             }
 
+            const uint64_t stateHash = MaterialStateHash(*material);
             auto existing = m_MaterialPipelines.find(index);
             if (existing != m_MaterialPipelines.end() &&
-                existing->second.GraphHash == material->Compiled.Hash &&
+                existing->second.StateHash == stateHash &&
                 existing->second.Valid) {
-                continue; // unchanged graph, keep the pipeline
+                continue; // nothing the pipeline depends on changed
             }
             if (existing != m_MaterialPipelines.end() && existing->second.Pipeline != VK_NULL_HANDLE) {
                 vkDestroyPipeline(device, existing->second.Pipeline, nullptr);
@@ -1346,6 +1367,16 @@ void main() {
                                                                   : std::string();
             std::string fragmentSource = Substitute(kGeometryFragmentShader, "%SCENE_UNIFORMS%", sceneUniforms);
             fragmentSource = Substitute(fragmentSource, "%MATERIAL_BODY%", body);
+            // Masked materials cut the fragment out entirely rather than
+            // blending, which is what lets foliage keep depth writes and stay in
+            // the ordinary pass. Only they need the test: a blended material
+            // wants its low-alpha pixels, and an opaque one has none.
+            std::string alphaTest;
+            if (material->AlphaMode == MaterialAlphaMode::Masked) {
+                alphaTest = "    if (surf.Opacity < " + std::to_string(material->AlphaCutoff) +
+                            ") { discard; }";
+            }
+            fragmentSource = Substitute(fragmentSource, "%ALPHA_TEST%", alphaTest);
 
             RHI::ShaderCompileRequest request{};
             request.Source = fragmentSource;
@@ -1358,7 +1389,7 @@ void main() {
                 // Keep whatever texture set this material already had, so a
                 // failed recompile does not also lose its bindings.
                 MaterialPipeline failed{};
-                failed.GraphHash = material->Compiled.Hash;
+                failed.StateHash = stateHash;
                 if (existing != m_MaterialPipelines.end()) {
                     failed.TextureSet = existing->second.TextureSet;
                 }
@@ -1415,16 +1446,36 @@ void main() {
             multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
             multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+            const bool blended = material->AlphaMode == MaterialAlphaMode::Blend;
+
             VkPipelineDepthStencilStateCreateInfo depthStencil{};
             depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
             depthStencil.depthTestEnable = VK_TRUE;
-            depthStencil.depthWriteEnable = VK_TRUE;
+            // A blended surface still tests depth so the wall behind it hides
+            // it, but writing depth would let it occlude whatever is drawn
+            // after, including other transparency.
+            depthStencil.depthWriteEnable = blended ? VK_FALSE : VK_TRUE;
             depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 
             VkPipelineColorBlendAttachmentState blendAttachments[3]{};
             for (auto& attachment : blendAttachments) {
                 attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+            }
+            if (blended) {
+                blendAttachments[0].blendEnable = VK_TRUE;
+                blendAttachments[0].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+                blendAttachments[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                blendAttachments[0].colorBlendOp = VK_BLEND_OP_ADD;
+                blendAttachments[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                blendAttachments[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                blendAttachments[0].alphaBlendOp = VK_BLEND_OP_ADD;
+                // Albedo and normal keep whatever the opaque surface behind
+                // wrote. The resolve modulates indirect light by those, and a
+                // half-transparent pane overwriting them would make the wall
+                // behind it take the glass's bounce light.
+                blendAttachments[1].colorWriteMask = 0;
+                blendAttachments[2].colorWriteMask = 0;
             }
 
             VkPipelineColorBlendStateCreateInfo colorBlend{};
@@ -1455,7 +1506,7 @@ void main() {
             pipelineInfo.subpass = 0;
 
             MaterialPipeline entry{};
-            entry.GraphHash = material->Compiled.Hash;
+            entry.StateHash = stateHash;
             // Carry the existing set across a graph edit: the descriptor pool
             // has no free, so re-allocating on every recompile would exhaust it.
             if (existing != m_MaterialPipelines.end()) {
@@ -1774,7 +1825,8 @@ void main() {
         m_Stats.SkippedDraws = 0;
 
         if (m_GPUDrivenEnabled && m_GPUScene.IsInitialized()) {
-            m_GPUScene.BeginFrame(m_Frame.DrawCommands.data(), m_Frame.DrawCommands.size());
+            m_GPUScene.BeginFrame(m_Frame.DrawCommands.data(), m_Frame.DrawCommands.size(),
+                                  m_Frame.CameraPosition);
             // Shadow cascades cull against the same cluster slots the GPU scene
             // just published, so this has to follow it.
             m_Shadows.BeginFrame(m_Frame, m_GPUScene);
@@ -1932,6 +1984,12 @@ void main() {
             for (const auto& batch : m_GPUScene.GetMaterialBatches()) {
                 VkPipeline pipeline = GetPipelineForMaterial(batch.MaterialIndex);
                 if (pipeline == VK_NULL_HANDLE || batch.ClusterSlotCount == 0) {
+                    continue;
+                }
+                // Blended geometry draws exactly once, in the early phase. The
+                // late phase redraws only what the early HZB rejected, and
+                // blending a surface twice doubles it.
+                if (batch.Transparent && latePhase) {
                     continue;
                 }
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);

@@ -149,6 +149,27 @@ namespace Renderer {
         uint32_t m_NextNodeId = 1;
     };
 
+    // How a material's opacity is meant to be read. The engine drew everything
+    // as if it were Opaque, so a leaf texture rendered as a rectangle and glass
+    // as a wall.
+    enum class MaterialAlphaMode : uint8_t {
+        Opaque = 0,
+        // Fully in or fully out per pixel. No sorting needed, so these stay in
+        // the ordinary depth-writing pass.
+        Masked,
+        // Blended, so they must draw after everything they show through and
+        // must not write depth.
+        Blend,
+    };
+
+    inline const char* MaterialAlphaModeName(MaterialAlphaMode mode) {
+        switch (mode) {
+            case MaterialAlphaMode::Masked: return "masked";
+            case MaterialAlphaMode::Blend:  return "blend";
+            default:                        return "opaque";
+        }
+    }
+
     // Runtime material: a graph plus its last compile result and the scalar
     // parameters the fixed fallback path uses.
     struct MaterialInstance {
@@ -157,6 +178,8 @@ namespace Renderer {
         MaterialCompileResult Compiled;
         MaterialFallback Fallback;
         bool DoubleSided = false;
+        MaterialAlphaMode AlphaMode = MaterialAlphaMode::Opaque;
+        float AlphaCutoff = 0.5f;
         bool Dirty = true;
     };
 

@@ -192,6 +192,9 @@ namespace Renderer {
         std::string NormalTexture;
         std::string EmissiveTexture;
         bool DoubleSided = false;
+        // "OPAQUE", "MASK", or "BLEND", straight from the file.
+        std::string AlphaMode = "OPAQUE";
+        float AlphaCutoff = 0.5f;
     };
 
     // One image referenced by the file. Either a path on disk, or the encoded

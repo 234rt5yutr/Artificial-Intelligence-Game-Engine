@@ -156,6 +156,12 @@ namespace {
                             ? meshStem + ":" + material.name
                             : meshStem + ":material" + std::to_string(i);
             desc.DoubleSided = material.double_sided != 0;
+            desc.AlphaCutoff = material.alpha_cutoff;
+            switch (material.alpha_mode) {
+                case cgltf_alpha_mode_mask:  desc.AlphaMode = "MASK"; break;
+                case cgltf_alpha_mode_blend: desc.AlphaMode = "BLEND"; break;
+                default:                     desc.AlphaMode = "OPAQUE"; break;
+            }
             desc.EmissiveFactor = Math::Vec3(material.emissive_factor[0],
                                              material.emissive_factor[1],
                                              material.emissive_factor[2]);

@@ -155,7 +155,12 @@ void main() {
         }
     }
 
-    if (pc.flags.x > 0.5) {
+    // Bit 1 marks a blended instance. It writes no depth, so it can occlude
+    // nothing, and it is drawn only in the early phase - testing it against the
+    // HZB would let it vanish behind geometry the depth test would have sorted
+    // out anyway.
+    bool blended = (inst.flags & 2u) != 0u;
+    if (pc.flags.x > 0.5 && !blended) {
         vec3 boundsMin = worldCenter - vec3(radius);
         vec3 boundsMax = worldCenter + vec3(radius);
         vec2 uvMin = vec2(1e9);

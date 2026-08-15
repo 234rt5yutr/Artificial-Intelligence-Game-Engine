@@ -97,6 +97,9 @@ namespace Renderer {
         uint32_t MaterialIndex = 0;
         uint32_t FirstClusterSlot = 0;
         uint32_t ClusterSlotCount = 0;
+        // Blended batches come last and are sorted back to front, so the caller
+        // can draw them after everything they show through.
+        bool Transparent = false;
     };
 
     struct GpuSceneStats {
@@ -110,6 +113,8 @@ namespace Renderer {
         uint32_t SkinnedInstances = 0;
         uint32_t SkinnedVerticesUsed = 0;
         uint32_t SkinnedVerticesCapacity = 0;
+        uint32_t TransparentInstances = 0;
+        uint32_t TransparentBatches = 0;
         uint64_t VertexBytesUsed = 0;
         uint64_t IndexBytesUsed = 0;
         uint64_t VertexBytesCapacity = 0;
@@ -152,7 +157,11 @@ namespace Renderer {
         // Rebuilds the per-frame instance list from the draw commands. Sorts by
         // material so each material becomes one indirect draw. Returns the total
         // number of cluster slots the cull pass must dispatch over.
-        uint32_t BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount);
+        // The camera position orders blended instances back to front; without it
+        // transparency composites in whatever order the draw list happened to
+        // arrive in.
+        uint32_t BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount,
+                            const Math::Vec3& cameraPosition = Math::Vec3(0.0f));
 
         const std::vector<GpuMaterialBatch>& GetMaterialBatches() const { return m_MaterialBatches; }
         uint32_t GetFrameInstanceCount() const { return static_cast<uint32_t>(m_FrameInstances.size()); }

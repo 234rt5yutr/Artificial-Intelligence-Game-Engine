@@ -131,6 +131,30 @@ its submeshes correctly instead of painting all of them with the first material.
 pins this down: it imports as one mesh, two sections, two instances, two
 indirect draws.
 
+**Alpha modes**. The engine drew every surface as if it were opaque, so a leaf
+texture rendered as a rectangle and glass as a wall. Materials now carry glTF's
+three modes. *Masked* bakes a `discard` below its cutoff into the material's own
+shader, which costs nothing and needs no sorting, so foliage stays in the
+ordinary depth-writing pass. *Blend* is a pipeline variant: blending on, depth
+writes off, and colour writes disabled on the albedo and normal targets so the
+surface behind keeps its own indirect lighting. Blended instances sort to the end
+of the frame back to front, never merge into a neighbouring batch (merging would
+undo the sort), skip the HZB occlusion test since they write no depth, draw only
+in the early phase because the late phase would blend them twice, and cast no
+shadow - the shadow pass has no alpha, so a window would throw the silhouette of
+a wall.
+
+Verified by capture: with a sphere at opacity 0.5, every one of the 179,253
+pixels it covers lands between the fully opaque render and the background.
+Masked, an opacity of 0.35 gives 179,281 lit pixels at cutoff 0.2 and exactly 0
+at cutoff 0.9. `assets/meshes/alpha_modes.gltf` carries one primitive per mode
+and imports as opaque, masked with its 0.35 cutoff, and blend.
+
+Finding this took fixing a second bug: the material pipeline cache was keyed on
+the graph hash alone, so alpha mode, its cutoff, and double-sidedness could all
+change without the pipeline ever being rebuilt. Double-sidedness had been
+silently broken the same way since it was added.
+
 **Temporal antialiasing** (`Core/Renderer/PostProcess/ComputeTAA.*`). The frame
 was already being jittered every frame for the upscaler and nothing resolved it:
 each frame sampled a different sub-pixel offset and went straight to the screen,
@@ -343,6 +367,9 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Animation blending fills local poses only. Global poses and skinning matrices
   are resolved in `RenderSystem` at draw-collection time, which is after
   `AnimatorSystem` and `IKSystem` have had their say.
+- Blended surfaces sort per instance, not per triangle. Two panes intersecting
+  each other composite in whichever order their centres fall, which is the
+  approximation every engine makes until it needs order-independent transparency.
 - TAA reprojects from depth alone. There is no velocity target, so a moving
   object leans entirely on the neighbourhood clamp: correct for static geometry,
   slightly soft on fast movers. The upgrade is a velocity attachment on the scene

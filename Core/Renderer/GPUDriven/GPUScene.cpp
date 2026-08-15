@@ -2,6 +2,7 @@
 
 #include "Core/ECS/Systems/RenderSystem.h"
 #include "Core/Log.h"
+#include "Core/Renderer/Material/MaterialGraph.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
 #include "Core/Renderer/Mesh.h"
 
@@ -463,7 +464,8 @@ namespace Renderer {
         }
     }
 
-    uint32_t GPUScene::BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount) {
+    uint32_t GPUScene::BeginFrame(const ECS::DrawCommand* commands, std::size_t commandCount,
+                                  const Math::Vec3& cameraPosition) {
         m_FrameInstances.clear();
         m_FrameInstanceOffsets.clear();
         m_MaterialBatches.clear();
@@ -482,6 +484,8 @@ namespace Renderer {
             const ECS::DrawCommand* Command;
             uint32_t MaterialIndex;
             uint32_t SkinnedVertexOffset;   // 0 for static geometry
+            bool Transparent = false;
+            float ViewDistance = 0.0f;      // only meaningful when transparent
         };
         std::vector<PendingInstance> pending;
         pending.reserve(commandCount);
@@ -523,13 +527,34 @@ namespace Renderer {
                     instanceLimitHit = true;
                     break;
                 }
-                pending.push_back({&section, &command,
-                                   command.MaterialIndex + section.MaterialSlot, skinnedOffset});
+                const uint32_t materialIndex = command.MaterialIndex + section.MaterialSlot;
+                const MaterialInstance* material =
+                    MaterialLibrary::Get().GetMaterial(materialIndex);
+                const bool transparent =
+                    material && material->AlphaMode == MaterialAlphaMode::Blend;
+
+                // Bounds are section-local, so the sort key is the world-space
+                // distance to the section's own centre, not the object origin.
+                const Math::Vec3 worldCentre =
+                    Math::Vec3(command.Transform *
+                               Math::Vec4(Math::Vec3(section.BoundsCenterRadius), 1.0f));
+                pending.push_back({&section, &command, materialIndex, skinnedOffset, transparent,
+                                   glm::length(worldCentre - cameraPosition)});
             }
         }
 
+        // Opaque first, grouped by material so each becomes one indirect draw.
+        // Blended instances follow, back to front, because they composite in
+        // draw order and batching them by material would put the near pane
+        // under the far one.
         std::stable_sort(pending.begin(), pending.end(),
                          [](const PendingInstance& lhs, const PendingInstance& rhs) {
+                             if (lhs.Transparent != rhs.Transparent) {
+                                 return !lhs.Transparent;
+                             }
+                             if (lhs.Transparent) {
+                                 return lhs.ViewDistance > rhs.ViewDistance;
+                             }
                              return lhs.MaterialIndex < rhs.MaterialIndex;
                          });
 
@@ -551,11 +576,21 @@ namespace Renderer {
             instance.ClusterBase = item.Section->ClusterBase;
             instance.ClusterCount = item.Section->ClusterCount;
             instance.MaterialIndex = item.MaterialIndex;
-            instance.Flags = item.Command->CastShadows ? 1u : 0u;
+            // A blended surface casting an opaque shadow is worse than it
+            // casting none: the shadow pass has no alpha, so a window would
+            // throw the silhouette of a wall.
+            instance.Flags = (item.Command->CastShadows && !item.Transparent) ? 1u : 0u;
+            if (item.Transparent) {
+                instance.Flags |= 2u;
+            }
 
-            if (m_MaterialBatches.empty() ||
+            // A blended batch never merges with the one before it: merging would
+            // reorder the draws that its back-to-front sort just established.
+            if (m_MaterialBatches.empty() || item.Transparent ||
+                m_MaterialBatches.back().Transparent ||
                 m_MaterialBatches.back().MaterialIndex != instance.MaterialIndex) {
-                m_MaterialBatches.push_back({instance.MaterialIndex, slotCursor, 0});
+                m_MaterialBatches.push_back({instance.MaterialIndex, slotCursor, 0,
+                                             item.Transparent});
             }
             m_MaterialBatches.back().ClusterSlotCount += item.Section->ClusterCount;
 
@@ -580,6 +615,18 @@ namespace Renderer {
         m_Stats.FrameMaterialBatches = static_cast<uint32_t>(m_MaterialBatches.size());
         m_Stats.SkinnedInstances = static_cast<uint32_t>(m_PendingSkins.size());
         m_Stats.SkinnedVerticesUsed = m_SkinnedVertexCursor;
+        m_Stats.TransparentInstances = 0;
+        m_Stats.TransparentBatches = 0;
+        for (const auto& instance : m_FrameInstances) {
+            if ((instance.Flags & 2u) != 0u) {
+                ++m_Stats.TransparentInstances;
+            }
+        }
+        for (const auto& batch : m_MaterialBatches) {
+            if (batch.Transparent) {
+                ++m_Stats.TransparentBatches;
+            }
+        }
         return m_FrameClusterSlots;
     }
 

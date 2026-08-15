@@ -169,6 +169,8 @@ namespace MCP {
             gpuScene["skinnedInstances"] = scene.SkinnedInstances;
             gpuScene["skinnedVerticesUsed"] = scene.SkinnedVerticesUsed;
             gpuScene["skinnedVerticesCapacity"] = scene.SkinnedVerticesCapacity;
+            gpuScene["transparentInstances"] = scene.TransparentInstances;
+            gpuScene["transparentBatches"] = scene.TransparentBatches;
             gpuScene["vertexBytesUsed"] = scene.VertexBytesUsed;
             gpuScene["vertexBytesCapacity"] = scene.VertexBytesCapacity;
             report["gpuScene"] = gpuScene;
@@ -924,6 +926,8 @@ namespace MCP {
                 entry["linkCount"] = material->Graph.GetLinks().size();
                 entry["compiled"] = material->Compiled.Succeeded;
                 entry["doubleSided"] = material->DoubleSided;
+                entry["alphaMode"] = Renderer::MaterialAlphaModeName(material->AlphaMode);
+                entry["alphaCutoff"] = material->AlphaCutoff;
                 if (!material->Compiled.Succeeded) {
                     entry["error"] = material->Compiled.Error;
                 }
@@ -972,6 +976,16 @@ namespace MCP {
                 {"description", "The graph document. Accepts an object or a JSON string."}};
             schema.Properties["doubleSided"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Disable backface culling for this material.");
+            schema.Properties["alphaMode"] = Json{
+                {"type", "string"},
+                {"enum", Json::array({"opaque", "masked", "blend"})},
+                {"description",
+                 "How the surface opacity is read. 'masked' discards below the cutoff and keeps "
+                 "depth writes, so it needs no sorting. 'blend' draws after all opaque geometry, "
+                 "back to front, writes no depth, and casts no shadow - the shadow pass has no "
+                 "alpha, so a blended caster would throw a solid silhouette."}};
+            schema.Properties["alphaCutoff"] = RenderToolsDetail::NumberProperty(
+                "Opacity below which a masked material discards the fragment.", 0.0, 1.0);
             schema.Required = {"name", "graph"};
             return schema;
         }
@@ -1010,12 +1024,30 @@ namespace MCP {
             if (arguments.contains("doubleSided") && arguments["doubleSided"].is_boolean()) {
                 material->DoubleSided = arguments["doubleSided"].get<bool>();
             }
+            if (arguments.contains("alphaMode") && arguments["alphaMode"].is_string()) {
+                const std::string mode = arguments["alphaMode"].get<std::string>();
+                if (mode == "masked") {
+                    material->AlphaMode = Renderer::MaterialAlphaMode::Masked;
+                } else if (mode == "blend") {
+                    material->AlphaMode = Renderer::MaterialAlphaMode::Blend;
+                } else if (mode == "opaque") {
+                    material->AlphaMode = Renderer::MaterialAlphaMode::Opaque;
+                } else {
+                    return ToolResult::Error("alphaMode must be opaque, masked, or blend");
+                }
+            }
+            if (arguments.contains("alphaCutoff") && arguments["alphaCutoff"].is_number()) {
+                material->AlphaCutoff =
+                    std::clamp(arguments["alphaCutoff"].get<float>(), 0.0f, 1.0f);
+            }
             library.MarkDirty(index);
             library.CompileDirty();
 
             Json state;
             state["index"] = index;
             state["name"] = material->Name;
+            state["alphaMode"] = Renderer::MaterialAlphaModeName(material->AlphaMode);
+            state["alphaCutoff"] = material->AlphaCutoff;
             state["compiled"] = material->Compiled.Succeeded;
             state["textureSlots"] = material->Compiled.TextureSlots;
             if (!material->Compiled.Succeeded) {

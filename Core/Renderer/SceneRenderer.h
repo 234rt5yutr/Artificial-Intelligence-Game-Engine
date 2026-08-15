@@ -207,7 +207,11 @@ namespace Renderer {
             // Each material owns its texture set: slot 0 of one material is not
             // slot 0 of another, so a single shared set would cross-bind them.
             VkDescriptorSet TextureSet = VK_NULL_HANDLE;
-            uint64_t GraphHash = 0;
+            // The graph hash alone is not the key. Alpha mode, its cutoff, and
+            // double-sidedness all change the pipeline without touching a single
+            // node, and keying on the graph meant editing any of them silently
+            // kept the old pipeline.
+            uint64_t StateHash = 0;
             bool Valid = false;
         };
 

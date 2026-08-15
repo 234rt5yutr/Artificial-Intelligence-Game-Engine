@@ -441,6 +441,11 @@ namespace MCP {
                     if (auto* material = library.GetMaterial(index)) {
                         material->Graph = AssetToolsDetail::BuildGraphFromGltfMaterial(desc);
                         material->DoubleSided = desc.DoubleSided;
+                        material->AlphaCutoff = desc.AlphaCutoff;
+                        material->AlphaMode =
+                            desc.AlphaMode == "BLEND" ? Renderer::MaterialAlphaMode::Blend
+                            : desc.AlphaMode == "MASK" ? Renderer::MaterialAlphaMode::Masked
+                                                       : Renderer::MaterialAlphaMode::Opaque;
                         library.MarkDirty(index);
                     }
                     if (i == 0) {
