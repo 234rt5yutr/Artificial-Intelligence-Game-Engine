@@ -716,5 +716,12 @@ add_executable(EngineCoreAnimationSystemsTests
 target_link_libraries(EngineCoreAnimationSystemsTests PRIVATE EngineCore)
 add_test(NAME EngineCoreAnimationSystemsTests COMMAND EngineCoreAnimationSystemsTests)
 
+add_executable(EngineCoreNavigationSystemsTests
+    Core/Tests/Navigation/NavigationSystemsTests.cpp
+)
+target_link_libraries(EngineCoreNavigationSystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCoreNavigationSystemsTests COMMAND EngineCoreNavigationSystemsTests)
+
+
 
 

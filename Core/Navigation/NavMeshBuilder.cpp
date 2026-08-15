@@ -125,7 +125,7 @@ NavMeshInputGeometry NavMeshBuilder::CollectGeometry(ECS::Scene* scene, uint8_t 
                 };
                 data.Indices = {
                     0,1,2, 0,2,3,  // Bottom
-                    4,6,5, 4,7,6,  // Top
+                    4,5,6, 4,6,7,  // Top
                     0,4,5, 0,5,1,  // Front
                     2,6,7, 2,7,3,  // Back
                     0,3,7, 0,7,4,  // Left
@@ -397,7 +397,7 @@ NavMeshBuildResult NavMeshBuilder::BuildTile(const NavMeshConfig& config,
     }
 
     // Calculate tile bounds
-    float tileWidth = config.TileSize * config.CellSize;
+    float tileWidth = config.TileSize;
     glm::vec3 tileBoundsMin = m_InputGeometry.BoundsMin;
     tileBoundsMin.x += tileX * tileWidth;
     tileBoundsMin.z += tileZ * tileWidth;
@@ -444,7 +444,7 @@ dtNavMesh* NavMeshBuilder::GetNavMesh() {
 void NavMeshBuilder::GetTileCoords(const NavMeshConfig& config,
                                    const glm::vec3& position,
                                    int32_t& outTileX, int32_t& outTileZ) const {
-    float tileWidth = config.TileSize * config.CellSize;
+    float tileWidth = config.TileSize;
     outTileX = static_cast<int32_t>((position.x - m_InputGeometry.BoundsMin.x) / tileWidth);
     outTileZ = static_cast<int32_t>((position.z - m_InputGeometry.BoundsMin.z) / tileWidth);
 }
@@ -457,7 +457,7 @@ void NavMeshBuilder::GetBounds(glm::vec3& outMin, glm::vec3& outMax) const {
 void NavMeshBuilder::GetTileCount(const NavMeshConfig& config,
                                   int32_t& outCountX, int32_t& outCountZ) const {
     glm::vec3 size = m_InputGeometry.BoundsMax - m_InputGeometry.BoundsMin;
-    float tileWidth = config.TileSize * config.CellSize;
+    float tileWidth = config.TileSize;
     outCountX = std::max(1, static_cast<int32_t>(std::ceil(size.x / tileWidth)));
     outCountZ = std::max(1, static_cast<int32_t>(std::ceil(size.z / tileWidth)));
 }
@@ -471,6 +471,10 @@ bool NavMeshBuilder::BuildHeightfield(const NavMeshConfig& config,
                                        const glm::vec3& boundsMax) {
     float bmin[3] = {boundsMin.x, boundsMin.y, boundsMin.z};
     float bmax[3] = {boundsMax.x, boundsMax.y, boundsMax.z};
+
+    if (bmax[1] <= bmin[1] + config.CellHeight) {
+        bmax[1] = bmin[1] + std::max(config.AgentHeight + config.CellHeight * 2.0f, 2.0f);
+    }
 
     int gridWidth, gridHeight;
     rcCalcGridSize(bmin, bmax, config.CellSize, &gridWidth, &gridHeight);
@@ -501,7 +505,11 @@ bool NavMeshBuilder::BuildHeightfield(const NavMeshConfig& config,
     // Apply area types
     for (size_t i = 0; i < m_InputGeometry.AreaTypes.size(); ++i) {
         if (triAreas[i] != RC_NULL_AREA) {
-            triAreas[i] = m_InputGeometry.AreaTypes[i];
+            if (m_InputGeometry.AreaTypes[i] == AREA_GROUND) {
+                triAreas[i] = RC_WALKABLE_AREA;
+            } else {
+                triAreas[i] = m_InputGeometry.AreaTypes[i];
+            }
         }
     }
 
@@ -598,6 +606,40 @@ bool NavMeshBuilder::BuildPolyMesh([[maybe_unused]] const NavMeshConfig& config)
         return false;
     }
 
+    // Set flags and areas for generated polygons
+    for (int i = 0; i < m_PolyMesh->npolys; ++i) {
+        if (m_PolyMesh->areas[i] == RC_WALKABLE_AREA) {
+            m_PolyMesh->areas[i] = AREA_GROUND;
+        }
+
+        switch (m_PolyMesh->areas[i]) {
+            case AREA_GROUND:
+                m_PolyMesh->flags[i] = FLAG_WALK;
+                break;
+            case AREA_WATER:
+                m_PolyMesh->flags[i] = FLAG_SWIM;
+                break;
+            case AREA_ROAD:
+                m_PolyMesh->flags[i] = FLAG_WALK;
+                break;
+            case AREA_GRASS:
+                m_PolyMesh->flags[i] = FLAG_WALK;
+                break;
+            case AREA_DOOR:
+                m_PolyMesh->flags[i] = FLAG_WALK | FLAG_DOOR;
+                break;
+            case AREA_JUMP:
+                m_PolyMesh->flags[i] = FLAG_WALK | FLAG_JUMP;
+                break;
+            case AREA_DISABLED:
+                m_PolyMesh->flags[i] = FLAG_DISABLED;
+                break;
+            default:
+                m_PolyMesh->flags[i] = FLAG_WALK;
+                break;
+        }
+    }
+
     return true;
 }
 
@@ -681,8 +723,8 @@ bool NavMeshBuilder::CreateTiledNavMesh(const NavMeshConfig& config,
     params.orig[0] = m_InputGeometry.BoundsMin.x;
     params.orig[1] = m_InputGeometry.BoundsMin.y;
     params.orig[2] = m_InputGeometry.BoundsMin.z;
-    params.tileWidth = config.TileSize * config.CellSize;
-    params.tileHeight = config.TileSize * config.CellSize;
+    params.tileWidth = config.TileSize;
+    params.tileHeight = config.TileSize;
     params.maxTiles = std::min(config.MaxTiles, static_cast<uint32_t>(tileCountX * tileCountZ));
     params.maxPolys = config.MaxPolysPerTile;
 
@@ -701,7 +743,7 @@ bool NavMeshBuilder::CreateTiledNavMesh(const NavMeshConfig& config,
     }
 
     // Build each tile
-    float tileWidth = config.TileSize * config.CellSize;
+    float tileWidth = config.TileSize;
     for (int32_t z = 0; z < tileCountZ; ++z) {
         for (int32_t x = 0; x < tileCountX; ++x) {
             glm::vec3 tileBoundsMin = m_InputGeometry.BoundsMin;
@@ -710,7 +752,7 @@ bool NavMeshBuilder::CreateTiledNavMesh(const NavMeshConfig& config,
 
             glm::vec3 tileBoundsMax = tileBoundsMin;
             tileBoundsMax.x += tileWidth;
-            tileBoundsMax.y = m_InputGeometry.BoundsMax.y;
+            tileBoundsMax.y = std::max(m_InputGeometry.BoundsMax.y, m_InputGeometry.BoundsMin.y + config.AgentHeight + config.CellHeight * 2.0f);
             tileBoundsMax.z += tileWidth;
 
             int dataSize = 0;
@@ -778,8 +820,12 @@ unsigned char* NavMeshBuilder::BuildTileData(const NavMeshConfig& config,
     params.walkableHeight = config.AgentHeight;
     params.walkableRadius = config.AgentRadius;
     params.walkableClimb = config.AgentMaxClimb;
-    rcVcopy(params.bmin, m_PolyMesh->bmin);
-    rcVcopy(params.bmax, m_PolyMesh->bmax);
+    params.bmin[0] = tileBoundsMin.x;
+    params.bmin[1] = tileBoundsMin.y;
+    params.bmin[2] = tileBoundsMin.z;
+    params.bmax[0] = tileBoundsMax.x;
+    params.bmax[1] = tileBoundsMax.y;
+    params.bmax[2] = tileBoundsMax.z;
     params.cs = config.CellSize;
     params.ch = config.CellHeight;
     params.tileX = tileX;
