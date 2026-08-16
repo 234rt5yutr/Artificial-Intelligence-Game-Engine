@@ -305,11 +305,12 @@ void main() {
         RHI::TransitionImage(cmd, m_Cube, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
-    void EnvironmentProbe::RequestBake(const Math::Vec3& position) {
+    void EnvironmentProbe::RequestBake(const Math::Vec3& position, float radius) {
         if (!IsInitialized()) {
             return;
         }
         m_Position = position;
+        m_Radius = std::max(radius, 0.0f);
         m_Face = 0;
         m_Baking = true;
         // The old cube stays live until the new one is complete: swapping a

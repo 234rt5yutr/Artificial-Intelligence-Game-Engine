@@ -216,6 +216,10 @@ namespace Renderer {
             // means the analytic sky stands in, which is what the shader does
             // before the first bake.
             Math::Vec4 ProbeParams;
+            // Where the probe was captured, and the proxy sphere reflections are
+            // reprojected against. Without it a reflection slides with the
+            // camera rather than staying pinned to what it reflects.
+            Math::Vec4 ProbePosition;
             Math::Vec4 DirectionalDirection[4];
             Math::Vec4 DirectionalColor[4];
             Math::UVec4 LightCounts;

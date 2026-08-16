@@ -70,7 +70,8 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     vec4 Resolution;
     vec4 AmbientColor;
     vec4 SkyColor;
-    vec4 ProbeParams;   // x ready, y mip count
+    vec4 ProbeParams;     // x ready, y mip count
+    vec4 ProbePosition;   // xyz probe centre, w proxy radius
     vec4 DirectionalDirection[4];
     vec4 DirectionalColor[4];
     uvec4 LightCounts;
@@ -458,7 +459,8 @@ void main() {
     // what their mirror lobe picks up from the environment.
     vec3 ambient = uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w *
                    surf.BaseColor * (1.0 - surf.Metallic);
-    ambient += EnvironmentSpecularProbe(uEnvironmentProbe, uMaterial.ProbeParams, n, v, f0,
+    ambient += EnvironmentSpecularProbe(uEnvironmentProbe, uMaterial.ProbeParams,
+                                       uMaterial.ProbePosition, inWorldPos, n, v, f0,
                                        surf.Roughness,
                                        uMaterial.SkyColor.rgb * uMaterial.SkyColor.w,
                                        uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w);
@@ -1838,6 +1840,7 @@ void main() {
         const EnvironmentProbeStats& probe = m_Probe.GetStats();
         uniforms.ProbeParams = Math::Vec4(probe.Ready ? 1.0f : 0.0f,
                                           static_cast<float>(probe.MipLevels), 0.0f, 0.0f);
+        uniforms.ProbePosition = m_Probe.GetPositionRadius();
         uniforms.TimeSeconds = frame.TimeSeconds;
 
         const uint32_t directionalCount =
@@ -2598,6 +2601,7 @@ void main() {
             ssrInputs.ProbeSampler = m_Probe.GetSampler();
             ssrInputs.ProbeReady = m_Probe.GetStats().Ready;
             ssrInputs.ProbeMipLevels = m_Probe.GetStats().MipLevels;
+            ssrInputs.ProbePosition = m_Probe.GetPositionRadius();
             ssrInputs.FrameIndex = m_Frame.FrameIndex;
             m_SSR.Render(cmd, m_Resolved, ssrInputs);
             if (m_SSR.GetStats().Active) {

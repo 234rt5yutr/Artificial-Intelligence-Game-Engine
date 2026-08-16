@@ -53,7 +53,13 @@ namespace Renderer {
         bool IsInitialized() const { return m_Context != nullptr && m_Cube.IsValid(); }
 
         // Starts a bake at `position`. The next six frames render the faces.
-        void RequestBake(const Math::Vec3& position);
+        // `radius` is the proxy sphere the reflection is reprojected against:
+        // roughly the size of the space the probe was captured in. Zero turns
+        // correction off and samples by direction alone.
+        void RequestBake(const Math::Vec3& position, float radius = 20.0f);
+        Math::Vec4 GetPositionRadius() const {
+            return Math::Vec4(m_Position, m_Ready ? m_Radius : 0.0f);
+        }
         bool IsBaking() const { return m_Baking; }
         bool IsReady() const { return m_Ready; }
 
@@ -99,6 +105,7 @@ namespace Renderer {
         bool m_Baking = false;
         bool m_Ready = false;
         Math::Vec3 m_Position{0.0f};
+        float m_Radius = 20.0f;
         EnvironmentProbeStats m_Stats{};
     };
 

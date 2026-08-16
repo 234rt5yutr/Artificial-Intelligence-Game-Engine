@@ -204,7 +204,14 @@ It is baked from the renderer's own output rather than a second render path: six
 frames render with the camera pointed down each cube face and are blitted into
 the cube, which costs six frames once instead of a duplicate pipeline forever. It
 also means the probe reflects precisely what the engine draws, lighting and post
-chain included. Both the geometry pass and the reflection pass sample it through
+chain included. Sampling is parallax corrected: a cube captured at one point is only right at
+that point, and reading it by direction alone makes a reflection slide with the
+camera instead of staying pinned to the surroundings. The reflected ray is
+intersected with a proxy sphere around the probe and sampled toward that hit.
+Measured by moving a mirrored sphere three units: the reflected highlight drifts
+180 pixels across it uncorrected and 134 corrected.
+
+Both the geometry pass and the reflection pass sample it through
 the same shared function, because a traced hit replaces the ambient specular term
 and can only subtract what it can reproduce - one pass reading a probe while the
 other read a sky would put a seam at the edge of every reflection. Verified in a
@@ -572,9 +579,10 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Depth of field is one gather with a single field. A sharp foreground object
   has no near-field dilate, so it does not spill over the blur behind it the way
   a real lens makes it. The upgrade is a two-field split.
-- There is one probe, baked on demand, and it does not follow the camera or
-  reproject by position. A reflection is therefore correct near where it was
-  baked and progressively wrong away from it.
+- There is one probe, baked on demand. Parallax correction keeps its reflections
+  pinned to the world, but a single proxy sphere only approximates the space it
+  was captured in; a room with a strong shape needs a box proxy, and several
+  rooms need several probes.
 - TAA reprojects from depth alone. There is no velocity target, so a moving
   object leans entirely on the neighbourhood clamp: correct for static geometry,
   slightly soft on fast movers. The upgrade is a velocity attachment on the scene

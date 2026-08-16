@@ -1512,6 +1512,11 @@ namespace MCP {
                 {"description", "World position to capture from. Defaults to the origin."},
                 {"items", Json{{"type", "number"}}},
                 {"minItems", 3}, {"maxItems", 3}};
+            schema.Properties["radius"] = RenderToolsDetail::NumberProperty(
+                "Proxy sphere the reflection is reprojected against, roughly the size of the "
+                "space being captured. Without it a reflection slides with the camera instead "
+                "of staying pinned to what it reflects. Zero disables the correction.",
+                0.0, 1000.0);
             return schema;
         }
 
@@ -1529,12 +1534,16 @@ namespace MCP {
 
             Math::Vec3 position(0.0f);
             RenderToolsDetail::ReadVec3(arguments, "position", position);
-            probe.RequestBake(position);
+            const float radius = arguments.contains("radius") && arguments["radius"].is_number()
+                                     ? std::clamp(arguments["radius"].get<float>(), 0.0f, 1000.0f)
+                                     : 20.0f;
+            probe.RequestBake(position, radius);
 
             Json state;
             state["position"] = RenderToolsDetail::Vec3ToJson(position);
             state["resolution"] = probe.GetStats().Resolution;
             state["mipLevels"] = probe.GetStats().MipLevels;
+            state["radius"] = radius;
             return ToolResult::Success("Probe bake started; it completes over the next six frames",
                                        state);
         }

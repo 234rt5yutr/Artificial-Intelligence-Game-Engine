@@ -36,6 +36,7 @@ layout(binding = 5) uniform Params {
     vec4 skyColor;
     vec4 groundColor;
     vec4 probeParams;
+    vec4 probePosition;
 } ssr;
 
 layout(binding = 6) uniform samplerCube environmentProbe;
@@ -187,7 +188,8 @@ void main() {
     // traced hit is a better answer for the same lobe, so it replaces that term
     // rather than stacking on top of it - adding both would make a mirror twice
     // as bright as the thing it reflects.
-    vec3 environment = EnvironmentSpecularProbe(environmentProbe, ssr.probeParams, worldNormal,
+    vec3 environment = EnvironmentSpecularProbe(environmentProbe, ssr.probeParams,
+                                               ssr.probePosition, worldPos, worldNormal,
                                                normalize(ssr.cameraPosition.xyz - worldPos),
                                                f0, roughness,
                                                ssr.skyColor.rgb, ssr.groundColor.rgb);
@@ -350,6 +352,7 @@ void main() {
         uniforms.GroundColor = Math::Vec4(inputs.GroundColor, 1.0f);
         uniforms.ProbeParams = Math::Vec4(inputs.ProbeReady ? 1.0f : 0.0f,
                                           static_cast<float>(inputs.ProbeMipLevels), 0.0f, 0.0f);
+        uniforms.ProbePosition = inputs.ProbePosition;
         if (m_Uniforms.Mapped) {
             std::memcpy(m_Uniforms.Mapped, &uniforms, sizeof(uniforms));
         }

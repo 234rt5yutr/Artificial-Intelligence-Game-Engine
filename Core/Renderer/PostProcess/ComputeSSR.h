@@ -49,6 +49,7 @@ namespace Renderer {
         VkSampler ProbeSampler = VK_NULL_HANDLE;
         bool ProbeReady = false;
         uint32_t ProbeMipLevels = 1;
+        Math::Vec4 ProbePosition{0.0f};
         uint64_t FrameIndex = 0;
     };
 
@@ -118,6 +119,7 @@ namespace Renderer {
             Math::Vec4 SkyColor;
             Math::Vec4 GroundColor;
             Math::Vec4 ProbeParams;   // x ready, y mip count
+            Math::Vec4 ProbePosition;
         };
 
         bool CreatePipeline();

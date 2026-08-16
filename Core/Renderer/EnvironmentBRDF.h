@@ -28,13 +28,38 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 skyColor, vec3 groundColor) {
 // Roughness picks a mip: a mirror reads the sharp top level, a rough surface a
 // blurred one. `probeParams.x` is zero until a bake completes, and the analytic
 // sky covers that gap rather than a black reflection.
-vec3 EnvironmentRadianceProbe(samplerCube probe, vec4 probeParams, vec3 direction,
-                              float roughness, vec3 skyColor, vec3 groundColor) {
+// A cube captured at one point is only correct at that point. Sampling it by
+// direction alone makes a reflection slide with the camera instead of staying
+// pinned to the surroundings, which reads as the world swimming. Intersecting
+// the reflected ray with a proxy sphere around the probe and sampling toward
+// that hit is what keeps it in place.
+vec3 ParallaxCorrect(vec3 direction, vec3 worldPos, vec4 probePosition) {
+    float radius = probePosition.w;
+    if (radius <= 0.0) {
+        return direction;
+    }
+    vec3 offset = worldPos - probePosition.xyz;
+    float along = dot(offset, direction);
+    float outside = dot(offset, offset) - radius * radius;
+    float discriminant = along * along - outside;
+    if (discriminant <= 0.0) {
+        // Outside the proxy entirely; the uncorrected direction is the best
+        // answer available and is what the analytic sky would have given.
+        return direction;
+    }
+    vec3 hit = worldPos + direction * (-along + sqrt(discriminant));
+    return normalize(hit - probePosition.xyz);
+}
+
+vec3 EnvironmentRadianceProbe(samplerCube probe, vec4 probeParams, vec4 probePosition,
+                              vec3 direction, vec3 worldPos, float roughness,
+                              vec3 skyColor, vec3 groundColor) {
     if (probeParams.x < 0.5) {
         return EnvironmentRadiance(direction, skyColor, groundColor);
     }
+    vec3 corrected = ParallaxCorrect(direction, worldPos, probePosition);
     float mip = clamp(roughness, 0.0, 1.0) * max(probeParams.y - 1.0, 0.0);
-    return textureLod(probe, direction, mip).rgb;
+    return textureLod(probe, corrected, mip).rgb;
 }
 
 // Karis' analytic fit to the split-sum environment BRDF. The real thing is a
@@ -59,12 +84,13 @@ vec3 EnvironmentSpecular(vec3 normal, vec3 viewDir, vec3 f0, float roughness,
            EnvBRDFApprox(f0, roughness, ndotv);
 }
 
-vec3 EnvironmentSpecularProbe(samplerCube probe, vec4 probeParams, vec3 normal, vec3 viewDir,
+vec3 EnvironmentSpecularProbe(samplerCube probe, vec4 probeParams, vec4 probePosition,
+                              vec3 worldPos, vec3 normal, vec3 viewDir,
                               vec3 f0, float roughness, vec3 skyColor, vec3 groundColor) {
     vec3 reflection = reflect(-viewDir, normal);
     float ndotv = clamp(dot(normal, viewDir), 0.0, 1.0);
-    return EnvironmentRadianceProbe(probe, probeParams, reflection, roughness,
-                                    skyColor, groundColor) *
+    return EnvironmentRadianceProbe(probe, probeParams, probePosition, reflection, worldPos,
+                                    roughness, skyColor, groundColor) *
            EnvBRDFApprox(f0, roughness, ndotv);
 }
 )GLSL";
