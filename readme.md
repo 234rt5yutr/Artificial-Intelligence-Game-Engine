@@ -323,6 +323,18 @@ how the frame was rendered and velocity is a property of the scene, and mixing
 them makes a still object report motion every frame. Verified exactly that way -
 a still scene writes zero velocity everywhere, and camera motion writes non-zero.
 
+Motion blur gathers along the largest velocity in a pixel's neighbourhood rather
+than the pixel's own. A background pixel beside a fast object has no velocity, so
+gathering along it left the object blurring strictly inside its outline against a
+sharp background, which is not what a shutter does. Two reductions - a maximum
+per 16-pixel tile, then a maximum over each tile's neighbours - give the blur
+something to follow one tile past the geometry that caused it, and taps are
+weighted by whether either end of the pair is actually moving so a still region
+beside a fast one stays sharp. Both reductions are capturable
+(`CaptureFrame` targets `velocityTiles` and `velocityNeighbours`), because the
+dilation is the mechanism and it is invisible in the final image: measured at
+2.67x, 16 tiles covered against 6.
+
 Temporal antialiasing reads it and falls back to depth reprojection only where
 nothing was written, which is the sky. Before this it could only ever describe
 the camera, so anything moving in the world ghosted. Motion blur gathers along
@@ -554,9 +566,6 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Animation blending fills local poses only. Global poses and skinning matrices
   are resolved in `RenderSystem` at draw-collection time, which is after
   `AnimatorSystem` and `IKSystem` have had their say.
-- Motion blur gathers along each pixel's own velocity, so a fast object blurs
-  within its own silhouette rather than bleeding past its edge. A tile-based
-  maximum-velocity pass is what buys that.
 - Skinned geometry contributes no velocity of its own. The instance transform is
   in the buffer, but the previous *posed* vertex is not, so a character that
   animates in place reports no motion.

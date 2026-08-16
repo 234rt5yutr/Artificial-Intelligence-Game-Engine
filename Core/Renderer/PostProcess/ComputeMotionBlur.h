@@ -12,9 +12,13 @@
 // and drag the next one toward it, and blurring before defocus would let motion
 // smear across a depth boundary that defocus had not yet softened.
 //
-// ponytail: a straight gather along each pixel's own velocity. A fast object
-// therefore blurs within its own silhouette rather than bleeding past its edge,
-// which is what a tile-based maximum-velocity pass buys and this does not.
+// The gather follows the largest velocity in the pixel's neighbourhood rather
+// than the pixel's own. A background pixel beside a fast object has no velocity
+// of its own, so gathering along it would leave the object blurring strictly
+// inside its silhouette with a hard edge against a sharp background - which is
+// not what a shutter does. Two small passes reduce velocity to a per-tile
+// maximum and then to a maximum over each tile's neighbours, and the blur reads
+// that.
 
 #include "Core/Math/Math.h"
 #include "Core/RHI/Vulkan/VulkanGpuResources.h"
@@ -64,15 +68,25 @@ namespace Renderer {
                     const ECS::PostProcessSettings& settings);
 
         RHI::GpuImage& GetOutputImage() { return m_Output; }
+        // The two reductions, for inspection. The dilation between them is the
+        // mechanism that lets a blur reach past the geometry that caused it, and
+        // it is not visible in the final image on its own.
+        RHI::GpuImage& GetTileMaxImage() { return m_TileMax; }
+        RHI::GpuImage& GetNeighbourMaxImage() { return m_NeighbourMax; }
         const MotionBlurStats& GetStats() const { return m_Stats; }
 
     private:
         struct MotionBlurUniforms {
             Math::Vec4 Resolution;   // xy size, zw 1/size
             Math::Vec4 Params;       // x strength, y sample count, z frame scale
+            Math::Vec4 TileParams;   // x tile size, y tile columns, z tile rows
         };
 
+        static constexpr uint32_t kTileSize = 16;
+
         bool CreatePipeline();
+        bool CreateTilePipelines();
+        void BuildTiles(VkCommandBuffer cmd, const MotionBlurInputs& inputs);
         bool CreateTargets(uint32_t width, uint32_t height);
         void DestroyTargets();
 
@@ -84,6 +98,18 @@ namespace Renderer {
         RHI::GpuBuffer m_Uniforms{};
 
         RHI::GpuImage m_Output{};
+        // The largest velocity in each tile, then the largest across each tile's
+        // neighbours. Two steps rather than one wide search per pixel.
+        RHI::GpuImage m_TileMax{};
+        RHI::GpuImage m_NeighbourMax{};
+        RHI::ComputePipeline m_TilePipeline{};
+        RHI::ComputePipeline m_NeighbourPipeline{};
+        VkDescriptorSetLayout m_TileSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSet m_TileSet = VK_NULL_HANDLE;
+        VkDescriptorSet m_NeighbourSet = VK_NULL_HANDLE;
+        RHI::GpuBuffer m_TileUniforms{};
+        uint32_t m_TileColumns = 0;
+        uint32_t m_TileRows = 0;
         VkSampler m_Sampler = VK_NULL_HANDLE;
         uint32_t m_Width = 0;
         uint32_t m_Height = 0;

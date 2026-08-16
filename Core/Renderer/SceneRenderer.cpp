@@ -2727,6 +2727,8 @@ void main() {
             else if (target == "albedo")   selected = &m_SceneAlbedo;
             else if (target == "color")    selected = &m_SceneColor;
             else if (target == "resolved") selected = &m_Resolved;
+            else if (target == "velocityTiles") selected = &m_MotionBlur.GetTileMaxImage();
+            else if (target == "velocityNeighbours") selected = &m_MotionBlur.GetNeighbourMaxImage();
             else {
                 error = "unknown capture target '" + target + "'";
                 return false;

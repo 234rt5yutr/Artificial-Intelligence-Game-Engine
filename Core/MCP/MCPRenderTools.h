@@ -1438,7 +1438,7 @@ namespace MCP {
             schema.Properties["target"] = Json{
                 {"type", "string"},
                 {"enum", Json::array({"final", "velocity", "normal", "albedo", "color",
-                                      "resolved"})},
+                                      "resolved", "velocityTiles", "velocityNeighbours"})},
                 {"description", "Which image to write. Defaults to whatever the frame ended on; "
                                 "the others are G-buffer views, for looking at what a pass wrote "
                                 "rather than inferring it from the lit result."}};
