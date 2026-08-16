@@ -232,6 +232,25 @@ screen edges, with ray distance, and with roughness up to a cutoff where a singl
 mirror ray stops meaning anything. Verified by capture on eight chrome spheres:
 135,565 pixels change when it is switched on, 96.2% of them brighter.
 
+**Order-independent transparency** (weighted blended). Blended surfaces used to
+composite in draw order, sorted per instance, so two intersecting panes resolved
+by whichever centre happened to be nearer and the wrong one won across half the
+overlap. They now write to two extra targets instead of the lit image: a
+weighted sum of every fragment, and the product of what each let through.
+Addition and multiplication do not care what order the terms arrive in, which is
+the whole trick. A compute pass divides one by the other to recover an average
+colour and mixes it over the lit image by revealage.
+
+The weight falls off with depth so a near surface still dominates a far one -
+that is what stands in for sorting - and is clamped, because the useful range
+spans several orders of magnitude and the top of it overflows a half float.
+Measured on two half-opacity spheres offset only in depth: the near and far
+colours come out at a ratio of 0.99, where sorted over-compositing would give
+about 2.00.
+
+The back-to-front sort in `GPUScene` is no longer load-bearing for correctness.
+It still groups batches, so it stays.
+
 **Alpha modes**. The engine drew every surface as if it were opaque, so a leaf
 texture rendered as a rectangle and glass as a wall. Materials now carry glTF's
 three modes. *Masked* bakes a `discard` below its cutoff into the material's own
@@ -542,9 +561,6 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - There is one probe, baked on demand, and it does not follow the camera or
   reproject by position. A reflection is therefore correct near where it was
   baked and progressively wrong away from it.
-- Blended surfaces sort per instance, not per triangle. Two panes intersecting
-  each other composite in whichever order their centres fall, which is the
-  approximation every engine makes until it needs order-independent transparency.
 - TAA reprojects from depth alone. There is no velocity target, so a moving
   object leans entirely on the neighbourhood clamp: correct for static geometry,
   slightly soft on fast movers. The upgrade is a velocity attachment on the scene

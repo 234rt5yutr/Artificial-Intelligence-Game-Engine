@@ -156,6 +156,8 @@ layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outNormal;
 layout(location = 3) out vec2 outVelocity;
+layout(location = 4) out vec4 outAccum;
+layout(location = 5) out float outReveal;
 
 %SCENE_UNIFORMS%
 
@@ -471,6 +473,19 @@ void main() {
     vec2 nowUV = (inClip.xy / max(inClip.w, 1e-6)) * 0.5 + 0.5;
     vec2 thenUV = (inPrevClip.xy / max(inPrevClip.w, 1e-6)) * 0.5 + 0.5;
     outVelocity = inPrevClip.w > 1e-6 ? nowUV - thenUV : vec2(0.0);
+
+    // Weighted-blended transparency. Both of these are written by every surface
+    // and masked off for opaque ones by the pipeline, so there is one shader
+    // rather than two that can disagree about lighting.
+    //
+    // The weight falls off with depth so a near surface dominates a far one -
+    // that is what stands in for sorting - and is clamped because the useful
+    // range spans several orders of magnitude and the top of it overflows.
+    float oitAlpha = clamp(surf.Opacity, 0.0, 1.0);
+    float oitWeight = clamp(pow(min(1.0, oitAlpha * 10.0) + 0.01, 3.0) * 1e8 *
+                            pow(1.0 - gl_FragCoord.z * 0.9, 3.0), 1e-2, 3e3);
+    outAccum = vec4(outColor.rgb * oitAlpha, oitAlpha) * oitWeight;
+    outReveal = oitAlpha;
 }
 )GLSL";
 
@@ -604,6 +619,47 @@ void main() {
             }
         }
 
+
+        // Weighted-blended transparency resolve. The accumulator holds a
+        // weighted sum of every blended fragment and revealage holds the product
+        // of what they let through; dividing one by the other recovers an
+        // average colour that never depended on draw order.
+        const char* kOitResolveShader = R"GLSL(
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D oitAccum;
+layout(binding = 1) uniform sampler2D oitReveal;
+layout(binding = 2, rgba16f) uniform image2D litImage;
+layout(binding = 3) uniform Params {
+    vec4 resolution;   // xy size, zw 1/size
+} oit;
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= int(oit.resolution.x) || coord.y >= int(oit.resolution.y)) {
+        return;
+    }
+
+    float reveal = texelFetch(oitReveal, coord, 0).r;
+    // Nothing blended covered this pixel, so the lit image is already the
+    // answer and touching it would only cost precision.
+    if (reveal > 0.9999) {
+        return;
+    }
+
+    vec4 accum = texelFetch(oitAccum, coord, 0);
+    // The weights cancel: the sum was weighted, and so was the alpha it is
+    // divided by. What comes out is the average colour of everything that
+    // covered this pixel.
+    vec3 average = accum.rgb / max(accum.a, 1e-5);
+
+    vec3 lit = imageLoad(litImage, coord).rgb;
+    imageStore(litImage, coord, vec4(mix(average, lit, reveal), 1.0));
+}
+)GLSL";
+
     } // namespace
 
     SceneRenderer::~SceneRenderer() {
@@ -640,6 +696,9 @@ void main() {
         }
         if (!m_DepthOfField.Initialize(context)) {
             ENGINE_CORE_WARN("Depth of field unavailable; the frame stays uniformly sharp");
+        }
+        if (!CreateTransparencyResolve()) {
+            ENGINE_CORE_WARN("Transparency resolve unavailable; blended surfaces will not composite");
         }
         if (!m_Probe.Initialize(context)) {
             ENGINE_CORE_WARN("Environment probe unavailable; reflections fall back to the sky");
@@ -993,8 +1052,8 @@ void main() {
         // Three colour targets plus depth. Albedo and normal exist so the GI and
         // resolve passes have something to modulate against; without them
         // indirect light could only be added, never coloured by the surface.
-        VkAttachmentDescription attachments[5]{};
-        const VkFormat colorFormats[4] = {
+        VkAttachmentDescription attachments[7]{};
+        const VkFormat colorFormats[6] = {
             VK_FORMAT_R16G16B16A16_SFLOAT,
             VK_FORMAT_R8G8B8A8_UNORM,
             VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -1002,8 +1061,12 @@ void main() {
             // sub-pixel motion is exactly the case the temporal passes care
             // about, and unorm cannot express it at all.
             VK_FORMAT_R16G16_SFLOAT,
+            // The transparency accumulator holds a weighted sum that routinely
+            // runs into the thousands, so it has to be float.
+            VK_FORMAT_R16G16B16A16_SFLOAT,
+            VK_FORMAT_R16_SFLOAT,
         };
-        for (uint32_t i = 0; i < 4; ++i) {
+        for (uint32_t i = 0; i < 6; ++i) {
             attachments[i].format = colorFormats[i];
             attachments[i].samples = VK_SAMPLE_COUNT_1_BIT;
             attachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -1013,27 +1076,27 @@ void main() {
             attachments[i].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             attachments[i].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
-        attachments[4].format = m_Context->GetDepthFormat();
-        attachments[4].samples = VK_SAMPLE_COUNT_1_BIT;
-        attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        attachments[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        attachments[4].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        attachments[6].format = m_Context->GetDepthFormat();
+        attachments[6].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[6].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[6].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[6].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[6].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[6].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[6].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference colorRefs[4]{};
-        for (uint32_t i = 0; i < 4; ++i) {
+        VkAttachmentReference colorRefs[6]{};
+        for (uint32_t i = 0; i < 6; ++i) {
             colorRefs[i].attachment = i;
             colorRefs[i].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
         VkAttachmentReference depthRef{};
-        depthRef.attachment = 4;
+        depthRef.attachment = 6;
         depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 4;
+        subpass.colorAttachmentCount = 6;
         subpass.pColorAttachments = colorRefs;
         subpass.pDepthStencilAttachment = &depthRef;
 
@@ -1061,7 +1124,7 @@ void main() {
 
         VkRenderPassCreateInfo passInfo{};
         passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        passInfo.attachmentCount = 5;
+        passInfo.attachmentCount = 7;
         passInfo.pAttachments = attachments;
         passInfo.subpassCount = 1;
         passInfo.pSubpasses = &subpass;
@@ -1079,8 +1142,8 @@ void main() {
         // Getting this wrong left the late phase clearing depth and handing the
         // velocity target a depth layout, which discards whatever the early
         // phase wrote into it.
-        constexpr uint32_t kDepthAttachment = 4;
-        for (uint32_t i = 0; i < 5; ++i) {
+        constexpr uint32_t kDepthAttachment = 6;
+        for (uint32_t i = 0; i < 7; ++i) {
             attachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             attachments[i].initialLayout = i == kDepthAttachment
                                                ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
@@ -1137,6 +1200,20 @@ void main() {
         }
 
         desc.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        desc.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        desc.Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        desc.DebugName = "OitAccum";
+        if (!RHI::CreateGpuImage(device, allocator, desc, m_OitAccum)) {
+            return false;
+        }
+
+        desc.Format = VK_FORMAT_R16_SFLOAT;
+        desc.DebugName = "OitReveal";
+        if (!RHI::CreateGpuImage(device, allocator, desc, m_OitReveal)) {
+            return false;
+        }
+
+        desc.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
         desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         desc.Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1145,14 +1222,14 @@ void main() {
             return false;
         }
 
-        const VkImageView views[5] = {
+        const VkImageView views[7] = {
             m_SceneColor.View, m_SceneAlbedo.View, m_SceneNormal.View, m_SceneVelocity.View,
-            m_SceneDepth.View
+            m_OitAccum.View, m_OitReveal.View, m_SceneDepth.View
         };
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.renderPass = m_ScenePassClear;
-        framebufferInfo.attachmentCount = 5;
+        framebufferInfo.attachmentCount = 7;
         framebufferInfo.pAttachments = views;
         framebufferInfo.width = width;
         framebufferInfo.height = height;
@@ -1184,6 +1261,8 @@ void main() {
         RHI::DestroyGpuImage(device, allocator, m_SceneAlbedo);
         RHI::DestroyGpuImage(device, allocator, m_SceneNormal);
         RHI::DestroyGpuImage(device, allocator, m_SceneVelocity);
+        RHI::DestroyGpuImage(device, allocator, m_OitAccum);
+        RHI::DestroyGpuImage(device, allocator, m_OitReveal);
         RHI::DestroyGpuImage(device, allocator, m_SceneDepth);
         RHI::DestroyGpuImage(device, allocator, m_Resolved);
         m_RenderWidth = 0;
@@ -1534,33 +1613,50 @@ void main() {
             depthStencil.depthWriteEnable = blended ? VK_FALSE : VK_TRUE;
             depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 
-            VkPipelineColorBlendAttachmentState blendAttachments[4]{};
+            VkPipelineColorBlendAttachmentState blendAttachments[6]{};
             for (auto& attachment : blendAttachments) {
                 attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
             }
             if (blended) {
-                blendAttachments[0].blendEnable = VK_TRUE;
-                blendAttachments[0].srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-                blendAttachments[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-                blendAttachments[0].colorBlendOp = VK_BLEND_OP_ADD;
-                blendAttachments[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-                blendAttachments[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-                blendAttachments[0].alphaBlendOp = VK_BLEND_OP_ADD;
-                // Albedo and normal keep whatever the opaque surface behind
-                // wrote. The resolve modulates indirect light by those, and a
-                // half-transparent pane overwriting them would make the wall
-                // behind it take the glass's bounce light.
+                // Blended surfaces go to the two transparency targets and touch
+                // nothing else. They no longer composite into the lit image in
+                // draw order, which is what made intersecting surfaces depend on
+                // whose centre happened to be nearer.
+                blendAttachments[0].colorWriteMask = 0;
                 blendAttachments[1].colorWriteMask = 0;
                 blendAttachments[2].colorWriteMask = 0;
-                // A blended surface writes no depth, so a velocity for it would
-                // describe motion at a depth nothing else agrees with.
                 blendAttachments[3].colorWriteMask = 0;
+
+                // Accumulation is a plain sum: addition does not care what order
+                // the terms arrive in, which is the whole trick.
+                blendAttachments[4].blendEnable = VK_TRUE;
+                blendAttachments[4].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                blendAttachments[4].dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                blendAttachments[4].colorBlendOp = VK_BLEND_OP_ADD;
+                blendAttachments[4].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                blendAttachments[4].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                blendAttachments[4].alphaBlendOp = VK_BLEND_OP_ADD;
+
+                // Revealage multiplies: each surface keeps its own fraction of
+                // what was already showing through, and multiplication is
+                // order-independent too.
+                blendAttachments[5].blendEnable = VK_TRUE;
+                blendAttachments[5].srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+                blendAttachments[5].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+                blendAttachments[5].colorBlendOp = VK_BLEND_OP_ADD;
+                blendAttachments[5].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+                blendAttachments[5].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                blendAttachments[5].alphaBlendOp = VK_BLEND_OP_ADD;
+            } else {
+                // An opaque surface has nothing to contribute to either.
+                blendAttachments[4].colorWriteMask = 0;
+                blendAttachments[5].colorWriteMask = 0;
             }
 
             VkPipelineColorBlendStateCreateInfo colorBlend{};
             colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-            colorBlend.attachmentCount = 4;
+            colorBlend.attachmentCount = 6;
             colorBlend.pAttachments = blendAttachments;
 
             const VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1861,6 +1957,83 @@ void main() {
                              "the surplus is dropped this frame",
                              frame.DirectionalLights.size());
         }
+    }
+
+    bool SceneRenderer::CreateTransparencyResolve() {
+        VkDevice device = m_Context->GetDevice();
+        m_OitResolveSetLayout = RHI::CreateComputeSetLayout(device, {
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // accumulation
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // revealage
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,            // the lit image, in place
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        });
+        if (m_OitResolveSetLayout == VK_NULL_HANDLE) {
+            return false;
+        }
+        m_OitResolvePipeline = RHI::CreateComputePipeline(device, m_Context->GetPipelineCache(),
+                                                          kOitResolveShader, "oit_resolve",
+                                                          {m_OitResolveSetLayout}, 0);
+        if (!m_OitResolvePipeline.IsValid()) {
+            return false;
+        }
+
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = m_DescriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &m_OitResolveSetLayout;
+        return vkAllocateDescriptorSets(device, &allocInfo, &m_OitResolveSet) == VK_SUCCESS;
+    }
+
+    void SceneRenderer::ResolveTransparency(VkCommandBuffer cmd) {
+        m_Stats.TransparencyActive = false;
+        if (!m_OitResolvePipeline.IsValid() || m_OitResolveSet == VK_NULL_HANDLE) {
+            return;
+        }
+
+        Math::Vec4 params(static_cast<float>(m_RenderWidth), static_cast<float>(m_RenderHeight),
+                          1.0f / static_cast<float>(m_RenderWidth),
+                          1.0f / static_cast<float>(m_RenderHeight));
+        if (m_ResolveUniformBuffer.Mapped) {
+            // Shares the resolve pass's uniform buffer: both want the same
+            // resolution and neither is in flight while the other runs.
+            std::memcpy(m_ResolveUniformBuffer.Mapped, &params, sizeof(params));
+        }
+
+        RHI::TransitionImage(cmd, m_Resolved, VK_IMAGE_LAYOUT_GENERAL);
+
+        VkDescriptorImageInfo imageInfos[3]{};
+        imageInfos[0] = {m_LinearSampler, m_OitAccum.View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        imageInfos[1] = {m_LinearSampler, m_OitReveal.View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        imageInfos[2] = {VK_NULL_HANDLE, m_Resolved.View, VK_IMAGE_LAYOUT_GENERAL};
+        VkDescriptorBufferInfo bufferInfo{m_ResolveUniformBuffer.Buffer, 0, sizeof(params)};
+
+        VkWriteDescriptorSet writes[4]{};
+        for (uint32_t i = 0; i < 3; ++i) {
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = m_OitResolveSet;
+            writes[i].dstBinding = i;
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = i == 2 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                              : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[i].pImageInfo = &imageInfos[i];
+        }
+        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[3].dstSet = m_OitResolveSet;
+        writes[3].dstBinding = 3;
+        writes[3].descriptorCount = 1;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[3].pBufferInfo = &bufferInfo;
+        vkUpdateDescriptorSets(m_Context->GetDevice(), 4, writes, 0, nullptr);
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_OitResolvePipeline.Pipeline);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_OitResolvePipeline.Layout,
+                                0, 1, &m_OitResolveSet, 0, nullptr);
+        vkCmdDispatch(cmd, (m_RenderWidth + kResolveGroupSize - 1) / kResolveGroupSize,
+                      (m_RenderHeight + kResolveGroupSize - 1) / kResolveGroupSize, 1);
+
+        RHI::TransitionImage(cmd, m_Resolved, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_Stats.TransparencyActive = true;
     }
 
     void SceneRenderer::DispatchSkinning(VkCommandBuffer cmd) {
@@ -2237,21 +2410,25 @@ void main() {
             m_Culler.CullEarly(cmd);
         }
 
-        VkClearValue clearValues[5]{};
+        VkClearValue clearValues[7]{};
         clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
         clearValues[1].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
         clearValues[2].color = {{0.5f, 0.5f, 0.5f, 0.0f}};
         // Zero velocity is "did not move", which is the right answer for the
         // sky and for anything the geometry pass never touches.
         clearValues[3].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        clearValues[4].depthStencil = {1.0f, 0};
+        // Nothing accumulated yet, and everything still shows through: those are
+        // the identities the transparency resolve reads as "no transparency here".
+        clearValues[4].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+        clearValues[5].color = {{1.0f, 1.0f, 1.0f, 1.0f}};
+        clearValues[6].depthStencil = {1.0f, 0};
 
         VkRenderPassBeginInfo passBegin{};
         passBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         passBegin.renderPass = m_ScenePassClear;
         passBegin.framebuffer = m_SceneFramebuffer;
         passBegin.renderArea.extent = {m_RenderWidth, m_RenderHeight};
-        passBegin.clearValueCount = 5;
+        passBegin.clearValueCount = 7;
         passBegin.pClearValues = clearValues;
 
         vkCmdBeginRenderPass(cmd, &passBegin, VK_SUBPASS_CONTENTS_INLINE);
@@ -2264,6 +2441,8 @@ void main() {
         m_SceneAlbedo.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         m_SceneNormal.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         m_SceneVelocity.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        m_OitAccum.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        m_OitReveal.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         m_SceneDepth.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         if (indirectAvailable && m_Culler.IsTwoPhaseEnabled()) {
@@ -2286,6 +2465,8 @@ void main() {
         RHI::TransitionImage(cmd, m_SceneAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         RHI::TransitionImage(cmd, m_SceneNormal, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         RHI::TransitionImage(cmd, m_SceneVelocity, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        RHI::TransitionImage(cmd, m_OitAccum, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        RHI::TransitionImage(cmd, m_OitReveal, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         RHI::TransitionImage(cmd, m_SceneDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         if (indirectAvailable && !m_Culler.IsTwoPhaseEnabled()) {
@@ -2392,6 +2573,8 @@ void main() {
 
             RHI::TransitionImage(cmd, m_Resolved, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
+
+        ResolveTransparency(cmd);
 
         // Reflections read the resolved image, so what they reflect is fully lit
         // rather than direct light alone, and they run before the temporal pass
@@ -2737,6 +2920,11 @@ void main() {
 
         m_MotionBlur.Shutdown();
         m_DepthOfField.Shutdown();
+        RHI::DestroyComputePipeline(device, m_OitResolvePipeline);
+        if (m_OitResolveSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, m_OitResolveSetLayout, nullptr);
+            m_OitResolveSetLayout = VK_NULL_HANDLE;
+        }
         m_Probe.Shutdown();
         m_SSR.Shutdown();
         m_TAA.Shutdown();

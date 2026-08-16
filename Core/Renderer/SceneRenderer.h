@@ -103,6 +103,7 @@ namespace Renderer {
         uint32_t SkinnedInstances = 0;
         uint32_t SkinnedVertices = 0;
         uint32_t SkinnedDropped = 0;
+        bool TransparencyActive = false;
         bool ProbeReady = false;
         bool ProbeBaking = false;
         uint32_t ProbeFaces = 0;
@@ -274,6 +275,10 @@ namespace Renderer {
         // Poses every skinned instance the GPU scene queued this frame.
         void DispatchSkinning(VkCommandBuffer cmd);
 
+        // Composites the weighted transparency targets over the lit image.
+        void ResolveTransparency(VkCommandBuffer cmd);
+        bool CreateTransparencyResolve();
+
         void UpdateSceneUniforms(const FrameRenderData& frame);
 
         RHI::VulkanContext* m_Context = nullptr;
@@ -286,7 +291,15 @@ namespace Renderer {
         RHI::GpuImage m_SceneAlbedo{};   // rgb base colour, a roughness
         RHI::GpuImage m_SceneNormal{};
         // Screen-space motion in UV units, written by the geometry pass.
-        RHI::GpuImage m_SceneVelocity{};   // rgb world normal (encoded), a metallic
+        RHI::GpuImage m_SceneVelocity{};
+        // Weighted-blended order-independent transparency: a weighted sum of
+        // every blended fragment, and the product of what they let through.
+        // Neither depends on the order they arrive in, which is the point.
+        RHI::GpuImage m_OitAccum{};
+        RHI::GpuImage m_OitReveal{};
+        RHI::ComputePipeline m_OitResolvePipeline{};
+        VkDescriptorSetLayout m_OitResolveSetLayout = VK_NULL_HANDLE;
+        VkDescriptorSet m_OitResolveSet = VK_NULL_HANDLE;   // rgb world normal (encoded), a metallic
         RHI::GpuImage m_SceneDepth{};
         RHI::GpuImage m_Resolved{};      // direct + GI, pre-upscale
 
