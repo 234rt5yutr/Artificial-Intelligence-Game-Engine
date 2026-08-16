@@ -140,6 +140,11 @@ namespace MCP {
             skinning["dropped"] = stats.SkinnedDropped;
             report["skinning"] = skinning;
 
+            Json defocus;
+            defocus["active"] = stats.DepthOfFieldActive;
+            defocus["blurPixels"] = stats.DepthOfFieldBlurPixels;
+            report["depthOfField"] = defocus;
+
             Json reflections;
             reflections["ssrEnabled"] = stats.SSREnabled;
             reflections["ssrActive"] = stats.SSRActive;
@@ -772,8 +777,10 @@ namespace MCP {
                       "way to receive a depth buffer - so bloom, SSAO, and colour grading are "
                       "reimplemented here over the G-buffer and respond to these settings. "
                       "Temporal antialiasing resolves the sub-pixel jitter the frame is already "
-                      "rendered with; with it off the jitter is pure cost. Depth of field and "
-                      "motion blur do not exist yet.") {}
+                      "rendered with; with it off the jitter is pure cost. Depth of field "
+                      "gathers over a disc scaled by circle of confusion, after the temporal "
+                      "resolve. Motion blur does not exist yet - it needs a velocity buffer "
+                      "nothing produces.") {}
 
         ToolAnnotations GetAnnotations() const override {
             ToolAnnotations annotations;
@@ -807,6 +814,15 @@ namespace MCP {
                 "Samples per pixel.", 4, 64);
             schema.Properties["ssaoBlurPasses"] = RenderToolsDetail::NumberProperty(
                 "Depth-aware blur passes over the occlusion buffer.", 0, 4);
+            schema.Properties["dof"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Defocus what is not near the focal plane.");
+            schema.Properties["dofFocalDistance"] = RenderToolsDetail::NumberProperty(
+                "Distance from the camera, in metres, that stays sharp.", 0.0, 1000.0);
+            schema.Properties["dofFocalRange"] = RenderToolsDetail::NumberProperty(
+                "How far past the focal distance a surface reaches full blur.", 0.01, 500.0);
+            schema.Properties["dofMaxBlur"] = RenderToolsDetail::NumberProperty(
+                "Largest blur radius, as a percentage of frame height, so the same setting "
+                "means the same visual blur at any resolution.", 0.0, 8.0);
             schema.Properties["ssr"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Trace screen-space reflections over the G-buffer.");
             schema.Properties["ssrMaxDistance"] = RenderToolsDetail::NumberProperty(
@@ -885,6 +901,21 @@ namespace MCP {
             if (arguments.contains("ssaoBlurPasses") && arguments["ssaoBlurPasses"].is_number()) {
                 settings.ssaoBlurPasses = std::clamp(arguments["ssaoBlurPasses"].get<int>(), 0, 4);
             }
+            if (arguments.contains("dof") && arguments["dof"].is_boolean()) {
+                settings.dofEnabled = arguments["dof"].get<bool>();
+            }
+            if (arguments.contains("dofFocalDistance") && arguments["dofFocalDistance"].is_number()) {
+                settings.dofFocalDistance =
+                    std::clamp(arguments["dofFocalDistance"].get<float>(), 0.0f, 1000.0f);
+            }
+            if (arguments.contains("dofFocalRange") && arguments["dofFocalRange"].is_number()) {
+                settings.dofFocalRange =
+                    std::clamp(arguments["dofFocalRange"].get<float>(), 0.01f, 500.0f);
+            }
+            if (arguments.contains("dofMaxBlur") && arguments["dofMaxBlur"].is_number()) {
+                settings.dofMaxBlur = std::clamp(arguments["dofMaxBlur"].get<float>(), 0.0f, 8.0f);
+            }
+
             auto& ssr = renderer->GetSSR().GetSettings();
             if (arguments.contains("ssr") && arguments["ssr"].is_boolean()) {
                 ssr.Enabled = arguments["ssr"].get<bool>();
@@ -932,6 +963,10 @@ namespace MCP {
 
             const auto& stats = renderer->GetBloom().GetStats();
             Json state;
+            state["dof"] = settings.dofEnabled;
+            state["dofFocalDistance"] = settings.dofFocalDistance;
+            state["dofFocalRange"] = settings.dofFocalRange;
+            state["dofMaxBlur"] = settings.dofMaxBlur;
             state["ssr"] = ssr.Enabled;
             state["ssrMaxDistance"] = ssr.MaxDistance;
             state["ssrSteps"] = ssr.StepCount;
@@ -1239,6 +1274,17 @@ namespace MCP {
                 "boolean", "Show or hide the viewport panel.");
             schema.Properties["editorCamera"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Drive the frame from the editor fly camera instead of the scene camera.");
+            schema.Properties["cameraPosition"] = Json{
+                {"type", "array"},
+                {"description", "Place the editor camera here. Implies editorCamera, since the "
+                                "override only drives the frame while that is on."},
+                {"items", Json{{"type", "number"}}},
+                {"minItems", 3}, {"maxItems", 3}};
+            schema.Properties["cameraTarget"] = Json{
+                {"type", "array"},
+                {"description", "Point the editor camera at this world position."},
+                {"items", Json{{"type", "number"}}},
+                {"minItems", 3}, {"maxItems", 3}};
             schema.Properties["gizmo"] = Json{
                 {"type", "string"},
                 {"description", "Transform gizmo mode."},
@@ -1269,6 +1315,16 @@ namespace MCP {
             }
             if (arguments.contains("editorCamera") && arguments["editorCamera"].is_boolean()) {
                 state.UseEditorCamera = arguments["editorCamera"].get<bool>();
+            }
+            Math::Vec3 cameraPosition = viewport.GetCameraPosition();
+            Math::Vec3 cameraTarget = cameraPosition + viewport.GetCameraForward();
+            const bool placed = RenderToolsDetail::ReadVec3(arguments, "cameraPosition", cameraPosition) |
+                                RenderToolsDetail::ReadVec3(arguments, "cameraTarget", cameraTarget);
+            if (placed) {
+                viewport.PlaceCamera(cameraPosition, cameraTarget);
+                // Placing a camera that does not drive the frame would do
+                // nothing visible, which reads as the call having failed.
+                state.UseEditorCamera = true;
             }
             if (arguments.contains("cameraSpeed") && arguments["cameraSpeed"].is_number()) {
                 state.CameraSpeed = std::clamp(arguments["cameraSpeed"].get<float>(), 0.1f, 200.0f);
@@ -1302,6 +1358,8 @@ namespace MCP {
             Json report;
             report["open"] = state.Open;
             report["editorCamera"] = state.UseEditorCamera;
+            report["cameraPosition"] = RenderToolsDetail::Vec3ToJson(viewport.GetCameraPosition());
+            report["cameraForward"] = RenderToolsDetail::Vec3ToJson(viewport.GetCameraForward());
             report["cameraSpeed"] = state.CameraSpeed;
             switch (state.Gizmo) {
                 case Editor::GizmoMode::None:      report["gizmo"] = "none"; break;

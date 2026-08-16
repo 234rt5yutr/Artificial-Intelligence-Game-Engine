@@ -121,6 +121,28 @@ namespace Editor {
         return true;
     }
 
+    void ViewportPanel::PlaceCamera(const Math::Vec3& position, const Math::Vec3& target) {
+        m_CameraPosition = position;
+
+        const Math::Vec3 offset = target - position;
+        const float horizontal = std::sqrt(offset.x * offset.x + offset.z * offset.z);
+        if (horizontal < 1e-5f && std::abs(offset.y) < 1e-5f) {
+            // Target equals position: keep the current orientation rather than
+            // producing a NaN basis.
+            return;
+        }
+        // Yaw is measured from +X in the XZ plane and pitch from that plane, the
+        // same convention BuildView reconstructs the forward vector with.
+        m_CameraYaw = std::atan2(offset.z, offset.x);
+        m_CameraPitch = std::atan2(offset.y, std::max(horizontal, 1e-5f));
+    }
+
+    Math::Vec3 ViewportPanel::GetCameraForward() const {
+        return Math::Vec3(std::cos(m_CameraPitch) * std::cos(m_CameraYaw),
+                          std::sin(m_CameraPitch),
+                          std::cos(m_CameraPitch) * std::sin(m_CameraYaw));
+    }
+
     void ViewportPanel::UpdateEditorCamera(float deltaTime, bool viewportHovered) {
         if (!m_State.UseEditorCamera) {
             return;

@@ -438,6 +438,7 @@ add_library(EngineCore
     # Phase 15: Post-Processing
     Core/ECS/Components/PostProcessComponent.h
     Core/Renderer/PostProcess/ComputeSSAO.h
+    Core/Renderer/PostProcess/ComputeDepthOfField.cpp
     Core/Renderer/PostProcess/ComputeSSAO.cpp
     Core/Renderer/PostProcess/ComputeSSR.cpp
     Core/Renderer/PostProcess/ComputeTAA.cpp

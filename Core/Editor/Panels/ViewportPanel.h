@@ -59,6 +59,14 @@ namespace Editor {
 
         void FocusOnSelection(EditorContext& editorContext);
 
+        // Place the editor camera explicitly. Without this the camera could only
+        // be flown by hand with the mouse, so nothing outside the window could
+        // decide what the frame looks at - which made every headless check
+        // depend on whatever the camera happened to be pointing at.
+        void PlaceCamera(const Math::Vec3& position, const Math::Vec3& target);
+        Math::Vec3 GetCameraPosition() const { return m_CameraPosition; }
+        Math::Vec3 GetCameraForward() const;
+
     private:
         // Rebinds the ImGui descriptor when the renderer's output view changes
         // (resize, upscaler quality change).

@@ -616,6 +616,9 @@ void main() {
         if (m_GPUDrivenEnabled && !m_Skinning.Initialize(context, 4096)) {
             ENGINE_CORE_WARN("GPU skinning unavailable; skeletal meshes render in bind pose");
         }
+        if (!m_DepthOfField.Initialize(context)) {
+            ENGINE_CORE_WARN("Depth of field unavailable; the frame stays uniformly sharp");
+        }
         if (!m_SSR.Initialize(context)) {
             ENGINE_CORE_WARN("Screen-space reflections unavailable; surfaces stay purely diffuse");
         }
@@ -1178,6 +1181,7 @@ void main() {
         }
 
         m_Culler.Resize(renderWidth, renderHeight);
+        m_DepthOfField.Resize(renderWidth, renderHeight);
         m_SSR.Resize(renderWidth, renderHeight);
         m_TAA.Resize(renderWidth, renderHeight);
         m_LightCuller.Resize(renderWidth, renderHeight);
@@ -2343,6 +2347,24 @@ void main() {
         m_Stats.TAAActive = taaStats.Active;
         m_Stats.TAAFeedback = taaStats.Feedback;
 
+        // Defocus after the temporal resolve. Blurring first would put a blurred
+        // frame into the history and pull the next sharp one toward it, which
+        // reads as smearing rather than depth of field.
+        {
+            DepthOfFieldInputs dofInputs{};
+            dofInputs.DepthView = m_SceneDepth.View;
+            dofInputs.Sampler = m_LinearSampler;
+            dofInputs.View = m_Frame.View;
+            dofInputs.InverseViewProjection = glm::inverse(m_Frame.ViewProjection);
+            m_DepthOfField.Render(cmd, *postSource, dofInputs, m_PostProcessSettings);
+            if (m_DepthOfField.GetStats().Active) {
+                postSource = &m_DepthOfField.GetOutputImage();
+            }
+        }
+        const DepthOfFieldStats& dofStats = m_DepthOfField.GetStats();
+        m_Stats.DepthOfFieldActive = dofStats.Active;
+        m_Stats.DepthOfFieldBlurPixels = dofStats.MaxBlurPixels;
+
         // Bloom, in the compute path the rest of the frame uses.
         //
         // `PostProcess/PostProcessManager` registers five passes and none of
@@ -2570,6 +2592,7 @@ void main() {
         VkDevice device = m_Context->GetDevice();
         vkDeviceWaitIdle(device);
 
+        m_DepthOfField.Shutdown();
         m_SSR.Shutdown();
         m_TAA.Shutdown();
         m_Bloom.Shutdown();

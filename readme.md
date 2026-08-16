@@ -229,6 +229,26 @@ is what stops it smearing. Measured over captured frames of a static scene, the
 mean absolute difference between consecutive frames falls from 0.220 with TAA off
 to 0.157 at feedback 0.5 and 0.149 at 0.97.
 
+**Camera placement** (MCP `SetEditorViewport`, `cameraPosition`/`cameraTarget`).
+The editor camera could only be flown by hand with the mouse, so nothing outside
+the window could decide what the frame looks at. Every headless check therefore
+depended on whatever the camera happened to be pointing at, which in practice
+meant putting the subject at the origin and hoping. Placing it explicitly turns
+`CaptureFrame` from a screenshot into a measurement.
+
+**Depth of field** (`Core/Renderer/PostProcess/ComputeDepthOfField.*`).
+`PostProcessComponent` has carried dofEnabled, dofFocalDistance, dofFocalRange
+and dofMaxBlur from the start and nothing ever read them: the old
+`DepthOfFieldPass` could not run, because `PostProcessPass` had no parameter
+through which to receive a depth buffer. One gather over a 16-tap sunflower disc,
+radius scaled by circle of confusion, each tap weighted by its *own* CoC so a
+sharp foreground object does not smear onto the background behind it. It runs
+after the temporal resolve - blurring first would put a blurred frame into the
+history and pull the next sharp one toward it, which reads as smearing rather
+than defocus. Measured as mean horizontal gradient over the region a distant
+sphere covers: 0.021 with it off, 0.012 focused near, and 0.025 focused on the
+sphere itself.
+
 **Frame capture** (`SceneRenderer::CaptureToFile`, MCP `CaptureFrame`). Nothing
 outside the window could see what the renderer produced, so no visual change was
 checkable: `GetRenderStats` reports that a pass ran, not what it drew. This blits
@@ -430,6 +450,9 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Animation blending fills local poses only. Global poses and skinning matrices
   are resolved in `RenderSystem` at draw-collection time, which is after
   `AnimatorSystem` and `IKSystem` have had their say.
+- Depth of field is one gather with a single field. A sharp foreground object
+  has no near-field dilate, so it does not spill over the blur behind it the way
+  a real lens makes it. The upgrade is a two-field split.
 - Reflections are screen space only. Anything off-screen or hidden behind what
   is on screen cannot be reflected; the pass fades toward the frame edge rather
   than pretending otherwise. Reflection probes are the fix, and they are a
