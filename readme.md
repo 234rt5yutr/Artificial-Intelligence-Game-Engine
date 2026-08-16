@@ -187,6 +187,22 @@ draws. `assets/meshes/rigged_strip.gltf` is a two-joint strip with a bend clip:
 importing it starts the clip, and across three captures 18,947 and 12,875 pixels
 move, against exactly 0 for the same mesh with nothing playing.
 
+**Reflection probe** (`Core/Renderer/EnvironmentProbe.*`, MCP
+`BakeEnvironmentProbe`). Reflections could only fall back to a two-colour
+analytic sky, so anything off screen reflected a gradient rather than the room it
+was standing in. A probe is exactly what the screen-space trace misses.
+
+It is baked from the renderer's own output rather than a second render path: six
+frames render with the camera pointed down each cube face and are blitted into
+the cube, which costs six frames once instead of a duplicate pipeline forever. It
+also means the probe reflects precisely what the engine draws, lighting and post
+chain included. Both the geometry pass and the reflection pass sample it through
+the same shared function, because a traced hit replaces the ambient specular term
+and can only subtract what it can reproduce - one pass reading a probe while the
+other read a sky would put a seam at the edge of every reflection. Verified in a
+red room: baking makes 2,580 pixels of a chrome sphere change, 1,369 of them
+toward red.
+
 **Environment specular** (`Core/Renderer/EnvironmentBRDF.h`). Ambient was applied
 as pure diffuse, which a metal does not have: metals came out darker than the
 dielectrics beside them and reflected nothing at all. Ambient diffuse is now
@@ -520,10 +536,12 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Depth of field is one gather with a single field. A sharp foreground object
   has no near-field dilate, so it does not spill over the blur behind it the way
   a real lens makes it. The upgrade is a two-field split.
-- Reflections are screen space only. Anything off-screen or hidden behind what
-  is on screen cannot be reflected; the pass fades toward the frame edge rather
-  than pretending otherwise. Reflection probes are the fix, and they are a
-  different feature rather than a bigger version of this one.
+- The probe's mips are a box downsample, not a GGX prefilter, so roughness picks
+  a blurred level rather than a correctly convolved one. A prefilter pass over
+  the same cube is the upgrade, and nothing above it would change.
+- There is one probe, baked on demand, and it does not follow the camera or
+  reproject by position. A reflection is therefore correct near where it was
+  baked and progressively wrong away from it.
 - Blended surfaces sort per instance, not per triangle. Two panes intersecting
   each other composite in whichever order their centres fall, which is the
   approximation every engine makes until it needs order-independent transparency.

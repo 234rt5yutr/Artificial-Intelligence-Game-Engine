@@ -70,6 +70,7 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     vec4 Resolution;
     vec4 AmbientColor;
     vec4 SkyColor;
+    vec4 ProbeParams;   // x ready, y mip count
     vec4 DirectionalDirection[4];
     vec4 DirectionalColor[4];
     uvec4 LightCounts;
@@ -178,6 +179,7 @@ struct PunctualLight {
 layout(std430, set = 0, binding = 4) readonly buffer Lights  { PunctualLight uLights[]; };
 layout(std430, set = 0, binding = 5) readonly buffer Grid    { uvec2 uLightGrid[]; };
 layout(std430, set = 0, binding = 6) readonly buffer Indices { uint uLightIndices[]; };
+layout(set = 0, binding = 7) uniform samplerCube uEnvironmentProbe;
 
 // One atlas tile lookup, shared by spot and point-cube shadows: project, clamp
 // inside the tile, then PCF. The projection differs; everything after it does
@@ -454,9 +456,10 @@ void main() {
     // what their mirror lobe picks up from the environment.
     vec3 ambient = uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w *
                    surf.BaseColor * (1.0 - surf.Metallic);
-    ambient += EnvironmentSpecular(n, v, f0, surf.Roughness,
-                                   uMaterial.SkyColor.rgb * uMaterial.SkyColor.w,
-                                   uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w);
+    ambient += EnvironmentSpecularProbe(uEnvironmentProbe, uMaterial.ProbeParams, n, v, f0,
+                                       surf.Roughness,
+                                       uMaterial.SkyColor.rgb * uMaterial.SkyColor.w,
+                                       uMaterial.AmbientColor.rgb * uMaterial.AmbientColor.w);
 
     outColor = vec4(direct + ambient + surf.Emissive, surf.Opacity);
     outAlbedo = vec4(surf.BaseColor, surf.Roughness);
@@ -638,6 +641,9 @@ void main() {
         if (!m_DepthOfField.Initialize(context)) {
             ENGINE_CORE_WARN("Depth of field unavailable; the frame stays uniformly sharp");
         }
+        if (!m_Probe.Initialize(context)) {
+            ENGINE_CORE_WARN("Environment probe unavailable; reflections fall back to the sky");
+        }
         if (!m_SSR.Initialize(context)) {
             ENGINE_CORE_WARN("Screen-space reflections unavailable; surfaces stay purely diffuse");
         }
@@ -724,7 +730,7 @@ void main() {
         }
 
         // Set 0: scene uniforms + the instance transforms the indirect draws index.
-        VkDescriptorSetLayoutBinding sceneBindings[7]{};
+        VkDescriptorSetLayoutBinding sceneBindings[8]{};
         sceneBindings[0].binding = 0;
         sceneBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         sceneBindings[0].descriptorCount = 1;
@@ -750,9 +756,18 @@ void main() {
             sceneBindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         }
 
+        // The environment probe. Always bound, because a shader that declares a
+        // sampler must have one written whether the branch reading it runs or
+        // not; before the first bake it is a cube that has never been rendered
+        // into and the shader takes the analytic sky instead.
+        sceneBindings[7].binding = 7;
+        sceneBindings[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        sceneBindings[7].descriptorCount = 1;
+        sceneBindings[7].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
         VkDescriptorSetLayoutCreateInfo sceneLayoutInfo{};
         sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        sceneLayoutInfo.bindingCount = 7;
+        sceneLayoutInfo.bindingCount = 8;
         sceneLayoutInfo.pBindings = sceneBindings;
         if (vkCreateDescriptorSetLayout(device, &sceneLayoutInfo, nullptr, &m_SceneSetLayout) != VK_SUCCESS) {
             return false;
@@ -1724,6 +1739,9 @@ void main() {
         uniforms.AmbientColor = Math::Vec4(0.05f, 0.06f, 0.08f, 1.0f);
         const auto& giSettings = m_GI.GetSettings();
         uniforms.SkyColor = Math::Vec4(giSettings.SkyColor, giSettings.SkyIntensity);
+        const EnvironmentProbeStats& probe = m_Probe.GetStats();
+        uniforms.ProbeParams = Math::Vec4(probe.Ready ? 1.0f : 0.0f,
+                                          static_cast<float>(probe.MipLevels), 0.0f, 0.0f);
         uniforms.TimeSeconds = frame.TimeSeconds;
 
         const uint32_t directionalCount =
@@ -1892,6 +1910,16 @@ void main() {
         }
 
         m_Frame = frame;
+        if (m_Probe.IsBaking()) {
+            // The probe reflects what the engine actually draws, so it is baked
+            // by pointing the ordinary frame down each face rather than by a
+            // parallel pipeline that could disagree with the real one.
+            m_Probe.GetFaceView(m_Frame.View, m_Frame.Projection);
+            m_Frame.ViewProjection = m_Frame.Projection * m_Frame.View;
+            m_Frame.CameraPosition = Math::Vec3(glm::inverse(m_Frame.View)[3]);
+            // A jittered face would bake the jitter into the cube.
+            m_Frame.ProjectionJitter = Math::Vec2(0.0f);
+        }
         EnsureMaterialPipelines();
         UpdateMaterialTextureSets();
 
@@ -1951,7 +1979,7 @@ void main() {
         VkDescriptorBufferInfo uniformInfo{m_SceneUniformBuffer.Buffer, 0, sizeof(SceneUniforms)};
         VkBuffer instanceBuffer = m_GPUScene.IsInitialized() ? m_GPUScene.GetInstanceBuffer()
                                                              : VK_NULL_HANDLE;
-        VkWriteDescriptorSet writes[8]{};
+        VkWriteDescriptorSet writes[9]{};
         uint32_t writeCount = 1;
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_SceneSet;
@@ -2028,6 +2056,20 @@ void main() {
             writes[writeCount].descriptorCount = 1;
             writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[writeCount].pBufferInfo = &lightInfos[i];
+            ++writeCount;
+        }
+
+        VkDescriptorImageInfo probeInfo{};
+        probeInfo.sampler = m_Probe.GetSampler();
+        probeInfo.imageView = m_Probe.GetCubeView();
+        probeInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        if (probeInfo.sampler != VK_NULL_HANDLE && probeInfo.imageView != VK_NULL_HANDLE) {
+            writes[writeCount].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[writeCount].dstSet = m_SceneSet;
+            writes[writeCount].dstBinding = 7;
+            writes[writeCount].descriptorCount = 1;
+            writes[writeCount].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[writeCount].pImageInfo = &probeInfo;
             ++writeCount;
         }
 
@@ -2168,6 +2210,7 @@ void main() {
             // else would ever move it out of UNDEFINED.
             RHI::TransitionImage(cmd, m_DummyShadow, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
             RHI::TransitionImage(cmd, m_DummyAtlas, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+            m_Probe.PrepareForSampling(cmd);
             m_DummyInitialized = true;
         }
 
@@ -2368,6 +2411,10 @@ void main() {
             // the reflection subtracts a different ambient than was added.
             ssrInputs.SkyColor = m_GI.GetSettings().SkyColor * m_GI.GetSettings().SkyIntensity;
             ssrInputs.GroundColor = Math::Vec3(0.05f, 0.06f, 0.08f);
+            ssrInputs.ProbeView = m_Probe.GetCubeView();
+            ssrInputs.ProbeSampler = m_Probe.GetSampler();
+            ssrInputs.ProbeReady = m_Probe.GetStats().Ready;
+            ssrInputs.ProbeMipLevels = m_Probe.GetStats().MipLevels;
             ssrInputs.FrameIndex = m_Frame.FrameIndex;
             m_SSR.Render(cmd, m_Resolved, ssrInputs);
             if (m_SSR.GetStats().Active) {
@@ -2465,6 +2512,16 @@ void main() {
             m_FSR.GetSettings().Quality != FSRQualityMode::Off) {
             m_FSR.Render(cmd, upscaleSource, m_LinearSampler);
         }
+
+        if (m_Probe.IsBaking()) {
+            // Captured from the resolved image: after lighting and reflections,
+            // before upscaling, so a face is the scene at render resolution.
+            m_Probe.CaptureFace(cmd, m_Resolved);
+        }
+        const EnvironmentProbeStats& probeStats = m_Probe.GetStats();
+        m_Stats.ProbeReady = probeStats.Ready;
+        m_Stats.ProbeBaking = probeStats.Baking;
+        m_Stats.ProbeFaces = probeStats.FacesCaptured;
 
         m_FinalImage = m_FSR.GetStats().Active ? &m_FSR.GetOutputTarget()
                        : (m_PostProcessRanThisFrame ? &m_Bloom.GetOutputImage() : postSource);
@@ -2680,6 +2737,7 @@ void main() {
 
         m_MotionBlur.Shutdown();
         m_DepthOfField.Shutdown();
+        m_Probe.Shutdown();
         m_SSR.Shutdown();
         m_TAA.Shutdown();
         m_Bloom.Shutdown();

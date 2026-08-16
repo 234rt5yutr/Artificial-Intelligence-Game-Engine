@@ -31,6 +31,7 @@
 #include "Core/Renderer/PostProcess/ComputeSSAO.h"
 #include "Core/Renderer/PostProcess/ComputeDepthOfField.h"
 #include "Core/Renderer/PostProcess/ComputeMotionBlur.h"
+#include "Core/Renderer/EnvironmentProbe.h"
 #include "Core/Renderer/PostProcess/ComputeSSR.h"
 #include "Core/Renderer/PostProcess/ComputeTAA.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
@@ -102,6 +103,9 @@ namespace Renderer {
         uint32_t SkinnedInstances = 0;
         uint32_t SkinnedVertices = 0;
         uint32_t SkinnedDropped = 0;
+        bool ProbeReady = false;
+        bool ProbeBaking = false;
+        uint32_t ProbeFaces = 0;
         bool MotionBlurActive = false;
         float MotionBlurStrength = 0.0f;
         bool DepthOfFieldActive = false;
@@ -155,6 +159,9 @@ namespace Renderer {
         const ComputeDepthOfField& GetDepthOfField() const { return m_DepthOfField; }
         const ComputeMotionBlur& GetMotionBlur() const { return m_MotionBlur; }
 
+        EnvironmentProbe& GetProbe() { return m_Probe; }
+        const EnvironmentProbe& GetProbe() const { return m_Probe; }
+
         ComputeSSR& GetSSR() { return m_SSR; }
         const ComputeSSR& GetSSR() const { return m_SSR; }
 
@@ -204,6 +211,10 @@ namespace Renderer {
             // Sky radiance for the environment term, taken from the GI settings
             // so there is one sky in the frame rather than two that disagree.
             Math::Vec4 SkyColor;
+            // x is 1 once a probe has been baked, y is its mip count. Zero
+            // means the analytic sky stands in, which is what the shader does
+            // before the first bake.
+            Math::Vec4 ProbeParams;
             Math::Vec4 DirectionalDirection[4];
             Math::Vec4 DirectionalColor[4];
             Math::UVec4 LightCounts;
@@ -324,6 +335,7 @@ namespace Renderer {
         ComputeDepthOfField m_DepthOfField;
         ComputeMotionBlur m_MotionBlur;
         ComputeSSR m_SSR;
+        EnvironmentProbe m_Probe;
         ComputeTAA m_TAA;
         ECS::PostProcessSettings m_PostProcessSettings{};
         // False until the chain runs at least once; the upscaler reads the

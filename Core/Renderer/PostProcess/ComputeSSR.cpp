@@ -35,7 +35,10 @@ layout(binding = 5) uniform Params {
     vec4 params2;          // x refineSteps, y roughnessCutoff, z frameIndex
     vec4 skyColor;
     vec4 groundColor;
+    vec4 probeParams;
 } ssr;
+
+layout(binding = 6) uniform samplerCube environmentProbe;
 
 %ENVIRONMENT_BRDF%
 
@@ -184,9 +187,10 @@ void main() {
     // traced hit is a better answer for the same lobe, so it replaces that term
     // rather than stacking on top of it - adding both would make a mirror twice
     // as bright as the thing it reflects.
-    vec3 environment = EnvironmentSpecular(worldNormal, normalize(ssr.cameraPosition.xyz - worldPos),
-                                           f0, roughness,
-                                           ssr.skyColor.rgb, ssr.groundColor.rgb);
+    vec3 environment = EnvironmentSpecularProbe(environmentProbe, ssr.probeParams, worldNormal,
+                                               normalize(ssr.cameraPosition.xyz - worldPos),
+                                               f0, roughness,
+                                               ssr.skyColor.rgb, ssr.groundColor.rgb);
     vec3 traced = hitColor * envWeight * ssr.params.w;
     vec3 result = base + (traced - environment) * hitMask;
     imageStore(outColor, coord, vec4(max(result, vec3(0.0)), 1.0));
@@ -224,6 +228,7 @@ void main() {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // albedo + roughness
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // environment probe
         });
         if (m_SetLayout == VK_NULL_HANDLE) {
             return false;
@@ -244,7 +249,7 @@ void main() {
         }
 
         const VkDescriptorPoolSize poolSizes[] = {
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5},
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
         };
@@ -343,6 +348,8 @@ void main() {
                                       static_cast<float>(inputs.FrameIndex & 0xFFFFu), 0.0f);
         uniforms.SkyColor = Math::Vec4(inputs.SkyColor, 1.0f);
         uniforms.GroundColor = Math::Vec4(inputs.GroundColor, 1.0f);
+        uniforms.ProbeParams = Math::Vec4(inputs.ProbeReady ? 1.0f : 0.0f,
+                                          static_cast<float>(inputs.ProbeMipLevels), 0.0f, 0.0f);
         if (m_Uniforms.Mapped) {
             std::memcpy(m_Uniforms.Mapped, &uniforms, sizeof(uniforms));
         }
@@ -358,7 +365,7 @@ void main() {
         imageInfos[4] = {VK_NULL_HANDLE, m_Output.View, VK_IMAGE_LAYOUT_GENERAL};
         VkDescriptorBufferInfo bufferInfo{m_Uniforms.Buffer, 0, sizeof(SSRUniforms)};
 
-        VkWriteDescriptorSet writes[6]{};
+        VkWriteDescriptorSet writes[7]{};
         for (uint32_t i = 0; i < 5; ++i) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = m_Set;
@@ -374,7 +381,21 @@ void main() {
         writes[5].descriptorCount = 1;
         writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         writes[5].pBufferInfo = &bufferInfo;
-        vkUpdateDescriptorSets(m_Context->GetDevice(), 6, writes, 0, nullptr);
+
+        // Bound whether or not a probe has been baked: the shader declares the
+        // sampler unconditionally, and the branch reading it is chosen by
+        // probeParams rather than by the descriptor being absent.
+        VkDescriptorImageInfo probeInfo{
+            inputs.ProbeSampler != VK_NULL_HANDLE ? inputs.ProbeSampler : m_Sampler,
+            inputs.ProbeView != VK_NULL_HANDLE ? inputs.ProbeView : imageInfos[0].imageView,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[6].dstSet = m_Set;
+        writes[6].dstBinding = 6;
+        writes[6].descriptorCount = 1;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[6].pImageInfo = &probeInfo;
+        vkUpdateDescriptorSets(m_Context->GetDevice(), 7, writes, 0, nullptr);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_Pipeline.Pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_Pipeline.Layout,

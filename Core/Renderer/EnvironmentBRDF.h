@@ -24,6 +24,19 @@ vec3 EnvironmentRadiance(vec3 direction, vec3 skyColor, vec3 groundColor) {
     return mix(groundColor, skyColor, up * up);
 }
 
+// With a baked probe the environment is the room rather than a gradient.
+// Roughness picks a mip: a mirror reads the sharp top level, a rough surface a
+// blurred one. `probeParams.x` is zero until a bake completes, and the analytic
+// sky covers that gap rather than a black reflection.
+vec3 EnvironmentRadianceProbe(samplerCube probe, vec4 probeParams, vec3 direction,
+                              float roughness, vec3 skyColor, vec3 groundColor) {
+    if (probeParams.x < 0.5) {
+        return EnvironmentRadiance(direction, skyColor, groundColor);
+    }
+    float mip = clamp(roughness, 0.0, 1.0) * max(probeParams.y - 1.0, 0.0);
+    return textureLod(probe, direction, mip).rgb;
+}
+
 // Karis' analytic fit to the split-sum environment BRDF. The real thing is a
 // precomputed lookup table; this is two lines and within a few percent, which is
 // well inside the error of approximating the environment with two colours.
@@ -43,6 +56,15 @@ vec3 EnvironmentSpecular(vec3 normal, vec3 viewDir, vec3 f0, float roughness,
     vec3 reflection = reflect(-viewDir, normal);
     float ndotv = clamp(dot(normal, viewDir), 0.0, 1.0);
     return EnvironmentRadiance(reflection, skyColor, groundColor) *
+           EnvBRDFApprox(f0, roughness, ndotv);
+}
+
+vec3 EnvironmentSpecularProbe(samplerCube probe, vec4 probeParams, vec3 normal, vec3 viewDir,
+                              vec3 f0, float roughness, vec3 skyColor, vec3 groundColor) {
+    vec3 reflection = reflect(-viewDir, normal);
+    float ndotv = clamp(dot(normal, viewDir), 0.0, 1.0);
+    return EnvironmentRadianceProbe(probe, probeParams, reflection, roughness,
+                                    skyColor, groundColor) *
            EnvBRDFApprox(f0, roughness, ndotv);
 }
 )GLSL";

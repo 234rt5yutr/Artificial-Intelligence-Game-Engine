@@ -41,6 +41,14 @@ namespace Renderer {
         // reproduce exactly what it is replacing.
         Math::Vec3 SkyColor{0.0f};
         Math::Vec3 GroundColor{0.0f};
+        // The same probe the geometry pass sampled. A traced hit replaces the
+        // ambient specular term, and it can only subtract what it can reproduce
+        // - if one pass reads a probe and the other an analytic sky, every
+        // reflection edge gets a seam.
+        VkImageView ProbeView = VK_NULL_HANDLE;
+        VkSampler ProbeSampler = VK_NULL_HANDLE;
+        bool ProbeReady = false;
+        uint32_t ProbeMipLevels = 1;
         uint64_t FrameIndex = 0;
     };
 
@@ -109,6 +117,7 @@ namespace Renderer {
             Math::Vec4 Params2;       // x refineSteps, y roughnessCutoff, z frameIndex
             Math::Vec4 SkyColor;
             Math::Vec4 GroundColor;
+            Math::Vec4 ProbeParams;   // x ready, y mip count
         };
 
         bool CreatePipeline();

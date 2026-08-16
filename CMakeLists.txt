@@ -236,6 +236,7 @@ add_library(EngineCore
     Core/Renderer/RenderMath.h
     Core/Renderer/EnvironmentBRDF.h
     Core/Renderer/SceneRenderer.h
+    Core/Renderer/EnvironmentProbe.cpp
     Core/Renderer/SceneRenderer.cpp
     Core/Renderer/RenderThread.h
     Core/Renderer/RenderThread.cpp

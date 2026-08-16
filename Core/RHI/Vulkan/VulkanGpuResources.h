@@ -30,6 +30,7 @@ namespace RHI {
         VkFormat Format = VK_FORMAT_UNDEFINED;
         VkExtent2D Extent{0, 0};
         uint32_t MipLevels = 1;
+        uint32_t ArrayLayers = 1;
         VkImageAspectFlags Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
         VkImageLayout Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -40,6 +41,11 @@ namespace RHI {
         uint32_t Width = 1;
         uint32_t Height = 1;
         uint32_t MipLevels = 1;
+        // Six layers plus Cube makes an environment map. Kept on the shared
+        // helper rather than hand-rolled at the one call site, so transitions
+        // and destruction keep working on it like any other image.
+        uint32_t ArrayLayers = 1;
+        bool Cube = false;
         VkFormat Format = VK_FORMAT_R16G16B16A16_SFLOAT;
         VkImageUsageFlags Usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
         VkImageAspectFlags Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -63,7 +69,8 @@ namespace RHI {
                               uint32_t baseMip,
                               uint32_t mipCount,
                               VkImageLayout oldLayout,
-                              VkImageLayout newLayout);
+                              VkImageLayout newLayout,
+                              uint32_t layerCount = 1);
 
     struct GpuBuffer {
         VkBuffer Buffer = VK_NULL_HANDLE;

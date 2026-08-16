@@ -64,7 +64,10 @@ namespace RHI {
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
         imageInfo.extent = { desc.Width, desc.Height, 1 };
         imageInfo.mipLevels = desc.MipLevels;
-        imageInfo.arrayLayers = 1;
+        imageInfo.arrayLayers = desc.ArrayLayers;
+        if (desc.Cube) {
+            imageInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+        }
         imageInfo.format = desc.Format;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -84,19 +87,20 @@ namespace RHI {
         out.Format = desc.Format;
         out.Extent = { desc.Width, desc.Height };
         out.MipLevels = desc.MipLevels;
+        out.ArrayLayers = desc.ArrayLayers;
         out.Aspect = desc.Aspect;
         out.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = out.Image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.viewType = desc.Cube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = desc.Format;
         viewInfo.subresourceRange.aspectMask = desc.Aspect;
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = desc.MipLevels;
         viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        viewInfo.subresourceRange.layerCount = desc.ArrayLayers;
 
         if (vkCreateImageView(device, &viewInfo, nullptr, &out.View) != VK_SUCCESS) {
             ENGINE_CORE_ERROR("Failed to create image view for '{}'", desc.DebugName);
@@ -145,7 +149,8 @@ namespace RHI {
         if (!image.IsValid() || image.Layout == newLayout) {
             return;
         }
-        TransitionImageRange(cmd, image.Image, image.Aspect, 0, image.MipLevels, image.Layout, newLayout);
+        TransitionImageRange(cmd, image.Image, image.Aspect, 0, image.MipLevels, image.Layout,
+                             newLayout, image.ArrayLayers);
         image.Layout = newLayout;
     }
 
@@ -155,7 +160,8 @@ namespace RHI {
                               uint32_t baseMip,
                               uint32_t mipCount,
                               VkImageLayout oldLayout,
-                              VkImageLayout newLayout) {
+                              VkImageLayout newLayout,
+                              uint32_t layerCount) {
         if (image == VK_NULL_HANDLE) {
             return;
         }
@@ -178,7 +184,7 @@ namespace RHI {
         barrier.subresourceRange.baseMipLevel = baseMip;
         barrier.subresourceRange.levelCount = mipCount;
         barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
+        barrier.subresourceRange.layerCount = layerCount;
         barrier.srcAccessMask = srcAccess;
         barrier.dstAccessMask = dstAccess;
 

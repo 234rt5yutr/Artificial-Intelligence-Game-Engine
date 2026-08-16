@@ -150,6 +150,12 @@ namespace MCP {
             defocus["blurPixels"] = stats.DepthOfFieldBlurPixels;
             report["depthOfField"] = defocus;
 
+            Json probe;
+            probe["ready"] = stats.ProbeReady;
+            probe["baking"] = stats.ProbeBaking;
+            probe["facesCaptured"] = stats.ProbeFaces;
+            report["environmentProbe"] = probe;
+
             Json reflections;
             reflections["ssrEnabled"] = stats.SSREnabled;
             reflections["ssrActive"] = stats.SSRActive;
@@ -1476,6 +1482,64 @@ namespace MCP {
         }
     };
 
+
+    // =========================================================================
+    // BakeEnvironmentProbe - capture the surroundings into a cubemap
+    // =========================================================================
+
+    class BakeEnvironmentProbeTool : public MCPTool {
+    public:
+        BakeEnvironmentProbeTool()
+            : MCPTool("BakeEnvironmentProbe",
+                      "Capture the scene into an environment cubemap from a point. Reflections "
+                      "and ambient specular fall back to a two-colour analytic sky without one, "
+                      "so anything off screen reflects a gradient rather than the room. The bake "
+                      "takes the next six frames, one per face, rendered through the ordinary "
+                      "path so the probe reflects exactly what the engine draws.") {}
+
+        ToolAnnotations GetAnnotations() const override {
+            ToolAnnotations annotations;
+            annotations.Title = "Bake Environment Probe";
+            annotations.ReadOnlyHint = false;
+            return annotations;
+        }
+
+        ToolInputSchema GetInputSchema() const override {
+            ToolInputSchema schema;
+            schema.Properties = Json::object();
+            schema.Properties["position"] = Json{
+                {"type", "array"},
+                {"description", "World position to capture from. Defaults to the origin."},
+                {"items", Json{{"type", "number"}}},
+                {"minItems", 3}, {"maxItems", 3}};
+            return schema;
+        }
+
+        bool RequiresScene() const override { return false; }
+
+        ToolResult Execute(const Json& arguments, ECS::Scene*) override {
+            auto* renderer = RenderToolsDetail::SceneRendererOrNull();
+            if (!renderer) {
+                return ToolResult::Error("No scene renderer is active");
+            }
+            auto& probe = renderer->GetProbe();
+            if (!probe.IsInitialized()) {
+                return ToolResult::Error("The environment probe is not available");
+            }
+
+            Math::Vec3 position(0.0f);
+            RenderToolsDetail::ReadVec3(arguments, "position", position);
+            probe.RequestBake(position);
+
+            Json state;
+            state["position"] = RenderToolsDetail::Vec3ToJson(position);
+            state["resolution"] = probe.GetStats().Resolution;
+            state["mipLevels"] = probe.GetStats().MipLevels;
+            return ToolResult::Success("Probe bake started; it completes over the next six frames",
+                                       state);
+        }
+    };
+
     // ========================================================================
     // Factory
     // ========================================================================
@@ -1492,6 +1556,7 @@ namespace MCP {
         tools.push_back(std::make_shared<GetMaterialGraphTool>());
         tools.push_back(std::make_shared<SetEditorViewportTool>());
         tools.push_back(std::make_shared<CaptureFrameTool>());
+        tools.push_back(std::make_shared<BakeEnvironmentProbeTool>());
         return tools;
     }
 
