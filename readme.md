@@ -236,6 +236,20 @@ is what stops it smearing. Measured over captured frames of a static scene, the
 mean absolute difference between consecutive frames falls from 0.220 with TAA off
 to 0.157 at feedback 0.5 and 0.149 at 0.97.
 
+**Verification harness** (`tools/verify_renderer.py`). Start the engine, run the
+script: it places the camera, builds a scene, and checks eight renderer features
+end to end from captured frames rather than from a pass reporting itself active -
+multi-instance placement, level of detail, per-submesh materials, skinning,
+blended transparency, reflections, environment specular, and depth of field.
+
+Every check frames at least two objects deliberately. The instance-layout bug
+above survived eight rounds of hand checks because each had a single visible
+object, and with one object there is nothing for a wrong transform to disagree
+with. Two of the checks also had to be rewritten to be about the right thing:
+whole-frame mean gradient measures temporal noise rather than defocus, and
+"reflections make things brighter" stopped being true once reflections replaced
+the environment term instead of stacking on it.
+
 **Camera placement** (MCP `SetEditorViewport`, `cameraPosition`/`cameraTarget`).
 The editor camera could only be flown by hand with the mouse, so nothing outside
 the window could decide what the frame looks at. Every headless check therefore
