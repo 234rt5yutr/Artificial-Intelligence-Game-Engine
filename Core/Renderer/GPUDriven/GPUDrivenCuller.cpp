@@ -20,7 +20,9 @@ namespace Renderer {
         constexpr uint32_t kCounterSlots = 8;
 
         // Shared with the shadow views; see ClusterCullShader.h.
-        const char* kCullShader = kClusterCullShaderSource;
+        // Resolved rather than raw: the instance struct is injected from the one
+        // definition GpuInstance mirrors.
+        const std::string kCullShader = ResolvedClusterCullShader();
 
         const char* kHZBCopyShader = R"GLSL(
 #version 450
@@ -137,7 +139,7 @@ void main() {
         }
 
         VkPipelineCache cache = m_Context->GetPipelineCache();
-        m_CullPipeline = RHI::CreateComputePipeline(device, cache, kCullShader, "cluster_cull",
+        m_CullPipeline = RHI::CreateComputePipeline(device, cache, kCullShader.c_str(), "cluster_cull",
                                                     {m_CullSetLayout}, 0);
         m_HZBCopyPipeline = RHI::CreateComputePipeline(device, cache, kHZBCopyShader, "hzb_copy",
                                                        {m_HZBCopySetLayout}, sizeof(int32_t) * 4);

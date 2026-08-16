@@ -160,8 +160,9 @@ void main() {
             return false;
         }
 
+        const std::string shadowCullSource = ResolvedClusterCullShader();
         m_CullPipeline = RHI::CreateComputePipeline(device, m_Context->GetPipelineCache(),
-                                                    kClusterCullShaderSource, "shadow_cluster_cull",
+                                                    shadowCullSource.c_str(), "shadow_cluster_cull",
                                                     {m_CullSetLayout}, 0);
         if (!m_CullPipeline.IsValid()) {
             return false;

@@ -59,6 +59,26 @@ namespace Renderer {
     };
     static_assert(sizeof(GpuInstance) == 112, "GpuInstance must match the cull shader layout");
 
+    // The GLSL mirror of GpuInstance, shared by every shader that reads the
+    // instance buffer. Two hand-written copies drifted the moment a field was
+    // added: the culler was updated and the geometry vertex shader was not, so
+    // every instance after the first read its transform at the wrong offset and
+    // objects collapsed onto one another.
+    inline const char* kGpuInstanceGLSL = R"GLSL(
+struct Instance {
+    mat4 transform;
+    vec4 boundsCenterRadius;
+    uint clusterBase;
+    uint clusterCount;
+    uint materialIndex;
+    uint flags;
+    uint vertexOffset;   // non-zero for a skinned instance's own arena slice
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+)GLSL";
+
     // Per-mesh residency record.
     // One primitive of a mesh. A mesh with several primitives shades each with
     // its own material, which is what glTF files actually contain; drawing the

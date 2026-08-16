@@ -101,14 +101,7 @@ layout(location = 3) out vec4 vTangent;
 
 %SCENE_UNIFORMS%
 
-struct Instance {
-    mat4 transform;
-    vec4 boundsCenterRadius;
-    uint clusterBase;
-    uint clusterCount;
-    uint materialIndex;
-    uint flags;
-};
+%GPU_INSTANCE%
 layout(std430, set = 0, binding = 1) readonly buffer Instances { Instance instances[]; };
 
 layout(push_constant) uniform Push {
@@ -1351,7 +1344,8 @@ void main() {
 
         VkDevice device = m_Context->GetDevice();
         const std::string sceneUniforms = kSceneUniformBlock;
-        const std::string vertexSource = Substitute(kGeometryVertexShader, "%SCENE_UNIFORMS%", sceneUniforms);
+        std::string vertexSource = Substitute(kGeometryVertexShader, "%SCENE_UNIFORMS%", sceneUniforms);
+        vertexSource = Substitute(vertexSource, "%GPU_INSTANCE%", kGpuInstanceGLSL);
 
         auto vertSpirv = RHI::ShaderCompiler::CompileToSPIRV(vertexSource, RHI::ShaderStage::Vertex,
                                                              "geometry.vert");

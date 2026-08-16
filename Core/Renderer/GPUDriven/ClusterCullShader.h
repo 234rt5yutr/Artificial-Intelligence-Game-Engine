@@ -1,5 +1,9 @@
 #pragma once
 
+#include "Core/Renderer/GPUDriven/GPUScene.h"
+
+#include <string>
+
 // The cluster culling compute shader, shared by the main view and by shadow
 // views.
 //
@@ -29,18 +33,7 @@ struct Cluster {
     uint pad;
 };
 
-struct Instance {
-    mat4 transform;
-    vec4 boundsCenterRadius;
-    uint clusterBase;
-    uint clusterCount;
-    uint materialIndex;
-    uint flags;
-    uint vertexOffset;   // non-zero for a skinned instance's own arena slice
-    uint pad0;
-    uint pad1;
-    uint pad2;
-};
+%GPU_INSTANCE%
 
 struct DrawCommand {
     uint indexCount;
@@ -213,6 +206,19 @@ void main() {
     atomicAdd(counters[latePhase ? 1u : 0u], 1u);
 }
 )GLSL";
+
+    // The shared instance struct is substituted in rather than written out, so
+    // the culler and the geometry pass cannot disagree about the layout of the
+    // buffer they both read.
+    inline std::string ResolvedClusterCullShader() {
+        std::string source = kClusterCullShaderSource;
+        const std::string token = "%GPU_INSTANCE%";
+        const std::size_t slot = source.find(token);
+        if (slot != std::string::npos) {
+            source.replace(slot, token.size(), kGpuInstanceGLSL);
+        }
+        return source;
+    }
 
 } // namespace Renderer
 } // namespace Core

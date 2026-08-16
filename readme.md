@@ -88,6 +88,13 @@ Punctual lights live in a storage buffer culled into a
 old fixed 16-point/8-spot cap: verified with 40 point lights producing over a
 million light-to-froxel assignments with no overflow.
 
+The GLSL mirror of `GpuInstance` lives in one place (`kGpuInstanceGLSL`) and is
+substituted into both the culler and the geometry vertex shader. Two hand-written
+copies is exactly how this broke once: adding a field for skinning updated the
+culler and not the vertex shader, so every instance after the first read its
+transform at the wrong offset and objects collapsed onto one another. Nothing
+caught it because the checks up to that point had one visible object.
+
 **GPU-driven cluster culling** (`Core/Renderer/GPUDriven/`). Meshes are
 clusterised into runs of <= 128 triangles along a Morton curve and copied into a
 single merged vertex/index arena, so a frame is one vertex bind, one index bind,
