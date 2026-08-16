@@ -128,6 +128,10 @@ struct Instance {
         bool Skinned = false;
         uint32_t SkinnedSourceOffset = 0;
         uint32_t BoneCount = 0;
+        // Frame this mesh was last drawn. Eviction needs an order, and "least
+        // recently seen" is the only one the scene can supply without being told
+        // what matters.
+        uint64_t LastUsedFrame = 0;
     };
 
     // A contiguous run of instances sharing one material, so the frame can issue
@@ -155,6 +159,15 @@ struct Instance {
         uint32_t TransparentInstances = 0;
         uint32_t TransparentBatches = 0;
         uint32_t LodInstances[kMaxSectionLods] = {};
+        // Compaction is the arena reclaiming space from meshes nothing has drawn
+        // lately. It is not free, so a scene that compacts every frame is a
+        // scene whose working set does not fit.
+        uint32_t Compactions = 0;
+        uint32_t EvictedMeshes = 0;
+        // Meshes that wanted space this frame and could not get it, reset every
+        // frame. A running total would only say how long the scene has been too
+        // big, which is the same information with a worse unit.
+        uint32_t MeshesAwaitingSpace = 0;
         // What the selector actually saw, so a level that looks wrong can be
         // traced to the number it was chosen from.
         float LodScale = 0.0f;
@@ -210,6 +223,11 @@ struct Instance {
         // geometry or the buffers are full (logged once per mesh).
         const GpuMeshRecord* EnsureResident(const Mesh* mesh);
 
+        // Drops meshes nothing has drawn recently and rebuilds the arena from
+        // the survivors. Called when an upload does not fit; returns false when
+        // even a full compaction cannot free enough.
+        bool Compact(const Mesh* required);
+
         // Rebuilds the per-frame instance list from the draw commands. Sorts by
         // material so each material becomes one indirect draw. Returns the total
         // number of cluster slots the cull pass must dispatch over.
@@ -264,7 +282,11 @@ struct Instance {
 
     private:
         bool AllocateBuffers();
-        bool UploadMesh(const Mesh* mesh, GpuMeshRecord& record);
+        // `outOfSpace` separates "this mesh can never be resident" from "the
+        // arena is full right now". The second is temporary, and treating it as
+        // permanent meant a mesh that arrived while the arena was full stayed
+        // rejected forever, even after a compaction freed room for it.
+        bool UploadMesh(const Mesh* mesh, GpuMeshRecord& record, bool* outOfSpace = nullptr);
 
         RHI::VulkanContext* m_Context = nullptr;
         GpuSceneLimits m_Limits{};
@@ -290,6 +312,13 @@ struct Instance {
         uint32_t m_SkinnedRegionStart = 0;
         std::vector<PendingSkin> m_PendingSkins;
         GpuLodSettings m_Lod{};
+
+        // Advanced once per BeginFrame; the unit LastUsedFrame is measured in.
+        uint64_t m_FrameCounter = 0;
+        // A mesh untouched for this many frames is a candidate for eviction. Two
+        // seconds at sixty: long enough that turning around does not evict what
+        // is behind you, short enough that a level transition reclaims quickly.
+        static constexpr uint64_t kEvictionAgeFrames = 120;
 
         std::vector<GpuInstance> m_FrameInstances;
         std::vector<uint32_t> m_FrameInstanceOffsets;

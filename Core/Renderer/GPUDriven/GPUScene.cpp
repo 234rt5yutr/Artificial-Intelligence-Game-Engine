@@ -256,6 +256,71 @@ namespace Renderer {
         m_Context = nullptr;
     }
 
+    bool GPUScene::Compact(const Mesh* required) {
+        // A bump allocator cannot free in the middle, so reclaiming means
+        // rebuilding: keep what has been drawn recently, drop the rest, and
+        // re-upload the survivors from the front. Expensive, and only ever paid
+        // when something did not fit.
+        std::vector<const Mesh*> survivors;
+        survivors.reserve(m_Residency.size());
+        uint32_t evicted = 0;
+        for (const auto& [mesh, record] : m_Residency) {
+            const bool recent = m_FrameCounter < record.LastUsedFrame + kEvictionAgeFrames;
+            if (recent && mesh != required) {
+                survivors.push_back(mesh);
+            } else if (mesh != required) {
+                ++evicted;
+            }
+        }
+        if (evicted == 0) {
+            // Everything resident is in use. Rebuilding would free nothing and
+            // cost a full re-upload, so report it and leave the arena alone.
+            // Traced rather than warned: this repeats for every waiting mesh
+            // every frame, and a warning per line would bury the log.
+            ++m_Stats.MeshesAwaitingSpace;
+            ENGINE_CORE_TRACE("GPUScene: arena full and every resident mesh is still in use");
+            return false;
+        }
+
+        // Most recently drawn first: if the survivors themselves do not all fit,
+        // the ones still on screen are the ones that should make it.
+        std::sort(survivors.begin(), survivors.end(),
+                  [this](const Mesh* lhs, const Mesh* rhs) {
+                      return m_Residency[lhs].LastUsedFrame > m_Residency[rhs].LastUsedFrame;
+                  });
+
+        m_Residency.clear();
+        m_VertexCursor = 0;
+        m_IndexCursor = 0;
+        m_ClusterCursor = 0;
+        m_SkinnedSourceCursor = 0;
+        m_Stats.ResidentTriangles = 0;
+
+        uint32_t restored = 0;
+        for (const Mesh* mesh : survivors) {
+            GpuMeshRecord record{};
+            if (!UploadMesh(mesh, record)) {
+                // No space left for the tail of the list; those become evictions
+                // too rather than half-resident entries.
+                ++evicted;
+                continue;
+            }
+            record.LastUsedFrame = m_FrameCounter;
+            m_Residency.emplace(mesh, record);
+            m_Stats.ResidentTriangles += record.IndexCount / 3;
+            ++restored;
+        }
+
+        ++m_Stats.Compactions;
+        m_Stats.EvictedMeshes += evicted;
+        m_Stats.ResidentMeshes = static_cast<uint32_t>(m_Residency.size());
+        m_Stats.ResidentClusters = m_ClusterCursor;
+        m_Stats.VertexBytesUsed = static_cast<uint64_t>(m_VertexCursor) * sizeof(Vertex);
+        m_Stats.IndexBytesUsed = static_cast<uint64_t>(m_IndexCursor) * sizeof(uint32_t);
+        ENGINE_CORE_INFO("GPUScene compacted: {} meshes kept, {} evicted", restored, evicted);
+        return true;
+    }
+
     const GpuMeshRecord* GPUScene::EnsureResident(const Mesh* mesh) {
         if (!m_Context || !mesh) {
             return nullptr;
@@ -263,6 +328,7 @@ namespace Renderer {
 
         auto resident = m_Residency.find(mesh);
         if (resident != m_Residency.end()) {
+            resident->second.LastUsedFrame = m_FrameCounter;
             return &resident->second;
         }
         if (m_Rejected.find(mesh) != m_Rejected.end()) {
@@ -270,11 +336,24 @@ namespace Renderer {
         }
 
         GpuMeshRecord record{};
-        if (!UploadMesh(mesh, record)) {
-            m_Rejected[mesh] = true;
-            ++m_Stats.RejectedMeshes;
-            return nullptr;
+        bool outOfSpace = false;
+        if (!UploadMesh(mesh, record, &outOfSpace)) {
+            if (!outOfSpace) {
+                // Geometry this path cannot represent at all. That verdict is
+                // permanent, and re-deciding it every frame would be the only
+                // thing it ever cost.
+                m_Rejected[mesh] = true;
+                ++m_Stats.RejectedMeshes;
+                return nullptr;
+            }
+            // Out of room, not out of luck: reclaim what nothing has drawn
+            // lately and try once more. If it still does not fit, leave the mesh
+            // unrejected so a later frame with more room can take it.
+            if (!Compact(mesh) || !UploadMesh(mesh, record, &outOfSpace)) {
+                return nullptr;
+            }
         }
+        record.LastUsedFrame = m_FrameCounter;
 
         auto inserted = m_Residency.emplace(mesh, record).first;
         m_Stats.ResidentMeshes = static_cast<uint32_t>(m_Residency.size());
@@ -285,7 +364,10 @@ namespace Renderer {
         return &inserted->second;
     }
 
-    bool GPUScene::UploadMesh(const Mesh* mesh, GpuMeshRecord& record) {
+    bool GPUScene::UploadMesh(const Mesh* mesh, GpuMeshRecord& record, bool* outOfSpace) {
+        if (outOfSpace) {
+            *outOfSpace = false;
+        }
         if (mesh->vertices.empty() || mesh->indices.size() < 3) {
             return false;
         }
@@ -453,9 +535,12 @@ namespace Renderer {
         if (m_VertexCursor + vertexCount > m_Limits.MaxVertices ||
             m_IndexCursor + indexCount > m_Limits.MaxIndices ||
             m_ClusterCursor + clusterCount > m_Limits.MaxClusters) {
-            ENGINE_CORE_WARN("GPUScene arenas are full ({} verts, {} indices, {} clusters resident); "
-                             "mesh stays on the direct draw path",
-                             m_VertexCursor, m_IndexCursor, m_ClusterCursor);
+            if (outOfSpace) {
+                *outOfSpace = true;
+            }
+            ENGINE_CORE_TRACE("GPUScene arenas are full ({} verts, {} indices, {} clusters "
+                              "resident); mesh waits for space",
+                              m_VertexCursor, m_IndexCursor, m_ClusterCursor);
             return false;
         }
 
@@ -531,6 +616,8 @@ namespace Renderer {
         m_PendingSkins.clear();
         m_SkinnedVertexCursor = 0;
         m_FrameClusterSlots = 0;
+        ++m_FrameCounter;
+        m_Stats.MeshesAwaitingSpace = 0;
         m_Stats.LodScale = lodScale;
         m_Stats.MinProjectedPixels = 0.0f;
         m_Stats.MaxProjectedPixels = 0.0f;
@@ -552,6 +639,14 @@ namespace Renderer {
         };
         std::vector<PendingInstance> pending;
         pending.reserve(commandCount);
+
+        // Residency first, for every command, before a single section pointer is
+        // taken. Compaction rebuilds every record in place, so a pointer grabbed
+        // in an earlier iteration would dangle the moment a later mesh triggered
+        // one.
+        for (std::size_t i = 0; i < commandCount; ++i) {
+            EnsureResident(commands[i].Mesh);
+        }
 
         bool instanceLimitHit = false;
         for (std::size_t i = 0; i < commandCount && !instanceLimitHit; ++i) {

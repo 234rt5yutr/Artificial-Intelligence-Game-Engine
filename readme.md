@@ -138,6 +138,21 @@ its submeshes correctly instead of painting all of them with the first material.
 pins this down: it imports as one mesh, two sections, two instances, two
 indirect draws.
 
+**Arena eviction**. The merged arena was a bump allocator with no eviction: once
+full, every further mesh fell off the GPU-driven path and stayed off, because a
+capacity failure was recorded the same way as unusable geometry. Those are
+different verdicts - one is permanent, the other means "not right now" - and
+conflating them meant a mesh that arrived while the arena was busy never became
+resident even after room appeared.
+
+Meshes now carry the frame they were last drawn. When an upload does not fit, the
+arena drops everything untouched for two seconds and rebuilds from the survivors,
+most recently drawn first. Residency is settled for every command before a single
+section pointer is taken, because compaction rebuilds every record and a pointer
+grabbed earlier in the loop would dangle. Verified by overfilling: 36 large
+meshes fit, hiding them and spawning 70 more triggers one compaction that
+reclaims all 36, and nothing is rejected.
+
 **Level of detail** (`GPUScene`, via meshoptimizer). Every mesh drew at full
 density however small it was on screen. Each section now keeps up to three
 levels: level 0 as authored, then halvings produced by `meshopt_simplify`, which
@@ -484,6 +499,11 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
   submeshes is not expressible.
 - Images embedded in a glTF as data URIs are skipped; GLB buffer-view images and
   external files both work.
+- The arena evicts by least-recently-drawn, and reclaiming means rebuilding: a
+  bump allocator cannot free in the middle. Compaction is therefore a full
+  re-upload of the survivors, paid only when something did not fit. A scene that
+  compacts every frame is a scene whose working set does not fit, and
+  `meshesAwaitingSpace` in the stats says so.
 - A skinned instance owns arena space per *instance*, not per mesh, because two
   copies of a character hold different poses. The skinning region is capped at
   256K vertices; past that an instance renders in its bind pose rather than

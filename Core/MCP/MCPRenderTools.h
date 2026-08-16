@@ -194,6 +194,9 @@ namespace MCP {
                 lodInstances.push_back(scene.LodInstances[i]);
             }
             gpuScene["lodInstances"] = lodInstances;
+            gpuScene["compactions"] = scene.Compactions;
+            gpuScene["evictedMeshes"] = scene.EvictedMeshes;
+            gpuScene["meshesAwaitingSpace"] = scene.MeshesAwaitingSpace;
             gpuScene["lodScale"] = scene.LodScale;
             gpuScene["minProjectedPixels"] = scene.MinProjectedPixels;
             gpuScene["maxProjectedPixels"] = scene.MaxProjectedPixels;
