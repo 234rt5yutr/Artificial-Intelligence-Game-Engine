@@ -192,6 +192,14 @@ move, against exactly 0 for the same mesh with nothing playing.
 analytic sky, so anything off screen reflected a gradient rather than the room it
 was standing in. A probe is exactly what the screen-space trace misses.
 
+Its mips are a GGX prefilter, not a plain blur: each level convolves the captured
+environment with the specular lobe for the roughness that level stands for, by
+importance sampling the distribution with a Hammersley sequence. A box downsample
+is cheaper and looks approximately right, but it spreads energy the way a camera
+defocus does rather than the way a rough surface does. Measured on one sphere
+with only its roughness changed, the reflection's variation across the surface
+falls from 6.93 to 5.74 to 1.08 as roughness goes 0.05, 0.40, 0.85.
+
 It is baked from the renderer's own output rather than a second render path: six
 frames render with the camera pointed down each cube face and are blitted into
 the cube, which costs six frames once instead of a duplicate pipeline forever. It
@@ -555,9 +563,6 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Depth of field is one gather with a single field. A sharp foreground object
   has no near-field dilate, so it does not spill over the blur behind it the way
   a real lens makes it. The upgrade is a two-field split.
-- The probe's mips are a box downsample, not a GGX prefilter, so roughness picks
-  a blurred level rather than a correctly convolved one. A prefilter pass over
-  the same cube is the upgrade, and nothing above it would change.
 - There is one probe, baked on demand, and it does not follow the camera or
   reproject by position. A reflection is therefore correct near where it was
   baked and progressively wrong away from it.
