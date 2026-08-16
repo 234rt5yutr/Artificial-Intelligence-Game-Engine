@@ -740,4 +740,10 @@ add_executable(EngineCoreAudioSystemsTests
 target_link_libraries(EngineCoreAudioSystemsTests PRIVATE EngineCore)
 add_test(NAME EngineCoreAudioSystemsTests COMMAND EngineCoreAudioSystemsTests)
 
+add_executable(EngineCoreAISystemsTests
+    Core/Tests/AI/AISystemsTests.cpp
+)
+target_link_libraries(EngineCoreAISystemsTests PRIVATE EngineCore)
+add_test(NAME EngineCoreAISystemsTests COMMAND EngineCoreAISystemsTests)
+
 
