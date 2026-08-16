@@ -257,6 +257,26 @@ depended on whatever the camera happened to be pointing at, which in practice
 meant putting the subject at the origin and hoping. Placing it explicitly turns
 `CaptureFrame` from a screenshot into a measurement.
 
+**Velocity buffer and motion blur** (`ComputeMotionBlur.*`, plus a fourth colour
+attachment on the scene pass). The geometry pass now writes how far each pixel
+moved, from the instance's previous transform and the previous unjittered
+view-projection. Both matrices are unjittered on purpose: jitter is a property of
+how the frame was rendered and velocity is a property of the scene, and mixing
+them makes a still object report motion every frame. Verified exactly that way -
+a still scene writes zero velocity everywhere, and camera motion writes non-zero.
+
+Temporal antialiasing reads it and falls back to depth reprojection only where
+nothing was written, which is the sky. Before this it could only ever describe
+the camera, so anything moving in the world ghosted. Motion blur gathers along
+the vector, last in the chain: blurring before the temporal pass would push a
+smeared frame into the history, and before defocus it would smear across a depth
+boundary defocus had not yet softened.
+
+Adding the attachment moved depth from index 3 to index 4, and the late-phase
+render pass still assumed 3 - so it cleared depth every late pass and handed the
+velocity target a depth layout. That is why velocity read back as empty until it
+was fixed.
+
 **Depth of field** (`Core/Renderer/PostProcess/ComputeDepthOfField.*`).
 `PostProcessComponent` has carried dofEnabled, dofFocalDistance, dofFocalRange
 and dofMaxBlur from the start and nothing ever read them: the old
@@ -471,6 +491,12 @@ For full setup/troubleshooting instructions, see [`BUILD_GUIDE.md`](BUILD_GUIDE.
 - Animation blending fills local poses only. Global poses and skinning matrices
   are resolved in `RenderSystem` at draw-collection time, which is after
   `AnimatorSystem` and `IKSystem` have had their say.
+- Motion blur gathers along each pixel's own velocity, so a fast object blurs
+  within its own silhouette rather than bleeding past its edge. A tile-based
+  maximum-velocity pass is what buys that.
+- Skinned geometry contributes no velocity of its own. The instance transform is
+  in the buffer, but the previous *posed* vertex is not, so a character that
+  animates in place reports no motion.
 - Depth of field is one gather with a single field. A sharp foreground object
   has no near-field dilate, so it does not spill over the blur behind it the way
   a real lens makes it. The upgrade is a two-field split.

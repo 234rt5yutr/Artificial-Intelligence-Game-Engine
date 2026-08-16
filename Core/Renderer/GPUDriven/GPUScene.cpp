@@ -668,6 +668,7 @@ namespace Renderer {
 
             GpuInstance instance;
             instance.Transform = item.Command->Transform;
+            instance.PreviousTransform = item.Command->PreviousTransform;
             instance.VertexOffset = item.SkinnedVertexOffset;
             instance.BoundsCenterRadius = item.Section->BoundsCenterRadius;
             instance.ClusterBase = lod.ClusterBase;

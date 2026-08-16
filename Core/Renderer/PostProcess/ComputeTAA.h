@@ -13,10 +13,11 @@
 // the history holds that this frame's pixels do not support gets pulled back
 // into range.
 //
-// ponytail: there is no velocity target, so reprojection is camera-only and a
-// moving object leans entirely on the neighbourhood clamp - correct for static
-// geometry, slightly soft on fast movers. The upgrade is a velocity attachment
-// on the scene pass plus a previous transform per instance.
+// Reprojection reads the velocity buffer where the geometry pass wrote one, and
+// falls back to depth against the previous view-projection where it did not -
+// the sky, and anything the pass never touched. Camera-only reprojection is
+// exact for a static world and wrong for everything that moves in it, which is
+// what the velocity target exists to fix.
 
 #include "Core/Math/Math.h"
 #include "Core/RHI/Vulkan/VulkanGpuResources.h"
@@ -30,6 +31,9 @@ namespace Renderer {
 
     struct TAAInputs {
         VkImageView DepthView = VK_NULL_HANDLE;
+        // Screen-space motion in UV units. Zero means "did not move", which is
+        // the correct answer wherever the geometry pass wrote nothing.
+        VkImageView VelocityView = VK_NULL_HANDLE;
         VkSampler Sampler = VK_NULL_HANDLE;
         // Both unjittered: reprojection must not chase the sub-pixel offset it
         // is there to resolve.

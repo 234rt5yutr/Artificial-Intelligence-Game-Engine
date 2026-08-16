@@ -21,8 +21,9 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0) uniform sampler2D currentColor;
 layout(binding = 1) uniform sampler2D sceneDepth;
 layout(binding = 2) uniform sampler2D historyColor;
-layout(binding = 3, rgba16f) uniform writeonly image2D outColor;
-layout(binding = 4) uniform Params {
+layout(binding = 3) uniform sampler2D sceneVelocity;
+layout(binding = 4, rgba16f) uniform writeonly image2D outColor;
+layout(binding = 5) uniform Params {
     mat4 invViewProjection;
     mat4 prevViewProjection;
     vec4 resolution;   // xy size, zw 1/size
@@ -57,14 +58,27 @@ void main() {
     // inverse view-projection and pushed back through the previous one, which
     // is exact for a static world and any camera motion.
     vec2 uv = (vec2(coord) + 0.5) * taa.resolution.zw;
-    float depth = texelFetch(sceneDepth, coord, 0).r;
-    vec4 world = taa.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
-    world /= max(world.w, 1e-6);
-    vec4 prevClip = taa.prevViewProjection * vec4(world.xyz, 1.0);
-    vec2 prevUV = (prevClip.xy / max(abs(prevClip.w), 1e-6) * sign(prevClip.w)) * 0.5 + 0.5;
+
+    // Prefer the velocity the geometry pass wrote: it describes the surface own
+    // motion as well as the camera. Where it wrote nothing - the sky, or a pixel
+    // the pass never touched - fall back to reprojecting depth, which is exact
+    // for a static world.
+    vec2 velocity = texelFetch(sceneVelocity, coord, 0).rg;
+    vec2 prevUV;
+    float prevW = 1.0;
+    if (dot(velocity, velocity) > 1e-12) {
+        prevUV = uv - velocity;
+    } else {
+        float depth = texelFetch(sceneDepth, coord, 0).r;
+        vec4 world = taa.invViewProjection * vec4(uv * 2.0 - 1.0, depth, 1.0);
+        world /= max(world.w, 1e-6);
+        vec4 prevClip = taa.prevViewProjection * vec4(world.xyz, 1.0);
+        prevW = prevClip.w;
+        prevUV = (prevClip.xy / max(abs(prevClip.w), 1e-6) * sign(prevClip.w)) * 0.5 + 0.5;
+    }
 
     bool onScreen = all(greaterThanEqual(prevUV, vec2(0.0))) &&
-                    all(lessThanEqual(prevUV, vec2(1.0))) && prevClip.w > 0.0;
+                    all(lessThanEqual(prevUV, vec2(1.0))) && prevW > 0.0;
     float feedback = taa.params.x * taa.params.y * (onScreen ? 1.0 : 0.0);
     if (feedback <= 0.0) {
         imageStore(outColor, coord, vec4(current, 1.0));
@@ -131,6 +145,7 @@ void main() {
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // current colour
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // depth
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // history
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,   // velocity
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,            // output
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         });
@@ -145,7 +160,7 @@ void main() {
         }
 
         const VkDescriptorPoolSize poolSizes[] = {
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8},
             {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2},
         };
@@ -276,31 +291,37 @@ void main() {
         RHI::TransitionImage(cmd, m_History[writeIndex], VK_IMAGE_LAYOUT_GENERAL);
 
         VkSampler sampler = inputs.Sampler != VK_NULL_HANDLE ? inputs.Sampler : m_Sampler;
-        VkDescriptorImageInfo imageInfos[4]{};
+        VkDescriptorImageInfo imageInfos[5]{};
         imageInfos[0] = {sampler, source.View, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         imageInfos[1] = {sampler, inputs.DepthView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         imageInfos[2] = {m_Sampler, m_History[readIndex].View,
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        imageInfos[3] = {VK_NULL_HANDLE, m_History[writeIndex].View, VK_IMAGE_LAYOUT_GENERAL};
+        // Depth stands in when there is no velocity target, so the sampler is
+        // always live even though the branch then never reads it.
+        imageInfos[3] = {m_Sampler,
+                         inputs.VelocityView != VK_NULL_HANDLE ? inputs.VelocityView
+                                                               : inputs.DepthView,
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        imageInfos[4] = {VK_NULL_HANDLE, m_History[writeIndex].View, VK_IMAGE_LAYOUT_GENERAL};
         VkDescriptorBufferInfo bufferInfo{m_Uniforms[writeIndex].Buffer, 0, sizeof(TAAUniforms)};
 
-        VkWriteDescriptorSet writes[5]{};
-        for (uint32_t i = 0; i < 4; ++i) {
+        VkWriteDescriptorSet writes[6]{};
+        for (uint32_t i = 0; i < 5; ++i) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = m_Sets[writeIndex];
             writes[i].dstBinding = i;
             writes[i].descriptorCount = 1;
-            writes[i].descriptorType = i == 3 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+            writes[i].descriptorType = i == 4 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                                               : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             writes[i].pImageInfo = &imageInfos[i];
         }
-        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[4].dstSet = m_Sets[writeIndex];
-        writes[4].dstBinding = 4;
-        writes[4].descriptorCount = 1;
-        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[4].pBufferInfo = &bufferInfo;
-        vkUpdateDescriptorSets(m_Context->GetDevice(), 5, writes, 0, nullptr);
+        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[5].dstSet = m_Sets[writeIndex];
+        writes[5].dstBinding = 5;
+        writes[5].descriptorCount = 1;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[5].pBufferInfo = &bufferInfo;
+        vkUpdateDescriptorSets(m_Context->GetDevice(), 6, writes, 0, nullptr);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_Pipeline.Pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_Pipeline.Layout,

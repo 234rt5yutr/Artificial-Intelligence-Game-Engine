@@ -17,6 +17,7 @@ namespace ECS {
     // Draw command structure for batching (cache-optimized)
     struct DrawCommand {
         Math::Mat4 Transform;           // 64 bytes - most accessed, put first
+        Math::Mat4 PreviousTransform;   // 64 bytes - where it was last frame
         const Renderer::Mesh* Mesh;     // 8 bytes
         uint32_t MaterialIndex;         // 4 bytes
         bool CastShadows;               // 1 byte
@@ -30,7 +31,7 @@ namespace ECS {
         uint32_t BoneOffset;            // 4 bytes
         uint32_t BoneCount;             // 4 bytes
     };
-    static_assert(sizeof(DrawCommand) == 88, "DrawCommand size check");
+    static_assert(sizeof(DrawCommand) == 152, "DrawCommand size check");
 
     class RenderSystem : public ParallelSystemBase {
     public:

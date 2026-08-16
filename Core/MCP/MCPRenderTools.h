@@ -140,6 +140,11 @@ namespace MCP {
             skinning["dropped"] = stats.SkinnedDropped;
             report["skinning"] = skinning;
 
+            Json motion;
+            motion["active"] = stats.MotionBlurActive;
+            motion["strength"] = stats.MotionBlurStrength;
+            report["motionBlur"] = motion;
+
             Json defocus;
             defocus["active"] = stats.DepthOfFieldActive;
             defocus["blurPixels"] = stats.DepthOfFieldBlurPixels;
@@ -779,8 +784,8 @@ namespace MCP {
                       "Temporal antialiasing resolves the sub-pixel jitter the frame is already "
                       "rendered with; with it off the jitter is pure cost. Depth of field "
                       "gathers over a disc scaled by circle of confusion, after the temporal "
-                      "resolve. Motion blur does not exist yet - it needs a velocity buffer "
-                      "nothing produces.") {}
+                      "resolve. Motion blur gathers along the velocity buffer the geometry "
+                      "pass writes, last in the chain so nothing downstream re-sharpens it.") {}
 
         ToolAnnotations GetAnnotations() const override {
             ToolAnnotations annotations;
@@ -814,6 +819,14 @@ namespace MCP {
                 "Samples per pixel.", 4, 64);
             schema.Properties["ssaoBlurPasses"] = RenderToolsDetail::NumberProperty(
                 "Depth-aware blur passes over the occlusion buffer.", 0, 4);
+            schema.Properties["motionBlur"] = RenderToolsDetail::SchemaProperty(
+                "boolean", "Blur along per-pixel motion. Needs the velocity buffer, so it does "
+                           "nothing for geometry the GPU-driven path did not draw.");
+            schema.Properties["motionBlurSamples"] = RenderToolsDetail::NumberProperty(
+                "Taps along the motion vector.", 2, 32);
+            schema.Properties["motionBlurStrength"] = RenderToolsDetail::NumberProperty(
+                "Multiplies one frame of motion. 1 blurs exactly the distance travelled.",
+                0.0, 4.0);
             schema.Properties["dof"] = RenderToolsDetail::SchemaProperty(
                 "boolean", "Defocus what is not near the focal plane.");
             schema.Properties["dofFocalDistance"] = RenderToolsDetail::NumberProperty(
@@ -901,6 +914,17 @@ namespace MCP {
             if (arguments.contains("ssaoBlurPasses") && arguments["ssaoBlurPasses"].is_number()) {
                 settings.ssaoBlurPasses = std::clamp(arguments["ssaoBlurPasses"].get<int>(), 0, 4);
             }
+            if (arguments.contains("motionBlur") && arguments["motionBlur"].is_boolean()) {
+                settings.motionBlurEnabled = arguments["motionBlur"].get<bool>();
+            }
+            if (arguments.contains("motionBlurSamples") && arguments["motionBlurSamples"].is_number()) {
+                settings.motionBlurSamples = std::clamp(arguments["motionBlurSamples"].get<int>(), 2, 32);
+            }
+            if (arguments.contains("motionBlurStrength") &&
+                arguments["motionBlurStrength"].is_number()) {
+                settings.motionBlurScale =
+                    std::clamp(arguments["motionBlurStrength"].get<float>(), 0.0f, 4.0f);
+            }
             if (arguments.contains("dof") && arguments["dof"].is_boolean()) {
                 settings.dofEnabled = arguments["dof"].get<bool>();
             }
@@ -963,6 +987,9 @@ namespace MCP {
 
             const auto& stats = renderer->GetBloom().GetStats();
             Json state;
+            state["motionBlur"] = settings.motionBlurEnabled;
+            state["motionBlurStrength"] = settings.motionBlurScale;
+            state["motionBlurSamples"] = settings.motionBlurSamples;
             state["dof"] = settings.dofEnabled;
             state["dofFocalDistance"] = settings.dofFocalDistance;
             state["dofFocalRange"] = settings.dofFocalRange;
@@ -1399,6 +1426,13 @@ namespace MCP {
             schema.Properties = Json::object();
             schema.Properties["path"] = RenderToolsDetail::SchemaProperty(
                 "string", "Destination PNG, relative to the project root.");
+            schema.Properties["target"] = Json{
+                {"type", "string"},
+                {"enum", Json::array({"final", "velocity", "normal", "albedo", "color",
+                                      "resolved"})},
+                {"description", "Which image to write. Defaults to whatever the frame ended on; "
+                                "the others are G-buffer views, for looking at what a pass wrote "
+                                "rather than inferring it from the lit result."}};
             schema.Required = {"path"};
             return schema;
         }
@@ -1420,13 +1454,15 @@ namespace MCP {
                                                       resolved, error)) {
                 return ToolResult::Error("Capture path rejected: " + error);
             }
-            if (!renderer->CaptureToFile(resolved.string(), error)) {
+            const std::string target = arguments.value("target", std::string());
+            if (!renderer->CaptureToFile(resolved.string(), error, target)) {
                 return ToolResult::Error("Capture failed: " + error);
             }
 
             const auto& stats = renderer->GetStats();
             Json state;
             state["path"] = arguments["path"];
+            state["target"] = target.empty() ? "final" : target;
             state["width"] = stats.DisplayWidth;
             state["height"] = stats.DisplayHeight;
             state["renderWidth"] = stats.RenderWidth;

@@ -13,6 +13,10 @@ namespace ECS {
         auto rootView = registry.view<TransformComponent>(entt::exclude<HierarchyComponent>);
         for (auto entity : rootView) {
             auto& transform = rootView.get<TransformComponent>(entity);
+            // Captured every frame, dirty or not: a still object has to report
+            // that it did not move, and leaving the field stale would make it
+            // look like it teleported the next time it did.
+            transform.PreviousWorldMatrix = transform.WorldMatrix;
             if (transform.IsDirty) {
                 transform.WorldMatrix = transform.GetLocalMatrix();
                 transform.IsDirty = false;
@@ -39,6 +43,7 @@ namespace ECS {
         for (auto entity : m_SortedEntities) {
             auto& transform = registry.get<TransformComponent>(entity);
             auto& hierarchy = registry.get<HierarchyComponent>(entity);
+            transform.PreviousWorldMatrix = transform.WorldMatrix;
 
             if (hierarchy.HasParent()) {
                 // Get parent's world matrix

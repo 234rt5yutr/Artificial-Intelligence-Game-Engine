@@ -12,6 +12,11 @@ namespace ECS {
 
         // Cached world matrix (updated by transform system)
         Math::Mat4 WorldMatrix{ 1.0f };
+        // Where this entity was last frame. The renderer needs it to work out
+        // how far a pixel moved, which is what separates an object's own motion
+        // from the camera's - reprojecting from depth alone can only ever
+        // describe the camera.
+        Math::Mat4 PreviousWorldMatrix{ 1.0f };
 
         // Dirty flag for optimization
         bool IsDirty = true;

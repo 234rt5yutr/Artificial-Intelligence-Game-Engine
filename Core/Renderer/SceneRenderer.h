@@ -30,6 +30,7 @@
 #include "Core/Renderer/PostProcess/ComputeBloom.h"
 #include "Core/Renderer/PostProcess/ComputeSSAO.h"
 #include "Core/Renderer/PostProcess/ComputeDepthOfField.h"
+#include "Core/Renderer/PostProcess/ComputeMotionBlur.h"
 #include "Core/Renderer/PostProcess/ComputeSSR.h"
 #include "Core/Renderer/PostProcess/ComputeTAA.h"
 #include "Core/Renderer/Shadows/ShadowRenderer.h"
@@ -101,6 +102,8 @@ namespace Renderer {
         uint32_t SkinnedInstances = 0;
         uint32_t SkinnedVertices = 0;
         uint32_t SkinnedDropped = 0;
+        bool MotionBlurActive = false;
+        float MotionBlurStrength = 0.0f;
         bool DepthOfFieldActive = false;
         float DepthOfFieldBlurPixels = 0.0f;
         bool SSREnabled = false;
@@ -142,9 +145,15 @@ namespace Renderer {
         // Writes whatever the frame last produced to a PNG. Nothing could see the
         // rendered image at all before this, which left every visual feature
         // unverifiable except by a human looking at the window.
-        bool CaptureToFile(const std::string& path, std::string& error);
+        // `target` names which image to write: empty or "final" for whatever the
+        // frame ended on, or a G-buffer name. Being able to look at velocity or
+        // normals directly is the difference between debugging a pass and
+        // guessing at it from the lit result.
+        bool CaptureToFile(const std::string& path, std::string& error,
+                           const std::string& target = std::string());
 
         const ComputeDepthOfField& GetDepthOfField() const { return m_DepthOfField; }
+        const ComputeMotionBlur& GetMotionBlur() const { return m_MotionBlur; }
 
         ComputeSSR& GetSSR() { return m_SSR; }
         const ComputeSSR& GetSSR() const { return m_SSR; }
@@ -185,6 +194,10 @@ namespace Renderer {
             Math::Mat4 ViewProjection;
             Math::Mat4 View;
             Math::Mat4 InverseViewProjection;
+            // Unjittered, both of them: velocity must describe where geometry
+            // moved, not the sub-pixel offset the frame was rendered with.
+            Math::Mat4 UnjitteredViewProjection;
+            Math::Mat4 PreviousViewProjection;
             Math::Vec4 CameraPosition;
             Math::Vec4 Resolution;
             Math::Vec4 AmbientColor;
@@ -260,7 +273,9 @@ namespace Renderer {
 
         RHI::GpuImage m_SceneColor{};    // direct lighting, HDR
         RHI::GpuImage m_SceneAlbedo{};   // rgb base colour, a roughness
-        RHI::GpuImage m_SceneNormal{};   // rgb world normal (encoded), a metallic
+        RHI::GpuImage m_SceneNormal{};
+        // Screen-space motion in UV units, written by the geometry pass.
+        RHI::GpuImage m_SceneVelocity{};   // rgb world normal (encoded), a metallic
         RHI::GpuImage m_SceneDepth{};
         RHI::GpuImage m_Resolved{};      // direct + GI, pre-upscale
 
@@ -307,6 +322,7 @@ namespace Renderer {
         ComputeBloom m_Bloom;
         ComputeSSAO m_SSAO;
         ComputeDepthOfField m_DepthOfField;
+        ComputeMotionBlur m_MotionBlur;
         ComputeSSR m_SSR;
         ComputeTAA m_TAA;
         ECS::PostProcessSettings m_PostProcessSettings{};

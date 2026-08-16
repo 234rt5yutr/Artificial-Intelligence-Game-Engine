@@ -64,6 +64,8 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 ViewProjection;
     mat4 View;
     mat4 InverseViewProjection;
+    mat4 UnjitteredViewProjection;
+    mat4 PreviousViewProjection;
     vec4 CameraPosition;
     vec4 Resolution;
     vec4 AmbientColor;
@@ -98,6 +100,11 @@ layout(location = 0) out vec3 vWorldPos;
 layout(location = 1) out vec3 vWorldNormal;
 layout(location = 2) out vec2 vTexCoord;
 layout(location = 3) out vec4 vTangent;
+// Both clip positions, unjittered, so the fragment can subtract them. Jitter is
+// a sub-pixel offset that differs every frame; leaving it in would report motion
+// for a surface that never moved.
+layout(location = 4) out vec4 vClip;
+layout(location = 5) out vec4 vPrevClip;
 
 %SCENE_UNIFORMS%
 
@@ -114,8 +121,14 @@ void main() {
     // so gl_InstanceIndex is the lookup key. Direct fallback draws push a model
     // matrix instead because they never went through the GPU scene.
     mat4 model = push.useInstanceBuffer != 0u ? instances[gl_InstanceIndex].transform : push.model;
+    // A direct draw has no instance record, so its previous transform is its
+    // current one: it reports no motion rather than a wrong one.
+    mat4 previousModel = push.useInstanceBuffer != 0u
+        ? instances[gl_InstanceIndex].previousTransform : push.model;
 
     vec4 world = model * vec4(inPosition, 1.0);
+    vClip = uMaterial.UnjitteredViewProjection * world;
+    vPrevClip = uMaterial.PreviousViewProjection * (previousModel * vec4(inPosition, 1.0));
     vWorldPos = world.xyz;
     // Normal matrix from the upper 3x3 inverse transpose, so non-uniform scale
     // does not shear the normals.
@@ -135,10 +148,13 @@ layout(location = 0) in vec3 inWorldPos;
 layout(location = 1) in vec3 inWorldNormal;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec4 inTangent;
+layout(location = 4) in vec4 inClip;
+layout(location = 5) in vec4 inPrevClip;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outAlbedo;
 layout(location = 2) out vec4 outNormal;
+layout(location = 3) out vec2 outVelocity;
 
 %SCENE_UNIFORMS%
 
@@ -445,6 +461,13 @@ void main() {
     outColor = vec4(direct + ambient + surf.Emissive, surf.Opacity);
     outAlbedo = vec4(surf.BaseColor, surf.Roughness);
     outNormal = vec4(n * 0.5 + 0.5, surf.Metallic);
+
+    // Where this pixel was last frame, in UV units. The perspective divide has
+    // to happen per fragment rather than being interpolated, or the motion of a
+    // surface at a steep angle comes out wrong across the triangle.
+    vec2 nowUV = (inClip.xy / max(inClip.w, 1e-6)) * 0.5 + 0.5;
+    vec2 thenUV = (inPrevClip.xy / max(inPrevClip.w, 1e-6)) * 0.5 + 0.5;
+    outVelocity = inPrevClip.w > 1e-6 ? nowUV - thenUV : vec2(0.0);
 }
 )GLSL";
 
@@ -608,6 +631,9 @@ void main() {
         // sizing it dynamically would be more code than it saves.
         if (m_GPUDrivenEnabled && !m_Skinning.Initialize(context, 4096)) {
             ENGINE_CORE_WARN("GPU skinning unavailable; skeletal meshes render in bind pose");
+        }
+        if (!m_MotionBlur.Initialize(context)) {
+            ENGINE_CORE_WARN("Motion blur unavailable; fast movement stays perfectly sharp");
         }
         if (!m_DepthOfField.Initialize(context)) {
             ENGINE_CORE_WARN("Depth of field unavailable; the frame stays uniformly sharp");
@@ -952,13 +978,17 @@ void main() {
         // Three colour targets plus depth. Albedo and normal exist so the GI and
         // resolve passes have something to modulate against; without them
         // indirect light could only be added, never coloured by the surface.
-        VkAttachmentDescription attachments[4]{};
-        const VkFormat colorFormats[3] = {
+        VkAttachmentDescription attachments[5]{};
+        const VkFormat colorFormats[4] = {
             VK_FORMAT_R16G16B16A16_SFLOAT,
             VK_FORMAT_R8G8B8A8_UNORM,
             VK_FORMAT_R16G16B16A16_SFLOAT,
+            // Velocity needs signed values and more precision than 8 bits: a
+            // sub-pixel motion is exactly the case the temporal passes care
+            // about, and unorm cannot express it at all.
+            VK_FORMAT_R16G16_SFLOAT,
         };
-        for (uint32_t i = 0; i < 3; ++i) {
+        for (uint32_t i = 0; i < 4; ++i) {
             attachments[i].format = colorFormats[i];
             attachments[i].samples = VK_SAMPLE_COUNT_1_BIT;
             attachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -968,27 +998,27 @@ void main() {
             attachments[i].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             attachments[i].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
-        attachments[3].format = m_Context->GetDepthFormat();
-        attachments[3].samples = VK_SAMPLE_COUNT_1_BIT;
-        attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        attachments[3].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        attachments[4].format = m_Context->GetDepthFormat();
+        attachments[4].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[4].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference colorRefs[3]{};
-        for (uint32_t i = 0; i < 3; ++i) {
+        VkAttachmentReference colorRefs[4]{};
+        for (uint32_t i = 0; i < 4; ++i) {
             colorRefs[i].attachment = i;
             colorRefs[i].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
         VkAttachmentReference depthRef{};
-        depthRef.attachment = 3;
+        depthRef.attachment = 4;
         depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 3;
+        subpass.colorAttachmentCount = 4;
         subpass.pColorAttachments = colorRefs;
         subpass.pDepthStencilAttachment = &depthRef;
 
@@ -1016,7 +1046,7 @@ void main() {
 
         VkRenderPassCreateInfo passInfo{};
         passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        passInfo.attachmentCount = 4;
+        passInfo.attachmentCount = 5;
         passInfo.pAttachments = attachments;
         passInfo.subpassCount = 1;
         passInfo.pSubpasses = &subpass;
@@ -1030,10 +1060,16 @@ void main() {
 
         // Identical apart from load ops, so pipelines built for one are valid
         // with the other. The late phase must not clear what the early phase drew.
-        for (uint32_t i = 0; i < 4; ++i) {
+        // Depth is the last attachment, not index 3: adding velocity moved it.
+        // Getting this wrong left the late phase clearing depth and handing the
+        // velocity target a depth layout, which discards whatever the early
+        // phase wrote into it.
+        constexpr uint32_t kDepthAttachment = 4;
+        for (uint32_t i = 0; i < 5; ++i) {
             attachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            attachments[i].initialLayout = i == 3 ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-                                                  : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            attachments[i].initialLayout = i == kDepthAttachment
+                                               ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                               : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         }
         if (vkCreateRenderPass(device, &passInfo, nullptr, &m_ScenePassLoad) != VK_SUCCESS) {
             ENGINE_CORE_ERROR("SceneRenderer: late-phase render pass creation failed");
@@ -1077,6 +1113,14 @@ void main() {
             return false;
         }
 
+        desc.Format = VK_FORMAT_R16G16_SFLOAT;
+        desc.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        desc.Aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        desc.DebugName = "SceneVelocity";
+        if (!RHI::CreateGpuImage(device, allocator, desc, m_SceneVelocity)) {
+            return false;
+        }
+
         desc.Format = VK_FORMAT_R16G16B16A16_SFLOAT;
         desc.Usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -1086,13 +1130,14 @@ void main() {
             return false;
         }
 
-        const VkImageView views[4] = {
-            m_SceneColor.View, m_SceneAlbedo.View, m_SceneNormal.View, m_SceneDepth.View
+        const VkImageView views[5] = {
+            m_SceneColor.View, m_SceneAlbedo.View, m_SceneNormal.View, m_SceneVelocity.View,
+            m_SceneDepth.View
         };
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.renderPass = m_ScenePassClear;
-        framebufferInfo.attachmentCount = 4;
+        framebufferInfo.attachmentCount = 5;
         framebufferInfo.pAttachments = views;
         framebufferInfo.width = width;
         framebufferInfo.height = height;
@@ -1123,6 +1168,7 @@ void main() {
         RHI::DestroyGpuImage(device, allocator, m_SceneColor);
         RHI::DestroyGpuImage(device, allocator, m_SceneAlbedo);
         RHI::DestroyGpuImage(device, allocator, m_SceneNormal);
+        RHI::DestroyGpuImage(device, allocator, m_SceneVelocity);
         RHI::DestroyGpuImage(device, allocator, m_SceneDepth);
         RHI::DestroyGpuImage(device, allocator, m_Resolved);
         m_RenderWidth = 0;
@@ -1175,6 +1221,7 @@ void main() {
 
         m_Culler.Resize(renderWidth, renderHeight);
         m_DepthOfField.Resize(renderWidth, renderHeight);
+        m_MotionBlur.Resize(renderWidth, renderHeight);
         m_SSR.Resize(renderWidth, renderHeight);
         m_TAA.Resize(renderWidth, renderHeight);
         m_LightCuller.Resize(renderWidth, renderHeight);
@@ -1472,7 +1519,7 @@ void main() {
             depthStencil.depthWriteEnable = blended ? VK_FALSE : VK_TRUE;
             depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 
-            VkPipelineColorBlendAttachmentState blendAttachments[3]{};
+            VkPipelineColorBlendAttachmentState blendAttachments[4]{};
             for (auto& attachment : blendAttachments) {
                 attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                             VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -1491,11 +1538,14 @@ void main() {
                 // behind it take the glass's bounce light.
                 blendAttachments[1].colorWriteMask = 0;
                 blendAttachments[2].colorWriteMask = 0;
+                // A blended surface writes no depth, so a velocity for it would
+                // describe motion at a depth nothing else agrees with.
+                blendAttachments[3].colorWriteMask = 0;
             }
 
             VkPipelineColorBlendStateCreateInfo colorBlend{};
             colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-            colorBlend.attachmentCount = 3;
+            colorBlend.attachmentCount = 4;
             colorBlend.pAttachments = blendAttachments;
 
             const VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1657,6 +1707,15 @@ void main() {
         uniforms.ViewProjection = frame.ViewProjection;
         uniforms.View = frame.View;
         uniforms.InverseViewProjection = glm::inverse(frame.ViewProjection);
+        // The jitter is removed here rather than in the shader: it is a property
+        // of how the frame was rendered, and velocity is a property of the
+        // scene. Keeping the two apart is what stops a still object reporting
+        // motion every frame.
+        Math::Mat4 unjitteredProjection = frame.Projection;
+        unjitteredProjection[2][0] -= frame.ProjectionJitter.x;
+        unjitteredProjection[2][1] -= frame.ProjectionJitter.y;
+        uniforms.UnjitteredViewProjection = unjitteredProjection * frame.View;
+        uniforms.PreviousViewProjection = m_PreviousUnjitteredViewProjection;
         uniforms.CameraPosition = Math::Vec4(frame.CameraPosition, 1.0f);
         uniforms.Resolution = Math::Vec4(static_cast<float>(m_RenderWidth),
                                          static_cast<float>(m_RenderHeight),
@@ -2135,18 +2194,21 @@ void main() {
             m_Culler.CullEarly(cmd);
         }
 
-        VkClearValue clearValues[4]{};
+        VkClearValue clearValues[5]{};
         clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
         clearValues[1].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
         clearValues[2].color = {{0.5f, 0.5f, 0.5f, 0.0f}};
-        clearValues[3].depthStencil = {1.0f, 0};
+        // Zero velocity is "did not move", which is the right answer for the
+        // sky and for anything the geometry pass never touches.
+        clearValues[3].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+        clearValues[4].depthStencil = {1.0f, 0};
 
         VkRenderPassBeginInfo passBegin{};
         passBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         passBegin.renderPass = m_ScenePassClear;
         passBegin.framebuffer = m_SceneFramebuffer;
         passBegin.renderArea.extent = {m_RenderWidth, m_RenderHeight};
-        passBegin.clearValueCount = 4;
+        passBegin.clearValueCount = 5;
         passBegin.pClearValues = clearValues;
 
         vkCmdBeginRenderPass(cmd, &passBegin, VK_SUBPASS_CONTENTS_INLINE);
@@ -2158,6 +2220,7 @@ void main() {
         m_SceneColor.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         m_SceneAlbedo.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         m_SceneNormal.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        m_SceneVelocity.Layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         m_SceneDepth.Layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
         if (indirectAvailable && m_Culler.IsTwoPhaseEnabled()) {
@@ -2179,6 +2242,7 @@ void main() {
         RHI::TransitionImage(cmd, m_SceneColor, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         RHI::TransitionImage(cmd, m_SceneAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         RHI::TransitionImage(cmd, m_SceneNormal, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        RHI::TransitionImage(cmd, m_SceneVelocity, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         RHI::TransitionImage(cmd, m_SceneDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         if (indirectAvailable && !m_Culler.IsTwoPhaseEnabled()) {
@@ -2326,6 +2390,7 @@ void main() {
 
             TAAInputs taaInputs{};
             taaInputs.DepthView = m_SceneDepth.View;
+            taaInputs.VelocityView = m_SceneVelocity.View;
             taaInputs.Sampler = m_LinearSampler;
             taaInputs.InverseViewProjection = glm::inverse(unjitteredViewProjection);
             taaInputs.PreviousViewProjection = m_PreviousUnjitteredViewProjection;
@@ -2358,6 +2423,19 @@ void main() {
         const DepthOfFieldStats& dofStats = m_DepthOfField.GetStats();
         m_Stats.DepthOfFieldActive = dofStats.Active;
         m_Stats.DepthOfFieldBlurPixels = dofStats.MaxBlurPixels;
+
+        {
+            MotionBlurInputs blurInputs{};
+            blurInputs.VelocityView = m_SceneVelocity.View;
+            blurInputs.Sampler = m_LinearSampler;
+            m_MotionBlur.Render(cmd, *postSource, blurInputs, m_PostProcessSettings);
+            if (m_MotionBlur.GetStats().Active) {
+                postSource = &m_MotionBlur.GetOutputImage();
+            }
+        }
+        const MotionBlurStats& blurStats = m_MotionBlur.GetStats();
+        m_Stats.MotionBlurActive = blurStats.Active;
+        m_Stats.MotionBlurStrength = blurStats.Strength;
 
         // Bloom, in the compute path the rest of the frame uses.
         //
@@ -2394,20 +2472,34 @@ void main() {
         m_PreviousViewProjection = m_Frame.ViewProjection;
     }
 
-    bool SceneRenderer::CaptureToFile(const std::string& path, std::string& error) {
+    bool SceneRenderer::CaptureToFile(const std::string& path, std::string& error,
+                                      const std::string& target) {
         std::lock_guard<std::mutex> captureGuard(m_CaptureMutex);
         if (!IsInitialized()) {
             error = "renderer is not initialised";
             return false;
         }
-        if (!m_FinalImage || !m_FinalImage->IsValid()) {
+
+        RHI::GpuImage* selected = m_FinalImage;
+        if (!target.empty() && target != "final") {
+            if (target == "velocity")      selected = &m_SceneVelocity;
+            else if (target == "normal")   selected = &m_SceneNormal;
+            else if (target == "albedo")   selected = &m_SceneAlbedo;
+            else if (target == "color")    selected = &m_SceneColor;
+            else if (target == "resolved") selected = &m_Resolved;
+            else {
+                error = "unknown capture target '" + target + "'";
+                return false;
+            }
+        }
+        if (!selected || !selected->IsValid()) {
             error = "no frame has been rendered yet";
             return false;
         }
 
         VkDevice device = m_Context->GetDevice();
         VmaAllocator allocator = m_Context->GetAllocator();
-        RHI::GpuImage& source = *m_FinalImage;
+        RHI::GpuImage& source = *selected;
         const uint32_t width = source.Extent.width;
         const uint32_t height = source.Extent.height;
         if (width == 0 || height == 0) {
@@ -2586,6 +2678,7 @@ void main() {
         VkDevice device = m_Context->GetDevice();
         vkDeviceWaitIdle(device);
 
+        m_MotionBlur.Shutdown();
         m_DepthOfField.Shutdown();
         m_SSR.Shutdown();
         m_TAA.Shutdown();

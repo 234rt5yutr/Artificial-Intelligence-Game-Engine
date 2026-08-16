@@ -42,6 +42,7 @@ namespace ECS {
             DrawCommand cmd{};
             cmd.Mesh = mesh.MeshData.get();
             cmd.Transform = transform.WorldMatrix;
+            cmd.PreviousTransform = transform.PreviousWorldMatrix;
             cmd.MaterialIndex = mesh.MaterialIndex;
             cmd.CastShadows = mesh.CastShadows;
             cmd.VirtualPagesUnavailable = false;
@@ -121,6 +122,7 @@ namespace ECS {
             DrawCommand cmd{};
             cmd.Mesh = mesh.MeshData.get();
             cmd.Transform = transform.WorldMatrix;
+            cmd.PreviousTransform = transform.PreviousWorldMatrix;
             cmd.MaterialIndex = mesh.MaterialIndex;
             cmd.CastShadows = mesh.CastShadows;
             cmd.VirtualPagesUnavailable = false;
@@ -179,6 +181,7 @@ namespace ECS {
             DrawCommand cmd{};
             cmd.Mesh = skeletal.MeshData.get();
             cmd.Transform = transform.WorldMatrix;
+            cmd.PreviousTransform = transform.PreviousWorldMatrix;
             cmd.MaterialIndex = skeletal.MaterialIndex;
             cmd.CastShadows = skeletal.CastShadows;
             cmd.BoneOffset = static_cast<uint32_t>(m_BoneMatrices.size());

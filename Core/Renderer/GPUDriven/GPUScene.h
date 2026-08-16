@@ -43,6 +43,10 @@ namespace Renderer {
     // One drawable instance for this frame.
     struct GpuInstance {
         Math::Mat4 Transform{1.0f};
+        // Last frame's transform, so the geometry pass can write how far each
+        // pixel moved. Without it the temporal passes can only reproject the
+        // camera and a moving object smears.
+        Math::Mat4 PreviousTransform{1.0f};
         Math::Vec4 BoundsCenterRadius{0.0f}; // local-space bounds of the whole mesh
         uint32_t ClusterBase = 0;            // into the shared cluster buffer
         uint32_t ClusterCount = 0;
@@ -57,7 +61,7 @@ namespace Renderer {
         uint32_t Pad1 = 0;
         uint32_t Pad2 = 0;
     };
-    static_assert(sizeof(GpuInstance) == 112, "GpuInstance must match the cull shader layout");
+    static_assert(sizeof(GpuInstance) == 176, "GpuInstance must match the cull shader layout");
 
     // The GLSL mirror of GpuInstance, shared by every shader that reads the
     // instance buffer. Two hand-written copies drifted the moment a field was
@@ -67,6 +71,7 @@ namespace Renderer {
     inline const char* kGpuInstanceGLSL = R"GLSL(
 struct Instance {
     mat4 transform;
+    mat4 previousTransform;
     vec4 boundsCenterRadius;
     uint clusterBase;
     uint clusterCount;

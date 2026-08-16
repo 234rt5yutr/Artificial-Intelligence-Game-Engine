@@ -1,0 +1,94 @@
+#pragma once
+
+// Motion blur, gathered along the velocity buffer.
+//
+// `PostProcessComponent` has carried motionBlurEnabled and its strength from the
+// start, and the old `MotionBlurPass` could never run: it wrote no descriptor
+// sets, and there was no velocity buffer for it to read even if it had. The
+// geometry pass now writes one, so this is a gather along it.
+//
+// It runs last in the chain, after the temporal resolve and depth of field.
+// Blurring before the temporal pass would push a smeared frame into the history
+// and drag the next one toward it, and blurring before defocus would let motion
+// smear across a depth boundary that defocus had not yet softened.
+//
+// ponytail: a straight gather along each pixel's own velocity. A fast object
+// therefore blurs within its own silhouette rather than bleeding past its edge,
+// which is what a tile-based maximum-velocity pass buys and this does not.
+
+#include "Core/Math/Math.h"
+#include "Core/RHI/Vulkan/VulkanGpuResources.h"
+
+#include <cstdint>
+
+namespace Core {
+namespace ECS { struct PostProcessSettings; }
+namespace RHI { class VulkanContext; }
+
+namespace Renderer {
+
+    struct MotionBlurInputs {
+        VkImageView VelocityView = VK_NULL_HANDLE;
+        VkSampler Sampler = VK_NULL_HANDLE;
+        // Frame time over the target frame time. Velocity is per frame, so a
+        // frame that took twice as long has to blur half as far to describe the
+        // same shutter.
+        float FrameScale = 1.0f;
+    };
+
+    struct MotionBlurStats {
+        bool Active = false;
+        uint32_t Width = 0;
+        uint32_t Height = 0;
+        uint32_t SampleCount = 0;
+        float Strength = 0.0f;
+    };
+
+    class ComputeMotionBlur {
+    public:
+        ComputeMotionBlur() = default;
+        ~ComputeMotionBlur();
+
+        ComputeMotionBlur(const ComputeMotionBlur&) = delete;
+        ComputeMotionBlur& operator=(const ComputeMotionBlur&) = delete;
+
+        bool Initialize(RHI::VulkanContext* context);
+        void Shutdown();
+        bool IsInitialized() const { return m_Context != nullptr && m_Pipeline.IsValid(); }
+
+        bool Resize(uint32_t width, uint32_t height);
+
+        // Reads `source` and leaves the blurred result in SHADER_READ_ONLY.
+        // Inactive when the settings disable it or nothing moved.
+        void Render(VkCommandBuffer cmd, RHI::GpuImage& source, const MotionBlurInputs& inputs,
+                    const ECS::PostProcessSettings& settings);
+
+        RHI::GpuImage& GetOutputImage() { return m_Output; }
+        const MotionBlurStats& GetStats() const { return m_Stats; }
+
+    private:
+        struct MotionBlurUniforms {
+            Math::Vec4 Resolution;   // xy size, zw 1/size
+            Math::Vec4 Params;       // x strength, y sample count, z frame scale
+        };
+
+        bool CreatePipeline();
+        bool CreateTargets(uint32_t width, uint32_t height);
+        void DestroyTargets();
+
+        RHI::VulkanContext* m_Context = nullptr;
+        RHI::ComputePipeline m_Pipeline{};
+        VkDescriptorSetLayout m_SetLayout = VK_NULL_HANDLE;
+        VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
+        VkDescriptorSet m_Set = VK_NULL_HANDLE;
+        RHI::GpuBuffer m_Uniforms{};
+
+        RHI::GpuImage m_Output{};
+        VkSampler m_Sampler = VK_NULL_HANDLE;
+        uint32_t m_Width = 0;
+        uint32_t m_Height = 0;
+        MotionBlurStats m_Stats{};
+    };
+
+} // namespace Renderer
+} // namespace Core
