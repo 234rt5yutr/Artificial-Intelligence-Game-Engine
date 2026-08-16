@@ -2,9 +2,11 @@
 
 #include "Core/Log.h"
 #include "Core/RHI/Vulkan/VulkanContext.h"
+#include "Core/Renderer/EnvironmentBRDF.h"
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace Core {
 namespace Renderer {
@@ -31,7 +33,11 @@ layout(binding = 5) uniform Params {
     vec4 cameraPosition;
     vec4 params;           // x maxDistance, y stepCount, z thickness, w intensity
     vec4 params2;          // x refineSteps, y roughnessCutoff, z frameIndex
+    vec4 skyColor;
+    vec4 groundColor;
 } ssr;
+
+%ENVIRONMENT_BRDF%
 
 vec3 WorldFromDepth(vec2 uv, float depth) {
     vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
@@ -168,13 +174,21 @@ void main() {
         hitMask *= clamp(1.0 - roughness / cutoff, 0.0, 1.0);
     }
 
-    // Schlick, with the same f0 convention the geometry pass uses: dielectrics
-    // reflect 4%, metals reflect their own colour.
+    // Same f0 convention the geometry pass uses: dielectrics reflect 4%, metals
+    // reflect their own colour.
     vec3 f0 = mix(vec3(0.04), albedoSample.rgb, metallic);
-    float cosTheta = clamp(dot(-viewDir, viewNormal), 0.0, 1.0);
-    vec3 fresnel = f0 + (vec3(1.0) - f0) * pow(1.0 - cosTheta, 5.0);
+    float ndotv = clamp(dot(-viewDir, viewNormal), 0.0, 1.0);
+    vec3 envWeight = EnvBRDFApprox(f0, roughness, ndotv);
 
-    vec3 result = base + hitColor * fresnel * hitMask * ssr.params.w;
+    // The lit image already carries ambient specular from the environment. A
+    // traced hit is a better answer for the same lobe, so it replaces that term
+    // rather than stacking on top of it - adding both would make a mirror twice
+    // as bright as the thing it reflects.
+    vec3 environment = EnvironmentSpecular(worldNormal, normalize(ssr.cameraPosition.xyz - worldPos),
+                                           f0, roughness,
+                                           ssr.skyColor.rgb, ssr.groundColor.rgb);
+    vec3 traced = hitColor * envWeight * ssr.params.w;
+    vec3 result = base + (traced - environment) * hitMask;
     imageStore(outColor, coord, vec4(max(result, vec3(0.0)), 1.0));
 }
 )GLSL";
@@ -215,8 +229,16 @@ void main() {
             return false;
         }
 
+        std::string source = kSSRShader;
+        const std::string token = "%ENVIRONMENT_BRDF%";
+        const std::size_t slot = source.find(token);
+        if (slot == std::string::npos) {
+            return false;
+        }
+        source.replace(slot, token.size(), kEnvironmentSpecularGLSL);
+
         m_Pipeline = RHI::CreateComputePipeline(device, m_Context->GetPipelineCache(),
-                                                kSSRShader, "ssr_trace", {m_SetLayout}, 0);
+                                                source.c_str(), "ssr_trace", {m_SetLayout}, 0);
         if (!m_Pipeline.IsValid()) {
             return false;
         }
@@ -319,6 +341,8 @@ void main() {
         uniforms.Params2 = Math::Vec4(static_cast<float>(m_Settings.RefineSteps),
                                       m_Settings.RoughnessCutoff,
                                       static_cast<float>(inputs.FrameIndex & 0xFFFFu), 0.0f);
+        uniforms.SkyColor = Math::Vec4(inputs.SkyColor, 1.0f);
+        uniforms.GroundColor = Math::Vec4(inputs.GroundColor, 1.0f);
         if (m_Uniforms.Mapped) {
             std::memcpy(m_Uniforms.Mapped, &uniforms, sizeof(uniforms));
         }

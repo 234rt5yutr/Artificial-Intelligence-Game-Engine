@@ -165,6 +165,23 @@ draws. `assets/meshes/rigged_strip.gltf` is a two-joint strip with a bend clip:
 importing it starts the clip, and across three captures 18,947 and 12,875 pixels
 move, against exactly 0 for the same mesh with nothing playing.
 
+**Environment specular** (`Core/Renderer/EnvironmentBRDF.h`). Ambient was applied
+as pure diffuse, which a metal does not have: metals came out darker than the
+dielectrics beside them and reflected nothing at all. Ambient diffuse is now
+scaled by `1 - metallic`, and every surface gains a specular term - a two-colour
+environment, sky above and ground below, weighted by Karis' analytic fit to the
+split-sum BRDF. Not a captured cubemap, but the difference between a metal that
+shows its surroundings and one that shows nothing. The sky comes from the GI
+settings, so the frame has one sky rather than two that disagree.
+
+The formula lives in one shared GLSL snippet because two passes must agree on it
+exactly: the geometry pass adds it, and the reflection pass *replaces* it
+wherever a ray hit, which it can only do by reproducing what it subtracts.
+Adding both would make a mirror twice as bright as the thing it reflects.
+Verified with GI, reflections, bloom and the temporal pass all off, leaving sky
+colour the only path to a pixel: changing it alone moves 173,440 pixels on a
+chrome sphere, 99.9% of them brighter and 99.9% gaining more blue than red.
+
 **Screen-space reflections** (`Core/Renderer/PostProcess/ComputeSSR.*`). Every
 surface was purely diffuse plus a direct highlight: a polished floor showed the
 light, never the room. The G-buffer already carried what a reflection needs -

@@ -2302,6 +2302,10 @@ void main() {
             ssrInputs.Projection = m_Frame.Projection;
             ssrInputs.InverseViewProjection = glm::inverse(m_Frame.ViewProjection);
             ssrInputs.CameraPosition = m_Frame.CameraPosition;
+            // Must match what UpdateSceneUniforms handed the geometry pass, or
+            // the reflection subtracts a different ambient than was added.
+            ssrInputs.SkyColor = m_GI.GetSettings().SkyColor * m_GI.GetSettings().SkyIntensity;
+            ssrInputs.GroundColor = Math::Vec3(0.05f, 0.06f, 0.08f);
             ssrInputs.FrameIndex = m_Frame.FrameIndex;
             m_SSR.Render(cmd, m_Resolved, ssrInputs);
             if (m_SSR.GetStats().Active) {

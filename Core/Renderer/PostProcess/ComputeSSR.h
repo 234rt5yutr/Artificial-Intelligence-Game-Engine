@@ -36,6 +36,11 @@ namespace Renderer {
         Math::Mat4 Projection{1.0f};
         Math::Mat4 InverseViewProjection{1.0f};
         Math::Vec3 CameraPosition{0.0f};
+        // The same two colours the geometry pass shaded ambient specular with.
+        // A traced hit replaces that term, so this pass has to be able to
+        // reproduce exactly what it is replacing.
+        Math::Vec3 SkyColor{0.0f};
+        Math::Vec3 GroundColor{0.0f};
         uint64_t FrameIndex = 0;
     };
 
@@ -102,6 +107,8 @@ namespace Renderer {
             Math::Vec4 CameraPosition;
             Math::Vec4 Params;        // x maxDistance, y stepCount, z thickness, w intensity
             Math::Vec4 Params2;       // x refineSteps, y roughnessCutoff, z frameIndex
+            Math::Vec4 SkyColor;
+            Math::Vec4 GroundColor;
         };
 
         bool CreatePipeline();
